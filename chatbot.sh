@@ -1,37 +1,69 @@
 #!/bin/bash
 #
-# Interfaccia conversazionale per l'analisi dei log JBoss/Undertow.
-# Legge una query, classifica l'intent con la rete neurale, esegue i tool.
+# Interfaccia conversazionale per l'analisi dei log Guidewire/JBoss/Undertow.
 #
-# Uso:
-#   ./chatbot.sh --access-log path/access.log [--server-log path/server.log] [--gc-log path/gc.log]
-#   echo "errori 500 delle ultime 3 ore" | ./chatbot.sh --access-log ...
+# Uso con resolver automatico (consigliato):
+#   ./chatbot.sh --env coll [--node 2] [--app ClaimCenter]
+#
+# Uso con path espliciti (compatibilità legacy):
+#   ./chatbot.sh --access-log path/access.log [--server-log ...] [--gc-log ...]
+#
+# Modalità non interattiva:
+#   ./chatbot.sh --env test --query "errori 500 delle ultime 3 ore"
+#   echo "..." | ./chatbot.sh --env prod
 #
 
 set -euo pipefail
 source "$(dirname "$0")/config.sh"
 
+# ─── Stato di sessione ───────────────────────────────────────────────────────
+ACTIVE_ENV=""
+ACTIVE_NODE="01"
+ACTIVE_APP="$DEFAULT_APP"
 ACCESS_LOG=""
 SERVER_LOG=""
 GC_LOG=""
 INTERACTIVE=1
+QUERY=""
 
+# ─── Parsing CLI ─────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --access-log) ACCESS_LOG="$2";  shift 2 ;;
-        --server-log) SERVER_LOG="$2";  shift 2 ;;
-        --gc-log)     GC_LOG="$2";      shift 2 ;;
+        --env)        ACTIVE_ENV="$2";   shift 2 ;;
+        --node)       ACTIVE_NODE="$2";  shift 2 ;;
+        --app)        ACTIVE_APP="$2";   shift 2 ;;
+        --base-dir)   LOG_BASE_DIR="$2"; shift 2 ;;
+        --access-log) ACCESS_LOG="$2";   shift 2 ;;
+        --server-log) SERVER_LOG="$2";   shift 2 ;;
+        --gc-log)     GC_LOG="$2";       shift 2 ;;
         --query)      QUERY="$2"; INTERACTIVE=0; shift 2 ;;
         -h|--help)
-            echo "Uso: $0 --access-log <file> [--server-log <file>] [--gc-log <file>]"
+            grep "^#" "$0" | head -14 | sed 's/^# \?//'
             exit 0
             ;;
         *) echo "[ERROR] opzione sconosciuta: $1" >&2; exit 1 ;;
     esac
 done
 
+# ─── Risoluzione log ─────────────────────────────────────────────────────────
+resolve_session_logs() {
+    if [[ -n "$ACTIVE_ENV" ]]; then
+        local resolved
+        resolved=$("$LIB_DIR/resolve-logs.sh" "$LOG_BASE_DIR" "$ACTIVE_ENV" "$ACTIVE_NODE" "$ACTIVE_APP") || {
+            echo "[ERROR] Impossibile risolvere i log per: env=$ACTIVE_ENV node=$ACTIVE_NODE app=$ACTIVE_APP" >&2
+            return 1
+        }
+        eval "$resolved"
+    fi
+}
+
+# Risoluzione iniziale
 if [[ -z "$ACCESS_LOG" ]]; then
-    echo "[ERROR] --access-log è obbligatorio" >&2
+    resolve_session_logs || exit 1
+fi
+
+if [[ -z "$ACCESS_LOG" ]]; then
+    echo "[ERROR] Specifica --env oppure --access-log" >&2
     exit 1
 fi
 
@@ -45,6 +77,7 @@ if [[ ! -d "$MODEL_DIR" ]]; then
     exit 1
 fi
 
+# ─── Dispatch tool ───────────────────────────────────────────────────────────
 dispatch_tool() {
     local tool="$1"
     local access="$ACCESS_LOG"
@@ -76,25 +109,25 @@ dispatch_tool() {
                 "$access"
             ;;
         filter_errors)
-            [[ -z "$server" ]] && { echo "[SKIP] --server-log non fornito per filter_errors"; return; }
+            [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile per filter_errors"; return; }
             gawk -f "$TOOLS_DIR/filter_errors.awk" \
                 -v time_window="$TIME_WINDOW" \
                 "$server"
             ;;
         service_times)
-            [[ -z "$server" ]] && { echo "[SKIP] --server-log non fornito per service_times"; return; }
+            [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile per service_times"; return; }
             gawk -f "$TOOLS_DIR/service_times.awk" \
                 -v time_window="$TIME_WINDOW" \
                 "$server"
             ;;
         gc_stats)
-            [[ -z "$gc" ]] && { echo "[SKIP] --gc-log non fornito per gc_stats"; return; }
+            [[ -z "$gc" ]] && { echo "[SKIP] gc.log non disponibile per gc_stats"; return; }
             gawk -f "$TOOLS_DIR/gc_stats.awk" \
                 -v time_window="$TIME_WINDOW" \
                 "$gc"
             ;;
         correlate_gc_slow)
-            [[ -z "$gc" ]] && { echo "[SKIP] --gc-log non fornito per correlate_gc_slow"; return; }
+            [[ -z "$gc" ]] && { echo "[SKIP] gc.log non disponibile per correlate_gc_slow"; return; }
             gawk -f "$TOOLS_DIR/correlate_gc_slow.awk" \
                 -v threshold_ms="${THRESHOLD_MS:-500}" \
                 "$gc" "$access"
@@ -111,7 +144,7 @@ dispatch_tool() {
                 "$access"
             ;;
         filter_app_errors)
-            [[ -z "$server" ]] && { echo "[SKIP] --server-log non fornito per filter_app_errors"; return; }
+            [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile per filter_app_errors"; return; }
             gawk -f "$TOOLS_DIR/filter_app_errors.awk" \
                 -v time_window="$TIME_WINDOW" \
                 "$server"
@@ -122,13 +155,28 @@ dispatch_tool() {
     esac
 }
 
+# ─── Esecuzione query ────────────────────────────────────────────────────────
 run_query() {
     local query="$1"
+
+    # Estrai eventuale cambio di contesto dalla query
+    local ctx
+    ctx=$("$LIB_DIR/context-extract.sh" "$query")
+    eval "$ctx"
+
+    local ctx_changed=0
+    [[ -n "$CTX_ENV"  && "$CTX_ENV"  != "$ACTIVE_ENV"  ]] && { ACTIVE_ENV="$CTX_ENV";   ctx_changed=1; }
+    [[ -n "$CTX_NODE" && "$CTX_NODE" != "$ACTIVE_NODE" ]] && { ACTIVE_NODE="$CTX_NODE"; ctx_changed=1; }
+    [[ -n "$CTX_APP"  && "$CTX_APP"  != "$ACTIVE_APP"  ]] && { ACTIVE_APP="$CTX_APP";   ctx_changed=1; }
+
+    if [[ "$ctx_changed" -eq 1 ]]; then
+        resolve_session_logs || return 1
+        echo "  [Contesto: env=$ACTIVE_ENV  nodo=$ACTIVE_NODE  app=$ACTIVE_APP]"
+    fi
 
     echo ""
     echo "┌─ Query: $query"
 
-    # Classificazione intent
     local tools
     tools=$("$LIB_DIR/infer.sh" "$query" 2>/dev/null)
 
@@ -138,7 +186,6 @@ run_query() {
         return
     fi
 
-    # Estrazione parametri
     eval "$("$LIB_DIR/param-extract.sh" "$query")"
 
     echo "│  Tool attivati:"
@@ -148,7 +195,6 @@ run_query() {
     done <<< "$tools"
     echo "│"
 
-    # Esecuzione tool
     while IFS=' ' read -r tool _prob; do
         echo "├─── $tool ─────────────────────────────"
         dispatch_tool "$tool"
@@ -158,14 +204,22 @@ run_query() {
     echo "└──────────────────────────────────────────"
 }
 
-# Modalità interattiva o singola query
+# ─── Main ────────────────────────────────────────────────────────────────────
+context_line() {
+    local env_info="${ACTIVE_ENV:-path esplicito}"
+    local node_info="${ACTIVE_NODE:-}"
+    local app_info="${ACTIVE_APP:-}"
+    [[ -n "$node_info" && -n "$ACTIVE_ENV" ]] && echo "Contesto: $env_info  nodo $node_info  ($app_info)" \
+                                               || echo "Log: $ACCESS_LOG"
+}
+
 if [[ "$INTERACTIVE" -eq 0 ]]; then
     run_query "${QUERY:-}"
 else
-    echo "Neural Log Analyzer — JBoss/Undertow"
-    echo "Log: $ACCESS_LOG"
-    [[ -n "$SERVER_LOG" ]] && echo "     $SERVER_LOG"
-    [[ -n "$GC_LOG"     ]] && echo "     $GC_LOG"
+    echo "Neural Log Analyzer — Guidewire/JBoss"
+    context_line
+    [[ -n "$SERVER_LOG" ]] && echo "     server.log: $SERVER_LOG"
+    [[ -n "$GC_LOG"     ]] && echo "     gc.log:     $GC_LOG"
     echo "Digita la tua domanda (Ctrl+C per uscire)"
     echo ""
 

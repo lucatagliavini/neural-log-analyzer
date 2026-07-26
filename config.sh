@@ -15,6 +15,27 @@ DATASET_FILE="$ANALYZER_DIR/dataset/queries.txt"
 LIB_DIR="$ANALYZER_DIR/lib"
 TOOLS_DIR="$ANALYZER_DIR/lib/tools"
 
+# ─── Log filesystem ──────────────────────────────────────────────────────────
+# Percorso base della farmlog (reale o example-logs per test)
+LOG_BASE_DIR="${LOG_BASE_DIR:-/unipol/logs/farmlog}"
+
+# Applicazione Guidewire di default per questa installazione del bot.
+# Sovrascrivibile via --app a runtime o settando DEFAULT_APP nell'ambiente.
+DEFAULT_APP="${DEFAULT_APP:-ClaimCenter}"
+
+# Tutte le applicazioni riconosciute in questa farm (per validazione e
+# riconoscimento dalla query naturale).
+AVAILABLE_APPS=("ClaimCenter" "ContactManager")
+
+# Mappa ambiente → codice nel nome nodo (lx<code>jbliq<nn>)
+declare -A ENV_NODE_CODE
+ENV_NODE_CODE[test]="ts"
+ENV_NODE_CODE[euro]="eu"
+ENV_NODE_CODE[coll]="pp"
+ENV_NODE_CODE[inte]="in"
+ENV_NODE_CODE[cert]="ce"
+ENV_NODE_CODE[prod]="pr"
+
 # Numero di feature del vettore di input.
 # Composizione: 60 unigram (0..59) + 4 bigram di co-presenza (60..63).
 # Aggiornare qui e in lib/query-to-features.sh in modo coerente.
