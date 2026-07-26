@@ -66,12 +66,28 @@ init_limits() {
 }
 
 OUTPUT_LINES=()
+
+# Verifica che un esempio abbia almeno una feature attiva nel vocabolario.
+# Esempi con vettore tutto-zero sono rumore puro per la rete.
+validate_example() {
+    local tool="$1" query="$2"
+    local features active
+    features=$("$SCRIPT_DIR/query-to-features.sh" "$query")
+    active=$(echo "$features" | tr ' ' '\n' | grep -c "^[^0]")
+    if [[ "$active" -eq 0 ]]; then
+        echo "[WARN] nessuna feature attiva, esempio scartato: [$tool] $query" >&2
+        return 1
+    fi
+    return 0
+}
+
 emit() {
     local tool="$1"
     local query="${2,,}"
     [[ "${TOOL_LIMIT[$tool]:-0}" -le 0 ]] && return
     [[ "${TOOL_GEN_COUNT[$tool]:-0}" -ge "${TOOL_LIMIT[$tool]}" ]] && return
     [[ -n "${SEEN_QUERIES[$query]:-}" ]] && return
+    validate_example "$tool" "$query" || return
     SEEN_QUERIES["$query"]=1
     TOOL_GEN_COUNT[$tool]=$(( ${TOOL_GEN_COUNT[$tool]} + 1 ))
     OUTPUT_LINES+=("${tool}"$'\t'"${query}")
@@ -141,7 +157,7 @@ SYN_DISTRIB=("distribuzione" "breakdown" "raggruppamento"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 gen_count_status() {
-    # keywords: errore(0-1), 500(2), 400(3), status|stato(8), http(9), quant(21), total(23)
+    # keywords: errore(0,peso2), 500(1), 400(2), status|stato(7), http(8), quant(18), total(20)
     for v in "${SYN_COUNT[@]}"; do
         emit "count_status" "${v} 500 nell'access log"
         emit "count_status" "${v} richieste con status 500"
@@ -158,7 +174,7 @@ gen_count_status() {
 }
 
 gen_distribute_status() {
-    # keywords: distribuzion(20), raggrupp(24), frequen(25), per(26), endpoint(43), api(45)
+    # keywords: distribuzion(17), raggrupp(21), frequen(22), per(23), endpoint(39), api(41)
     for ep in "${SYN_ENDPOINT[@]}"; do
         for d in "${SYN_DISTRIB[@]}"; do
             emit "distribute_status" "${d} degli errori per ${ep}"
@@ -177,8 +193,8 @@ gen_distribute_status() {
 }
 
 gen_slow_requests() {
-    # keywords: lent(30-31), latenz(32), ms(33), prestazion(34)
-    # NON usa servizi/soa (54-55) — quelli sono service_times
+    # keywords: lent(27,peso2), latenz(28), ms(29), prestazion(30)
+    # bigram[55]: lento+servizi attiva service_times, NON slow_requests — evitare soa/servizi
     for s in "${SYN_SLOW[@]}"; do
         emit "slow_requests" "richieste ${s}"
         emit "slow_requests" "chiamate http ${s}"
@@ -202,8 +218,8 @@ gen_slow_requests() {
 }
 
 gen_traffic_volume() {
-    # keywords: ora|ore(10-11), minut(12-13), giorn(14), ultim(17-18), quant(21), total(23)
-    # Keyword 57: volum|picco|andament — discrimina da tail_log
+    # keywords: ora|ore(9,peso2), minut(10,peso2), giorn(11), ultim(14,peso2), quant(18), total(20)
+    # unigram 53: volum|picco|andament; bigram[56]: volume+tempo (discrimina da tail_log)
     for t in "${SYN_TIME[@]}"; do
         emit "traffic_volume" "traffico ${t}"
         emit "traffic_volume" "volume di richieste ${t}"
@@ -228,7 +244,8 @@ gen_traffic_volume() {
 }
 
 gen_filter_errors() {
-    # keywords: warn(35), exception|eccezione(36), stack.trace(37), crash|fatal(38), log.applicat(39)
+    # keywords: warn(31), exception|eccezione(32), stack.trace(33), crash|fatal(34), log.applicat(35)
+    # bigram[54]: exception+tempo attiva filter_errors (non traffic_volume)
     for e in "${SYN_ERRORS[@]}"; do
         emit "filter_errors" "${e} nel server log"
         emit "filter_errors" "${e} recenti nel log applicativo"
@@ -243,9 +260,9 @@ gen_filter_errors() {
 }
 
 gen_service_times() {
-    # keywords: lent(30-31), latenz(32), ms(33), prestazion(34)
-    # Keyword 54: servizi|servizio — discrimina da slow_requests
-    # Keyword 55: soa — segnale forte esclusivo di service_times
+    # keywords: lent(27,peso2), latenz(28), ms(29), prestazion(30)
+    # unigram 50: servizi|servizio; unigram 51: soa (segnale forte esclusivo)
+    # bigram[55]: lento+servizi → service_times (discrimina da slow_requests)
     for v in "${SYN_SHOW[@]}"; do
         emit "service_times" "${v} i tempi di risposta dei servizi soa"
         emit "service_times" "${v} la latenza dei web service"
@@ -271,7 +288,7 @@ gen_service_times() {
 }
 
 gen_gc_stats() {
-    # keywords: gc|garbage(40), heap(41), memori|jvm(42)
+    # keywords: gc|garbage(36), heap(37), memori|jvm(38)
     for v in "${SYN_SHOW[@]}"; do
         emit "gc_stats" "${v} le statistiche del garbage collector"
         emit "gc_stats" "${v} le pause gc"
@@ -292,7 +309,7 @@ gen_gc_stats() {
 }
 
 gen_correlate_gc_slow() {
-    # keywords: gc|garbage(40), lent(30-31), latenz(32), memori(42)
+    # keywords: gc|garbage(36), lent(27,peso2), latenz(28), memori(38)
     for t in "${SYN_TIME[@]}"; do
         emit "correlate_gc_slow" "correlazione tra gc e richieste lente ${t}"
         emit "correlate_gc_slow" "il garbage collector causa latenze ${t}"
@@ -312,8 +329,8 @@ gen_correlate_gc_slow() {
 }
 
 gen_tail_log() {
-    # keywords: ultim(17-18), recent|ultim(49), list(27), mostr(48)
-    # Keyword 56: rig|tail — discrimina da traffic_volume
+    # keywords: ultim(14,peso2), recent(16), list(24), mostr(44)
+    # unigram 52: rig|tail; bigram[57]: righe+recente (discrimina da traffic_volume)
     for v in "${SYN_SHOW[@]}"; do
         emit "tail_log" "${v} le ultime righe del log"
         emit "tail_log" "${v} gli ultimi accessi"
@@ -340,7 +357,7 @@ gen_tail_log() {
 }
 
 gen_filter_ip() {
-    # keywords: \bip\b(46), client|indirizz(47)
+    # keywords: \bip\b(42), client|indirizz(43)
     local IPS=("172.30.100.5" "10.0.1.25" "192.168.50.10" "203.0.113.1" "198.51.100.3"
                "172.16.0.50" "10.10.20.30" )
     for ip in "${IPS[@]}"; do
@@ -363,8 +380,8 @@ gen_filter_ip() {
 }
 
 gen_filter_app_errors() {
-    # keywords: applicat(50), nascost|intern(51), root.cause|business(52), loggat(53)
-    # exception|eccezione(36) è un segnale forte aggiuntivo
+    # keywords: applicat(46), nascost|intern(47), root.cause|business(48), loggat(49)
+    # exception|eccezione(32) è un segnale forte aggiuntivo
     for v in "${SYN_SHOW[@]}"; do
         emit "filter_app_errors" "${v} gli errori applicativi nel server log"
         emit "filter_app_errors" "${v} le exception loggati come info"

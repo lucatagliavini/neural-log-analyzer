@@ -15,13 +15,15 @@ DATASET_FILE="$ANALYZER_DIR/dataset/queries.txt"
 LIB_DIR="$ANALYZER_DIR/lib"
 TOOLS_DIR="$ANALYZER_DIR/lib/tools"
 
-# Numero di feature del vettore di input (keyword presenti nel vocabolario)
+# Numero di feature del vettore di input.
+# Composizione: 54 unigram (0..53) + 4 bigram di co-presenza (54..57).
+# Aggiornare qui e in lib/query-to-features.sh in modo coerente.
 NUM_FEATURES=58
 
 # Numero di tool (classi output della rete)
 NUM_TOOLS=11
 
-# Soglia di confidenza per attivare un tool (rete softmax → probabilità)
+# Soglia di confidenza per attivare un tool
 TOOL_THRESHOLD=0.20
 
 # Architettura della rete: 58 input → 32 hidden → 11 output

@@ -1,10 +1,11 @@
 #!/bin/bash
 #
-# Genera il dataset di training da esempi etichettati in dataset/queries_labeled.txt
+# Genera il dataset di training da dataset/queries_labeled.txt.
 # Formato sorgente: <etichette_tool_separati_da_virgola> TAB <testo_query>
 # Esempio:  count_status,distribute_status   quanti errori 500 ci sono stati oggi
 #
-# Output: dataset/queries.txt (formato framework: 50 feature + 10 output)
+# Output: dataset/queries.txt — NUM_FEATURES colonne feature + NUM_TOOLS colonne output.
+# Il numero esatto di colonne è determinato da config.sh (NUM_FEATURES, NUM_TOOLS).
 #
 
 set -euo pipefail
@@ -18,8 +19,8 @@ if [[ ! -f "$LABELED" ]]; then
 fi
 
 echo "# Neural Log Analyzer — intent classification dataset" > "$DATASET_FILE"
-echo "# 50 feature input (keyword presence) + 10 tool output (multi-label)" >> "$DATASET_FILE"
-echo "# Generato da build-dataset.sh" >> "$DATASET_FILE"
+echo "# ${NUM_FEATURES} feature input (unigram + bigram) + ${NUM_TOOLS} tool output (multi-label)" >> "$DATASET_FILE"
+echo "# Generato da build-dataset.sh — non modificare a mano" >> "$DATASET_FILE"
 
 count=0
 while IFS=$'\t' read -r labels query; do
