@@ -172,9 +172,20 @@ dispatch_tool() {
             fi
             local log_path=""
             if [[ -n "$gw_dir" ]]; then
-                log_path=$(find "$gw_dir" -maxdepth 1 \
-                    \( -name "*${named_log}*.log" -o -name "*${named_log}*.log.gz" \) \
-                    | sort -r | head -1)
+                # Preferisce il file plain esatto (*-<name>.log) prima dei ruotati
+                log_path=$(find "$gw_dir" -maxdepth 1 -name "*-${named_log}.log" 2>/dev/null | head -1)
+                # Fallback: match più ampio escludendo i rotated (che hanno timestamp nel nome)
+                if [[ -z "$log_path" ]]; then
+                    log_path=$(find "$gw_dir" -maxdepth 1 \
+                        \( -name "*${named_log}.log" -o -name "*${named_log}.log.gz" \) \
+                        2>/dev/null | grep -v "[0-9]\{10\}" | head -1)
+                fi
+                # Ultimo fallback: qualsiasi match
+                if [[ -z "$log_path" ]]; then
+                    log_path=$(find "$gw_dir" -maxdepth 1 \
+                        \( -name "*${named_log}*.log" -o -name "*${named_log}*.log.gz" \) \
+                        2>/dev/null | grep -v "[0-9]\{10\}" | sort | head -1)
+                fi
             fi
             if [[ -z "$log_path" ]]; then
                 echo "[SKIP] Log '$named_log' non trovato in $gw_dir"
