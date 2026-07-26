@@ -59,11 +59,26 @@ if [[ ! -d "$APP_DIR" ]]; then
 fi
 
 # ─── File di log ─────────────────────────────────────────────────────────────
-SERVER_LOG_PATH="$APP_DIR/server.log"
-GC_LOG_PATH="$APP_DIR/gc.log"
+# Risolve un file di log: restituisce il path del file plain o .gz più recente.
+# Se il file è .gz, restituisce il path con suffisso .gz invariato — il
+# chiamante usa open_log() in chatbot.sh per gestire la decompressione.
+resolve_log_file() {
+    local base_path="$1"
+    if   [[ -f "${base_path}" ]];     then echo "${base_path}"
+    elif [[ -f "${base_path}.gz" ]];  then echo "${base_path}.gz"
+    else echo ""
+    fi
+}
 
-# Access log: prende il più recente tra tutti i file undertow_access_log*.log
-ACCESS_LOG_PATH=$(find "$APP_DIR" -maxdepth 1 -name "undertow_access_log*.log" | sort -r | head -1)
+SERVER_LOG_PATH=$(resolve_log_file "$APP_DIR/server.log")
+GC_LOG_PATH=$(resolve_log_file "$APP_DIR/gc.log")
+
+# Access log: prende il più recente tra plain e .gz, preferisce plain
+ACCESS_LOG_PATH=$(
+    { find "$APP_DIR" -maxdepth 1 -name "undertow_access_log*.log" -o \
+                                   -name "undertow_access_log*.log.gz"; } 2>/dev/null \
+    | sort -r | head -1
+)
 
 if [[ -z "$ACCESS_LOG_PATH" ]]; then
     echo "echo '[ERROR] resolve-logs: nessun undertow_access_log in $APP_DIR' >&2" >&2
@@ -72,8 +87,9 @@ fi
 
 # ─── Output ──────────────────────────────────────────────────────────────────
 echo "ACCESS_LOG='${ACCESS_LOG_PATH}'"
-echo "SERVER_LOG='$([[ -f "$SERVER_LOG_PATH" ]] && echo "$SERVER_LOG_PATH")'"
-echo "GC_LOG='$([[ -f "$GC_LOG_PATH" ]] && echo "$GC_LOG_PATH")'"
+echo "SERVER_LOG='${SERVER_LOG_PATH}'"
+echo "GC_LOG='${GC_LOG_PATH}'"
 echo "ACTIVE_NODE='${NODE_NUM}'"
 echo "ACTIVE_ENV='${ENV_NAME}'"
 echo "ACTIVE_APP='${APP}'"
+echo "GUIDEWIRE_LOG_DIR='${NODE_DIR}/${APP}/Guidewire'"

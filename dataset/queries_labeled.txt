@@ -467,3 +467,48 @@ filter_app_errors	voglio vedere gli errori applicativi nel server log
 filter_app_errors	voglio vedere le exception loggati come info
 filter_app_errors	voglio vedere i problemi applicativi nascosti nel log
 filter_app_errors	voglio vedere le eccezioni interne dell'applicazione
+
+# ── tail_named_log — log Guidewire specifici ──────────────────────────────────
+tail_named_log	mostrami il cc.log
+tail_named_log	ultime righe del cc.log
+tail_named_log	dammi le ultime 100 righe del cc.log
+tail_named_log	cosa c'è nel cc.log
+tail_named_log	leggi il cc.log
+tail_named_log	apri il cc.log
+tail_named_log	mostrami l'api.log
+tail_named_log	ultime righe dell'api.log
+tail_named_log	cosa dice l'api.log
+tail_named_log	errori nell'api.log
+tail_named_log	controlla l'api.log
+tail_named_log	mostrami il database.log
+tail_named_log	ultime righe del database log
+tail_named_log	cosa c'è nel database.log
+tail_named_log	errori nel database.log
+tail_named_log	mostrami il messaging.log
+tail_named_log	ultime righe del messaging.log
+tail_named_log	messaggi in coda non processati nel messaging.log
+tail_named_log	cosa dice il messaging log
+tail_named_log	errori nel messaging.log
+tail_named_log	mostrami il performance_integrations log
+tail_named_log	ultime righe del performance_integr log
+tail_named_log	performance delle integrazioni nel log
+tail_named_log	latenze nel performance_integrations.log
+tail_named_log	mostrami il jgroups.log
+tail_named_log	ultime righe del jgroups.log
+tail_named_log	errori di cluster nel jgroups log
+tail_named_log	cosa dice il jgroups.log
+tail_named_log	mostrami il plugin log
+tail_named_log	errori nei plugin nel log
+tail_named_log	ultime righe del ruleengine log
+tail_named_log	regole di business nel ruleengine log
+tail_named_log	cosa c'è nel ruleengine.log
+tail_named_log	mostrami il ccJBatch log
+tail_named_log	errori nel batch log
+tail_named_log	ultime righe del ccJBatch
+tail_named_log	mostrami il studio.log
+tail_named_log	cosa c'è nel velocity.log
+tail_named_log	ultime righe del contactsearch.log
+tail_named_log	errori nel claimnumgen log
+tail_named_log	performance delle integrazioni nel log
+tail_named_log	controlla il log delle performance delle integrazioni
+tail_named_log	latenze delle integrazioni nel performance log

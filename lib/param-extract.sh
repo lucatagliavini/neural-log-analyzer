@@ -52,8 +52,19 @@ if echo "$query" | grep -qE "ultim[ei] [0-9]+"; then
     TAIL_N=$(echo "$query" | grep -oE "ultim[ei] [0-9]+" | grep -oE "[0-9]+" | head -1)
 fi
 
+# Nome log Guidewire specifico: "cc.log", "api.log", "database log", "messaging", ...
+NAMED_LOG=""
+for _log_name in cc api database messaging performance_integr jgroups plugin ruleengine studio \
+                 ccJBatch ccCanaliz claimnumgen contactsearch velocity arbitrato; do
+    if echo "$query" | grep -qiE "\b${_log_name}"; then
+        NAMED_LOG="$_log_name"
+        break
+    fi
+done
+
 echo "TIME_WINDOW='${TIME_WINDOW}'"
 echo "STATUS_CODE='${STATUS_CODE}'"
 echo "THRESHOLD_MS='${THRESHOLD_MS}'"
 echo "IP_FILTER='${IP_FILTER}'"
 echo "TAIL_N='${TAIL_N}'"
+echo "NAMED_LOG='${NAMED_LOG}'"

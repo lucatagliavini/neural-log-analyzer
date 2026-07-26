@@ -6,9 +6,9 @@
 # Uso: ./lib/query-to-features.sh "mostrami gli errori 500"
 #
 # Struttura del vettore:
-#   [0..56]  Unigram — presenza/peso di keyword nel testo (0/1/2)
+#   [0..67]  Unigram — presenza/peso di keyword nel testo (0/1/2)
 #            peso=2 per keyword molto discriminanti (valore 2 anziché 1)
-#   [57..61] Bigram  — co-presenza di due pattern nella stessa query (0/1)
+#   [68..71] Bigram  — co-presenza di due pattern nella stessa query (0/1)
 #            Ogni bigram disambigua una coppia di classi che condividono unigram
 
 query="${1,,}"  # lowercase
@@ -96,6 +96,15 @@ UNIGRAMS=(
     "rott[oa]|non.va\b|non.funz :: 1"  # 57  "ha rotto", "non va", "non funziona"
     "c.è.*problem|qualcosa.*stran :: 1" # 58  "c'è qualcosa di strano", "c'è un problema"
     "vediamo|un.occhiat         :: 1"  # 59  "vediamo i 500", "dammi un'occhiata"
+    # [60-67] Log Guidewire specifici — tail_named_log
+    "cc\.log|claimcenter.log     :: 2"  # 60  log principale ClaimCenter
+    "api\.log                    :: 2"  # 61  log API REST
+    "database\.log|db\.log       :: 2"  # 62  log database/JDBC
+    "messaging\.log              :: 2"  # 63  log code JMS
+    "performance.integr|perf.int  :: 2"  # 64  performance_integrations.log
+    "jgroups                     :: 2"  # 65  log cluster JGroups
+    "plugin[s.]|ruleengine|studio :: 1" # 66  plugin, rule engine, studio
+    "coda|queue\b|batch\b        :: 1"  # 67  keyword dominio GW: batch, code
 )
 
 features=()
@@ -117,13 +126,13 @@ done
 # Ogni bigram disambigua una coppia di classi che condividono gli stessi unigram.
 
 BIGRAMS=(
-    # [60] exception + tempo → filter_errors (non traffic_volume o tail_log)
+    # [68] exception + tempo → filter_errors (non traffic_volume o tail_log)
     "exception|eccezion|warn      :: ora |ore |ultim|recent|stamatt|stanott"
-    # [61] lento + servizi/backend → service_times (non slow_requests) — Leva C
+    # [69] lento + servizi/backend → service_times (non slow_requests) — Leva C
     "lent[oaie]|slow|latenz       :: servizi|servizio|soa\b|backend|web.?service"
-    # [62] volume/andamento + tempo → traffic_volume (non tail_log)
+    # [70] volume/andamento + tempo → traffic_volume (non tail_log)
     "volum|andament|picco         :: ora |ore |ultim|minut|giorn"
-    # [63] righe/tail + recente → tail_log (non traffic_volume)
+    # [71] righe/tail + recente → tail_log (non traffic_volume)
     "rig[ah]|tail\b               :: ultim|recent|recenti"
 )
 

@@ -37,18 +37,18 @@ ENV_NODE_CODE[cert]="ce"
 ENV_NODE_CODE[prod]="pr"
 
 # Numero di feature del vettore di input.
-# Composizione: 60 unigram (0..59) + 4 bigram di co-presenza (60..63).
+# Composizione: 68 unigram (0..67) + 4 bigram di co-presenza (68..71).
 # Aggiornare qui e in lib/query-to-features.sh in modo coerente.
-NUM_FEATURES=64
+NUM_FEATURES=72
 
 # Numero di tool (classi output della rete)
-NUM_TOOLS=11
+NUM_TOOLS=12
 
 # Soglia di confidenza per attivare un tool
 TOOL_THRESHOLD=0.20
 
-# Architettura della rete: 58 input → 32 hidden → 11 output
-MODEL_TOPOLOGY="${NUM_FEATURES},32,${NUM_TOOLS}"
+# Architettura della rete: 72 input → 48 hidden → 12 output
+MODEL_TOPOLOGY="${NUM_FEATURES},48,${NUM_TOOLS}"
 
 # Nomi dei tool nell'ordine dell'output layer (indice 0..10)
 TOOL_NAMES=(
@@ -63,6 +63,7 @@ TOOL_NAMES=(
     tail_log
     filter_ip
     filter_app_errors
+    tail_named_log
 )
 
 # Descrizioni leggibili per l'utente
@@ -78,3 +79,4 @@ TOOL_DESC[correlate_gc_slow]="Correlazione tra pause GC e richieste lente"
 TOOL_DESC[tail_log]="Ultime N righe di un file di log"
 TOOL_DESC[filter_ip]="Traffico filtrato per indirizzo IP sorgente"
 TOOL_DESC[filter_app_errors]="Errori applicativi nel server.log (status 5xx e exception loggati come INFO)"
+TOOL_DESC[tail_named_log]="Ultime N righe di un log Guidewire specifico (cc.log, api.log, database.log, ...)"

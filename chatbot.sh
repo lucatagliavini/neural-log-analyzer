@@ -77,6 +77,20 @@ if [[ ! -d "$MODEL_DIR" ]]; then
     exit 1
 fi
 
+# ─── Helper: apertura trasparente di log plain o .gz ─────────────────────────
+# Uso: gawk ... $(log_args "$file")
+# Restituisce il path diretto oppure un process substitution gunzip -c.
+# Compatibile con Linux, WSL e AIX (gunzip -c è POSIX).
+open_log() {
+    local f="$1"
+    [[ -z "$f" ]] && return
+    if [[ "$f" == *.gz ]]; then
+        echo "<(gunzip -c '$f')"
+    else
+        echo "'$f'"
+    fi
+}
+
 # ─── Dispatch tool ───────────────────────────────────────────────────────────
 dispatch_tool() {
     local tool="$1"
@@ -86,68 +100,90 @@ dispatch_tool() {
 
     case "$tool" in
         count_status)
-            gawk -f "$TOOLS_DIR/count_status.awk" \
+            eval gawk -f "$TOOLS_DIR/count_status.awk" \
                 -v status_filter="$STATUS_CODE" \
                 -v time_window="$TIME_WINDOW" \
-                "$access"
+                "$(open_log "$access")"
             ;;
         distribute_status)
-            gawk -f "$TOOLS_DIR/distribute_status.awk" \
+            eval gawk -f "$TOOLS_DIR/distribute_status.awk" \
                 -v status_filter="$STATUS_CODE" \
                 -v time_window="$TIME_WINDOW" \
-                "$access"
+                "$(open_log "$access")"
             ;;
         slow_requests)
-            gawk -f "$TOOLS_DIR/slow_requests.awk" \
+            eval gawk -f "$TOOLS_DIR/slow_requests.awk" \
                 -v threshold_ms="${THRESHOLD_MS:-1000}" \
                 -v time_window="$TIME_WINDOW" \
-                "$access"
+                "$(open_log "$access")"
             ;;
         traffic_volume)
-            gawk -f "$TOOLS_DIR/traffic_volume.awk" \
+            eval gawk -f "$TOOLS_DIR/traffic_volume.awk" \
                 -v time_window="$TIME_WINDOW" \
-                "$access"
+                "$(open_log "$access")"
             ;;
         filter_errors)
             [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile per filter_errors"; return; }
-            gawk -f "$TOOLS_DIR/filter_errors.awk" \
+            eval gawk -f "$TOOLS_DIR/filter_errors.awk" \
                 -v time_window="$TIME_WINDOW" \
-                "$server"
+                "$(open_log "$server")"
             ;;
         service_times)
             [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile per service_times"; return; }
-            gawk -f "$TOOLS_DIR/service_times.awk" \
+            eval gawk -f "$TOOLS_DIR/service_times.awk" \
                 -v time_window="$TIME_WINDOW" \
-                "$server"
+                "$(open_log "$server")"
             ;;
         gc_stats)
             [[ -z "$gc" ]] && { echo "[SKIP] gc.log non disponibile per gc_stats"; return; }
-            gawk -f "$TOOLS_DIR/gc_stats.awk" \
+            eval gawk -f "$TOOLS_DIR/gc_stats.awk" \
                 -v time_window="$TIME_WINDOW" \
-                "$gc"
+                "$(open_log "$gc")"
             ;;
         correlate_gc_slow)
             [[ -z "$gc" ]] && { echo "[SKIP] gc.log non disponibile per correlate_gc_slow"; return; }
-            gawk -f "$TOOLS_DIR/correlate_gc_slow.awk" \
+            eval gawk -f "$TOOLS_DIR/correlate_gc_slow.awk" \
                 -v threshold_ms="${THRESHOLD_MS:-500}" \
-                "$gc" "$access"
+                "$(open_log "$gc")" "$(open_log "$access")"
             ;;
         tail_log)
-            gawk -f "$TOOLS_DIR/tail_log.awk" \
+            eval gawk -f "$TOOLS_DIR/tail_log.awk" \
                 -v tail_n="${TAIL_N:-50}" \
-                "$access"
+                "$(open_log "$access")"
             ;;
         filter_ip)
-            gawk -f "$TOOLS_DIR/filter_ip.awk" \
+            eval gawk -f "$TOOLS_DIR/filter_ip.awk" \
                 -v ip_filter="$IP_FILTER" \
                 -v time_window="$TIME_WINDOW" \
-                "$access"
+                "$(open_log "$access")"
             ;;
         filter_app_errors)
             [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile per filter_app_errors"; return; }
-            gawk -f "$TOOLS_DIR/filter_app_errors.awk" \
+            eval gawk -f "$TOOLS_DIR/filter_app_errors.awk" \
                 -v time_window="$TIME_WINDOW" \
-                "$server"
+                "$(open_log "$server")"
+            ;;
+        tail_named_log)
+            local gw_dir="${GUIDEWIRE_LOG_DIR:-}"
+            local named_log="${NAMED_LOG:-}"
+            if [[ -z "$named_log" ]]; then
+                echo "[SKIP] Nessun log Guidewire specificato nella query"
+                return
+            fi
+            local log_path=""
+            if [[ -n "$gw_dir" ]]; then
+                log_path=$(find "$gw_dir" -maxdepth 1 \
+                    \( -name "*${named_log}*.log" -o -name "*${named_log}*.log.gz" \) \
+                    | sort -r | head -1)
+            fi
+            if [[ -z "$log_path" ]]; then
+                echo "[SKIP] Log '$named_log' non trovato in $gw_dir"
+                return
+            fi
+            echo "  Log: $log_path"
+            eval gawk -f "$TOOLS_DIR/tail_log.awk" \
+                -v tail_n="${TAIL_N:-50}" \
+                "$(open_log "$log_path")"
             ;;
         *)
             echo "[WARN] Tool sconosciuto: $tool" >&2
