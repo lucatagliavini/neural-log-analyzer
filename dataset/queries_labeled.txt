@@ -395,3 +395,75 @@ filter_app_errors	elenca gli errori applicativi nel server log
 filter_app_errors	elenca le exception loggati come info
 filter_app_errors	elenca i problemi applicativi nascosti nel log
 filter_app_errors	elenca le eccezioni interne dell'applicazione
+
+# ─── Leva B: finestre temporali colloquiali ───────────────────────────────────
+filter_errors	errori di stamattina nel server log
+filter_errors	exception di stanotte nel log
+traffic_volume	traffico di stamattina
+traffic_volume	quante richieste stamattina
+traffic_volume	andamento del traffico stanotte
+tail_log	log di stamattina
+tail_log	righe di stanotte nell'access log
+count_status	quanti 500 di stamattina
+filter_errors	warning di questa mattina nel log applicativo
+traffic_volume	volume di richieste di questa sera
+filter_errors	cosa è successo poco fa nel log
+tail_log	ultime righe di poco fa
+count_status	errori avvenuti poco fa
+
+# ─── Leva A: linguaggio colloquiale/informale ─────────────────────────────────
+filter_errors	cosa ha rotto il server
+filter_errors	c'è qualcosa che non va nel server log
+filter_errors	qualcosa di strano nel log applicativo
+filter_errors	vediamo cosa ha lanciato eccezioni
+slow_requests	vediamo le richieste più lente
+count_status	vediamo quanti errori ci sono stati
+filter_errors	dammi un'occhiata agli errori nel log
+filter_errors	il server non funziona cosa dice il log
+filter_errors	cosa non va nel log jboss
+slow_requests	il server risponde lento cosa è successo
+gc_stats	qualcosa non va con la memoria jvm
+filter_app_errors	c'è qualcosa di strano nel log applicativo nascosto
+filter_errors	c'è un problema nel server log
+
+# ─── Leva C: backend/web service espliciti ───────────────────────────────────
+service_times	web service lenti
+service_times	il backend è lento
+service_times	latenza del backend
+service_times	web service con latenza alta
+service_times	il backend risponde lentamente
+service_times	performance del web service
+service_times	backend con response time elevato
+slow_requests,service_times	le richieste e il backend sono lenti
+
+# ─── generati automaticamente 2026-07-26 ──────────────────────────────
+count_status	quante errori 4xx
+count_status	quante risposte http con errore
+distribute_status	raggruppamento dei 500 per api
+distribute_status	suddivisione degli errori per api
+distribute_status	suddivisione dei 500 per api
+distribute_status	ripartizione degli errori per api
+distribute_status	ripartizione dei 500 per api
+slow_requests	chiamate http con risposta ritardata
+slow_requests	richieste lente nelle ultime 2 ore
+traffic_volume	andamento del traffico nelle ultime 24 ore
+gc_stats	elenca le pause gc
+gc_stats	elenca l'utilizzo della heap
+gc_stats	elenca la memoria jvm
+gc_stats	voglio vedere le statistiche del garbage collector
+correlate_gc_slow	gc e slow request degli ultimi 30 minuti
+correlate_gc_slow	correlazione tra gc e richieste lente di oggi
+correlate_gc_slow	il garbage collector causa latenze di oggi
+correlate_gc_slow	gc e slow request di oggi
+correlate_gc_slow	correlazione tra gc e richieste lente di ieri
+tail_log	elenca le ultime 100 righe dell'access log
+tail_log	elenca gli ultimi eventi nel log
+filter_ip	accessi dall'ip 203.0.113.1 nelle ultime ore
+filter_ip	errori http dall'ip 203.0.113.1
+filter_ip	richieste dall'ip 198.51.100.3
+filter_ip	cosa ha fatto l'ip 198.51.100.3
+filter_ip	traffico dal client 198.51.100.3
+filter_app_errors	voglio vedere gli errori applicativi nel server log
+filter_app_errors	voglio vedere le exception loggati come info
+filter_app_errors	voglio vedere i problemi applicativi nascosti nel log
+filter_app_errors	voglio vedere le eccezioni interne dell'applicazione

@@ -136,8 +136,18 @@ SYN_SOA=(   "servizi soa" "web service" "servizi backend" "servizi interni"
 # Termini di riga/tail (keyword 56, discriminano tail_log)
 SYN_TAIL=(  "righe" "tail" "ultime righe" "le ultime N righe" )
 
-# Termini di volume/andamento (keyword 57, discriminano traffic_volume)
+# Termini di volume/andamento (keyword 56, discriminano traffic_volume)
 SYN_VOL=(   "volume" "andamento" "picco" "volumi" "andamento del traffico" )
+
+# Finestre temporali colloquiali — Leva B (keyword 17-19)
+SYN_TIMECOLL=( "stamattina" "stanotte" "questa mattina" "poco fa" "questa sera" )
+
+# Termini colloquiali per errori/problemi — Leva A (keyword 57-59)
+SYN_BROKEN=( "cosa ha rotto" "non va nel log" "qualcosa di strano" "non funziona"
+             "vediamo cosa è successo" "dammi un'occhiata" )
+
+# Termini backend/web service — Leva C (keyword 53 ampliata)
+SYN_BACKEND=( "backend" "web service" "web services" "servizi backend" )
 
 # Aggettivi per richieste lente (keyword: lent[oaie]|slow — indici 30-31)
 SYN_SLOW=(  "lente" "con latenza alta" "con response time elevato"
@@ -241,6 +251,11 @@ gen_traffic_volume() {
     emit "traffic_volume" "richieste totali per ora di ieri"
     emit "traffic_volume" "volume totale di accessi"
     emit "traffic_volume" "picco di accessi al server"
+    # Leva B: temporali colloquiali
+    for tc in "${SYN_TIMECOLL[@]}"; do
+        emit "traffic_volume" "traffico ${tc}"
+        emit "traffic_volume" "quante richieste ${tc}"
+    done
 }
 
 gen_filter_errors() {
@@ -257,6 +272,15 @@ gen_filter_errors() {
     emit "filter_errors" "righe di errore nel server.log"
     emit "filter_errors" "exception e warning nel log jboss"
     emit "filter_errors" "cosa ha lanciato eccezioni nel log"
+    # Leva B: temporali colloquiali
+    for tc in "${SYN_TIMECOLL[@]}"; do
+        emit "filter_errors" "errori ${tc} nel server log"
+        emit "filter_errors" "eccezioni ${tc} nel log applicativo"
+    done
+    # Leva A: colloquiale
+    for br in "${SYN_BROKEN[@]}"; do
+        emit "filter_errors" "${br} nel server log"
+    done
 }
 
 gen_service_times() {
@@ -285,6 +309,13 @@ gen_service_times() {
     emit "service_times" "quale servizio è più lento in ms"
     emit "service_times" "tempi di esecuzione dei web service jboss"
     emit "service_times" "servizio con latenza alta"
+    # Leva C: backend/web service espliciti
+    for be in "${SYN_BACKEND[@]}"; do
+        emit "service_times" "latenza del ${be}"
+        emit "service_times" "${be} lenti"
+        emit "service_times" "performance del ${be}"
+        emit "service_times" "tempi di risposta del ${be}"
+    done
 }
 
 gen_gc_stats() {
@@ -354,6 +385,11 @@ gen_tail_log() {
     emit "tail_log" "le richieste più recenti"
     emit "tail_log" "tail dell'access log"
     emit "tail_log" "le ultime righe del log undertow"
+    # Leva B: temporali colloquiali
+    for tc in "${SYN_TIMECOLL[@]}"; do
+        emit "tail_log" "log ${tc}"
+        emit "tail_log" "righe di log ${tc}"
+    done
 }
 
 gen_filter_ip() {

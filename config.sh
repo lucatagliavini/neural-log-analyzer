@@ -16,9 +16,9 @@ LIB_DIR="$ANALYZER_DIR/lib"
 TOOLS_DIR="$ANALYZER_DIR/lib/tools"
 
 # Numero di feature del vettore di input.
-# Composizione: 54 unigram (0..53) + 4 bigram di co-presenza (54..57).
+# Composizione: 60 unigram (0..59) + 4 bigram di co-presenza (60..63).
 # Aggiornare qui e in lib/query-to-features.sh in modo coerente.
-NUM_FEATURES=58
+NUM_FEATURES=64
 
 # Numero di tool (classi output della rete)
 NUM_TOOLS=11
