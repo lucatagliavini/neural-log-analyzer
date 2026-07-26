@@ -75,6 +75,11 @@ VOCAB=(
     "nascost|intern"        # 51
     "root.cause|business"   # 52
     "loggat|loggati"        # 53
+    # [54-57] Discriminatori aggiuntivi
+    "servizi|servizio"      # 54  service_times vs slow_requests
+    "soa\b"                 # 55  service_times (peso doppio per SOA)
+    "rig[ah]|tail\b"        # 56  tail_log (righe di log, non volume)
+    "volum|picco|andament"  # 57  traffic_volume vs tail_log
 )
 
 features=()

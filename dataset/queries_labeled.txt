@@ -338,3 +338,60 @@ filter_app_errors	fammi vedere le eccezioni interne dell'applicazione
 filter_app_errors	visualizza gli errori applicativi nel server log
 filter_app_errors	visualizza le exception loggati come info
 filter_app_errors	visualizza i problemi applicativi nascosti nel log
+
+# ─── generati automaticamente 2026-07-26 ──────────────────────────────
+count_status	quanti risposte http con errore
+count_status	quanti 503 ricevuti
+count_status	quanti richieste con status code 400
+count_status	quante 500 nell'access log
+count_status	quante richieste con status 500
+distribute_status	distribuzione degli errori per api
+distribute_status	distribuzione dei 500 per api
+distribute_status	breakdown degli errori per api
+distribute_status	breakdown dei 500 per api
+distribute_status	raggruppamento degli errori per api
+slow_requests	richieste molto lente
+slow_requests	chiamate http molto lente
+slow_requests	richieste con tempi elevati
+slow_requests	chiamate http con tempi elevati
+slow_requests	richieste con risposta ritardata
+traffic_volume	quante chiamate nelle ultime 6 ore
+traffic_volume	andamento del traffico nelle ultime 6 ore
+traffic_volume	traffico nelle ultime 24 ore
+traffic_volume	volume di richieste nelle ultime 24 ore
+traffic_volume	quante chiamate nelle ultime 24 ore
+filter_errors	exception recenti nel log applicativo
+filter_errors	warning recenti nel log applicativo
+filter_errors	problemi nel server log
+filter_errors	problemi recenti nel log applicativo
+filter_errors	anomalie nel server log
+service_times	visualizza i tempi di risposta dei servizi soa
+service_times	visualizza la latenza dei web service
+service_times	visualizza i servizi più lenti
+service_times	visualizza le performance dei servizi backend
+service_times	elenca i tempi di risposta dei servizi soa
+gc_stats	visualizza le statistiche del garbage collector
+gc_stats	visualizza le pause gc
+gc_stats	visualizza l'utilizzo della heap
+gc_stats	visualizza la memoria jvm
+gc_stats	elenca le statistiche del garbage collector
+correlate_gc_slow	correlazione tra gc e richieste lente nelle ultime 24 ore
+correlate_gc_slow	il garbage collector causa latenze nelle ultime 24 ore
+correlate_gc_slow	gc e slow request nelle ultime 24 ore
+correlate_gc_slow	correlazione tra gc e richieste lente degli ultimi 30 minuti
+correlate_gc_slow	il garbage collector causa latenze degli ultimi 30 minuti
+tail_log	visualizza gli ultimi accessi
+tail_log	visualizza le ultime 100 righe dell'access log
+tail_log	visualizza gli ultimi eventi nel log
+tail_log	elenca le ultime righe del log
+tail_log	elenca gli ultimi accessi
+filter_ip	errori http dall'ip 192.168.50.10
+filter_ip	richieste dall'ip 203.0.113.1
+filter_ip	cosa ha fatto l'ip 203.0.113.1
+filter_ip	traffico dal client 203.0.113.1
+filter_ip	attività dall'indirizzo 203.0.113.1
+filter_app_errors	visualizza le eccezioni interne dell'applicazione
+filter_app_errors	elenca gli errori applicativi nel server log
+filter_app_errors	elenca le exception loggati come info
+filter_app_errors	elenca i problemi applicativi nascosti nel log
+filter_app_errors	elenca le eccezioni interne dell'applicazione

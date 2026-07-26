@@ -16,7 +16,7 @@ LIB_DIR="$ANALYZER_DIR/lib"
 TOOLS_DIR="$ANALYZER_DIR/lib/tools"
 
 # Numero di feature del vettore di input (keyword presenti nel vocabolario)
-NUM_FEATURES=54
+NUM_FEATURES=58
 
 # Numero di tool (classi output della rete)
 NUM_TOOLS=11
@@ -24,7 +24,7 @@ NUM_TOOLS=11
 # Soglia di confidenza per attivare un tool (rete softmax → probabilità)
 TOOL_THRESHOLD=0.20
 
-# Architettura della rete: 54 input → 32 hidden → 11 output
+# Architettura della rete: 58 input → 32 hidden → 11 output
 MODEL_TOPOLOGY="${NUM_FEATURES},32,${NUM_TOOLS}"
 
 # Nomi dei tool nell'ordine dell'output layer (indice 0..10)

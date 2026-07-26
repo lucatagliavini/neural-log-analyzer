@@ -113,6 +113,16 @@ SYN_ERRORS=("errori" "eccezioni" "exception" "warning" "problemi"
 # Verbi di ricerca/filtro
 SYN_FILTER=("filtra" "cerca" "trova" "mostrami" "dammi" "seleziona" "estrai" )
 
+# Termini SOA / servizi interni (keyword 54-55, discriminano service_times)
+SYN_SOA=(   "servizi soa" "web service" "servizi backend" "servizi interni"
+            "chiamate soa" "servizi jboss" )
+
+# Termini di riga/tail (keyword 56, discriminano tail_log)
+SYN_TAIL=(  "righe" "tail" "ultime righe" "le ultime N righe" )
+
+# Termini di volume/andamento (keyword 57, discriminano traffic_volume)
+SYN_VOL=(   "volume" "andamento" "picco" "volumi" "andamento del traffico" )
+
 # Aggettivi per richieste lente (keyword: lent[oaie]|slow — indici 30-31)
 SYN_SLOW=(  "lente" "con latenza alta" "con response time elevato"
             "sopra soglia" "che impiegano troppo" "molto lente"
@@ -167,7 +177,8 @@ gen_distribute_status() {
 }
 
 gen_slow_requests() {
-    # keywords: lent(30-31), latenz(32), ms(33), prestazion|performanc(34)
+    # keywords: lent(30-31), latenz(32), ms(33), prestazion(34)
+    # NON usa servizi/soa (54-55) — quelli sono service_times
     for s in "${SYN_SLOW[@]}"; do
         emit "slow_requests" "richieste ${s}"
         emit "slow_requests" "chiamate http ${s}"
@@ -182,10 +193,17 @@ gen_slow_requests() {
         emit "slow_requests" "${v} i timeout nell'access log"
         emit "slow_requests" "${v} le prestazioni degradate"
     done
+    # Esempi espliciti senza keyword SOA — rinforzano il confine
+    emit "slow_requests" "richieste http con risposta lenta"
+    emit "slow_requests" "endpoint con latenza elevata"
+    emit "slow_requests" "chiamate con response time alto"
+    emit "slow_requests" "richieste che superano i 500 ms"
+    emit "slow_requests" "quali url rispondono lentamente"
 }
 
 gen_traffic_volume() {
     # keywords: ora|ore(10-11), minut(12-13), giorn(14), ultim(17-18), quant(21), total(23)
+    # Keyword 57: volum|picco|andament — discrimina da tail_log
     for t in "${SYN_TIME[@]}"; do
         emit "traffic_volume" "traffico ${t}"
         emit "traffic_volume" "volume di richieste ${t}"
@@ -197,9 +215,16 @@ gen_traffic_volume() {
         emit "traffic_volume" "${v} i picchi di richieste"
         emit "traffic_volume" "${v} le richieste al minuto"
     done
+    # Esempi con keyword 57 (volume/andamento/picco) senza keyword temporali
+    for vol in "${SYN_VOL[@]}"; do
+        emit "traffic_volume" "${vol} del traffico http"
+        emit "traffic_volume" "${vol} delle richieste al server"
+    done
     emit "traffic_volume" "andamento richieste nell'arco della giornata"
     emit "traffic_volume" "picco di traffico nelle ultime ore"
     emit "traffic_volume" "richieste totali per ora di ieri"
+    emit "traffic_volume" "volume totale di accessi"
+    emit "traffic_volume" "picco di accessi al server"
 }
 
 gen_filter_errors() {
@@ -218,7 +243,9 @@ gen_filter_errors() {
 }
 
 gen_service_times() {
-    # keywords: lent(30-31), latenz(32), ms(33), prestazion|performanc(34)
+    # keywords: lent(30-31), latenz(32), ms(33), prestazion(34)
+    # Keyword 54: servizi|servizio — discrimina da slow_requests
+    # Keyword 55: soa — segnale forte esclusivo di service_times
     for v in "${SYN_SHOW[@]}"; do
         emit "service_times" "${v} i tempi di risposta dei servizi soa"
         emit "service_times" "${v} la latenza dei web service"
@@ -230,11 +257,17 @@ gen_service_times() {
         emit "service_times" "latenza dei servizi interni ${t}"
         emit "service_times" "performance backend ${t}"
     done
+    # Esempi con keyword 54/55 che rinforzano il confine con slow_requests
+    for soa in "${SYN_SOA[@]}"; do
+        emit "service_times" "tempi di risposta ${soa}"
+        emit "service_times" "latenza ${soa}"
+        emit "service_times" "${soa} lenti"
+    done
     emit "service_times" "quanto ci mette il servizio di autenticazione"
     emit "service_times" "durata media delle chiamate soa"
-    emit "service_times" "servizi con response time alto"
     emit "service_times" "quale servizio è più lento in ms"
     emit "service_times" "tempi di esecuzione dei web service jboss"
+    emit "service_times" "servizio con latenza alta"
 }
 
 gen_gc_stats() {
@@ -280,6 +313,7 @@ gen_correlate_gc_slow() {
 
 gen_tail_log() {
     # keywords: ultim(17-18), recent|ultim(49), list(27), mostr(48)
+    # Keyword 56: rig|tail — discrimina da traffic_volume
     for v in "${SYN_SHOW[@]}"; do
         emit "tail_log" "${v} le ultime righe del log"
         emit "tail_log" "${v} gli ultimi accessi"
@@ -288,14 +322,21 @@ gen_tail_log() {
     done
     for r in "${SYN_RECENT[@]}"; do
         emit "tail_log" "log ${r}"
-        emit "tail_log" "richieste ${r}"
+        emit "tail_log" "righe di log ${r}"
         emit "tail_log" "accessi ${r}"
+    done
+    # Esempi con keyword 56 (rig/tail) che rinforzano il confine con traffic_volume
+    for tl in "${SYN_TAIL[@]}"; do
+        emit "tail_log" "${tl} del log di accesso"
+        emit "tail_log" "ultime ${tl} dell'access log"
     done
     emit "tail_log" "ultime 50 righe dell'access log"
     emit "tail_log" "cosa è successo di recente nel log"
     emit "tail_log" "attività recente nel log di accesso"
     emit "tail_log" "ultime 200 richieste al server"
     emit "tail_log" "le richieste più recenti"
+    emit "tail_log" "tail dell'access log"
+    emit "tail_log" "le ultime righe del log undertow"
 }
 
 gen_filter_ip() {
