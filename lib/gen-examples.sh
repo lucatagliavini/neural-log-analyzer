@@ -450,36 +450,20 @@ gen_filter_app_errors() {
     emit "filter_app_errors" "analisi root cause errori applicativi"
 }
 
+# ─── Override dal profilo (opzionale) ────────────────────────────────────────
+# Sourca examples.sh dal profilo DOPO le definizioni core, così il profilo può
+# ridefinire qualunque gen_<tool>() o aggiungerne di nuovi specifici del dominio.
+[[ -f "$PROFILE_DIR/examples.sh" ]] && source "$PROFILE_DIR/examples.sh"
+
 # ─── Dispatch e output ────────────────────────────────────────────────────────
 
 run_gen() {
-    case "$1" in
-        count_status)      gen_count_status ;;
-        distribute_status) gen_distribute_status ;;
-        slow_requests)     gen_slow_requests ;;
-        traffic_volume)    gen_traffic_volume ;;
-        filter_errors)     gen_filter_errors ;;
-        service_times)     gen_service_times ;;
-        gc_stats)          gen_gc_stats ;;
-        correlate_gc_slow) gen_correlate_gc_slow ;;
-        tail_log)          gen_tail_log ;;
-        filter_ip)         gen_filter_ip ;;
-        filter_app_errors) gen_filter_app_errors ;;
-        tail_named_log)
-            # tail_named_log è specifico di profili con log Guidewire (es. liquido)
-            local GW_LOGS=("cc.log" "api.log" "database.log" "messaging.log"
-                           "performance_integr.log" "jgroups.log")
-            for log in "${GW_LOGS[@]}"; do
-                local lname="${log%.log}"
-                emit "tail_named_log" "ultime righe del ${log}"
-                emit "tail_named_log" "mostrami il ${log}"
-                emit "tail_named_log" "cosa c'è nel ${log} recentemente"
-                emit "tail_named_log" "tail del ${lname} log"
-                emit "tail_named_log" "ultimi eventi nel ${log}"
-            done
-            ;;
-        *) echo "[ERROR] tool sconosciuto: $1" >&2; exit 1 ;;
-    esac
+    local fn="gen_${1//-/_}"
+    if declare -f "$fn" > /dev/null 2>&1; then
+        "$fn"
+    else
+        echo "[SKIP] nessun generatore per '$1' (definisci ${fn}() in examples.sh)" >&2
+    fi
 }
 
 init_limits
