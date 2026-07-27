@@ -17,13 +17,37 @@ source "$PROFILE_DIR/system.conf"
 query="${1,,}"
 
 # ─── Ambiente ────────────────────────────────────────────────────────────────
+# Sinonimi italiani per i nomi ambiente. Il profilo può aggiungerne via ENV_SYNONYMS
+# prima di sourcere questo script. Formato: "regex::nome_env"
+declare -a _ENV_SYNONYMS=(
+    "produzion[ei]::prod"
+    "integrazion[ei]|integr\b::inte"
+    "collaudo::coll"
+    "certificazion[ei]|certif\b::cert"
+)
+if declare -p ENV_SYNONYMS &>/dev/null; then
+    _ENV_SYNONYMS+=("${ENV_SYNONYMS[@]}")
+fi
+
 CTX_ENV=""
+# Prima: match diretto sul nome env (es: "prod", "test", "coll")
 for env_name in "${!ENV_NODE_CODE[@]}"; do
     if echo "$query" | grep -qE "\b${env_name}\b"; then
         CTX_ENV="$env_name"
         break
     fi
 done
+# Poi: sinonimi italiani se non ancora trovato
+if [[ -z "$CTX_ENV" ]]; then
+    for syn_entry in "${_ENV_SYNONYMS[@]}"; do
+        syn_pat="${syn_entry%%::*}"
+        syn_env="${syn_entry##*::}"
+        if echo "$query" | grep -qE "\b${syn_pat}"; then
+            CTX_ENV="$syn_env"
+            break
+        fi
+    done
+fi
 
 # ─── Nodo ────────────────────────────────────────────────────────────────────
 CTX_NODE=""

@@ -82,10 +82,19 @@ TOOLS_DIR="$SCRIPT_DIR/lib/tools"
 # Carica dispatch (open_log + dispatch_tool)
 source "$LIB_DIR/dispatch.sh"
 
-# ─── Modalità non interattiva: --env obbligatorio ────────────────────────────
-if [[ "$INTERACTIVE" -eq 0 && -z "$ACCESS_LOG" && -z "$ACTIVE_ENV" ]]; then
-    echo "[ERROR] --query richiede --env (o --access-log)" >&2
-    exit 1
+# ─── Modalità non interattiva: deduzione contesto dalla query ────────────────
+if [[ "$INTERACTIVE" -eq 0 && -z "$ACCESS_LOG" ]]; then
+    if [[ -n "$QUERY" ]]; then
+        ctx=$("$LIB_DIR/context-extract.sh" "$QUERY")
+        eval "$ctx"
+        [[ -n "$CTX_ENV"  && "$CTX_ENV"  != "$ACTIVE_ENV"  ]] && ACTIVE_ENV="$CTX_ENV"
+        [[ -n "$CTX_NODE" && "$CTX_NODE" != "$ACTIVE_NODE" ]] && ACTIVE_NODE="$CTX_NODE"
+        [[ -n "$CTX_APP"  && "$CTX_APP"  != "$ACTIVE_APP"  ]] && ACTIVE_APP="$CTX_APP"
+    fi
+    if [[ -z "$ACTIVE_ENV" ]]; then
+        echo "[ERROR] --query richiede --env (o --access-log), oppure menziona l'ambiente nella query (es: \"errori in coll\")" >&2
+        exit 1
+    fi
 fi
 
 # ─── Validazione modello ─────────────────────────────────────────────────────
