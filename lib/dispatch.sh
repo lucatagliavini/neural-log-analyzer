@@ -83,6 +83,7 @@ dispatch_tool() {
             eval gawk -f "$TOOLS_DIR/filter_ip.awk" \
                 -v ip_filter="$IP_FILTER" \
                 -v time_window="$TIME_WINDOW" \
+                -v top_n="${TAIL_N:-10}" \
                 "$(open_log "$access")"
             ;;
         filter_app_errors)
