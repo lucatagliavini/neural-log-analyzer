@@ -70,11 +70,28 @@ resolve_log_file() {
 SERVER_LOG_PATH=$(resolve_log_file "$APP_DIR/server.log")
 GC_LOG_PATH=$(resolve_log_file "$APP_DIR/gc.log")
 
-ACCESS_LOG_PATH=$(
-    { find "$APP_DIR" -maxdepth 1 -name "undertow_access_log*.log" -o \
-                                   -name "undertow_access_log*.log.gz"; } 2>/dev/null \
-    | sort -r | head -1
-)
+DATE_FILTER="${DATE_FILTER:-}"
+
+if [[ -n "$DATE_FILTER" ]]; then
+    # Cerca il log ruotato per la data specifica (es. "ieri")
+    ACCESS_LOG_PATH=$(
+        { find "$APP_DIR" -maxdepth 1 \
+            -name "undertow_access_log.${DATE_FILTER}.log" -o \
+            -name "undertow_access_log.${DATE_FILTER}.log.gz"; } 2>/dev/null \
+        | sort -r | head -1
+    )
+    if [[ -z "$ACCESS_LOG_PATH" ]]; then
+        echo "echo '[WARN] resolve-logs: nessun log per data $DATE_FILTER in $APP_DIR — uso log corrente' >&2"
+    fi
+fi
+
+if [[ -z "$ACCESS_LOG_PATH" ]]; then
+    ACCESS_LOG_PATH=$(
+        { find "$APP_DIR" -maxdepth 1 -name "undertow_access_log*.log" -o \
+                                       -name "undertow_access_log*.log.gz"; } 2>/dev/null \
+        | sort -r | head -1
+    )
+fi
 
 if [[ -z "$ACCESS_LOG_PATH" ]]; then
     echo "echo '[ERROR] resolve-logs: nessun undertow_access_log in $APP_DIR' >&2" >&2

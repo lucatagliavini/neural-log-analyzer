@@ -25,52 +25,46 @@ dispatch_tool() {
     local access="$ACCESS_LOG"
     local server="${SERVER_LOG:-}"
     local gc="${GC_LOG:-}"
+    local tw_args="-f '$LIB_DIR/utils-time.awk' -v time_from='${TIME_FROM:-}' -v time_to='${TIME_TO:-}'"
 
     case "$tool" in
         count_status)
-            eval gawk -f "$TOOLS_DIR/count_status.awk" \
+            eval gawk "$tw_args" -f "$TOOLS_DIR/count_status.awk" \
                 -v status_filter="$STATUS_CODE" \
-                -v time_window="$TIME_WINDOW" \
                 "$(open_log "$access")"
             ;;
         distribute_status)
-            eval gawk -f "$TOOLS_DIR/distribute_status.awk" \
+            eval gawk "$tw_args" -f "$TOOLS_DIR/distribute_status.awk" \
                 -v status_filter="$STATUS_CODE" \
-                -v time_window="$TIME_WINDOW" \
                 "$(open_log "$access")"
             ;;
         slow_requests)
-            eval gawk -f "$TOOLS_DIR/slow_requests.awk" \
+            eval gawk "$tw_args" -f "$TOOLS_DIR/slow_requests.awk" \
                 -v threshold_ms="${THRESHOLD_MS:-1000}" \
-                -v time_window="$TIME_WINDOW" \
                 "$(open_log "$access")"
             ;;
         traffic_volume)
-            eval gawk -f "$TOOLS_DIR/traffic_volume.awk" \
-                -v time_window="$TIME_WINDOW" \
+            eval gawk "$tw_args" -f "$TOOLS_DIR/traffic_volume.awk" \
                 "$(open_log "$access")"
             ;;
         filter_errors)
             [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile per filter_errors"; return; }
-            eval gawk -f "$TOOLS_DIR/filter_errors.awk" \
-                -v time_window="$TIME_WINDOW" \
+            eval gawk "$tw_args" -f "$TOOLS_DIR/filter_errors.awk" \
                 "$(open_log "$server")"
             ;;
         service_times)
             [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile per service_times"; return; }
-            eval gawk -f "$TOOLS_DIR/service_times.awk" \
-                -v time_window="$TIME_WINDOW" \
+            eval gawk "$tw_args" -f "$TOOLS_DIR/service_times.awk" \
                 "$(open_log "$server")"
             ;;
         gc_stats)
             [[ -z "$gc" ]] && { echo "[SKIP] gc.log non disponibile per gc_stats"; return; }
-            eval gawk -f "$TOOLS_DIR/gc_stats.awk" \
-                -v time_window="$TIME_WINDOW" \
+            eval gawk "$tw_args" -f "$TOOLS_DIR/gc_stats.awk" \
                 "$(open_log "$gc")"
             ;;
         correlate_gc_slow)
             [[ -z "$gc" ]] && { echo "[SKIP] gc.log non disponibile per correlate_gc_slow"; return; }
-            eval gawk -f "$TOOLS_DIR/correlate_gc_slow.awk" \
+            eval gawk "$tw_args" -f "$TOOLS_DIR/correlate_gc_slow.awk" \
                 -v threshold_ms="${THRESHOLD_MS:-500}" \
                 "$(open_log "$gc")" "$(open_log "$access")"
             ;;
@@ -80,9 +74,8 @@ dispatch_tool() {
                 "$(open_log "$access")"
             ;;
         filter_ip)
-            eval gawk -f "$TOOLS_DIR/filter_ip.awk" \
+            eval gawk "$tw_args" -f "$TOOLS_DIR/filter_ip.awk" \
                 -v ip_filter="$IP_FILTER" \
-                -v time_window="$TIME_WINDOW" \
                 -v top_n="${TAIL_N:-10}" \
                 "$(open_log "$access")"
             ;;

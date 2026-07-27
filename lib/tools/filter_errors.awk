@@ -1,11 +1,12 @@
 # Filtra righe ERROR e WARN dal server.log JBoss.
-# Parametri: -v time_window="2h|30m|"
+# Parametri: -v time_from="YYYY-MM-DDTHH:MM"  -v time_to="YYYY-MM-DDTHH:MM"
 #
 # Formato: YYYY-MM-DD HH:MM:SS,mmm LEVEL [classe] (thread) messaggio
 
 BEGIN { FS = " "; max_rows = 50; count = 0 }
 
 /ERROR|WARN/ {
+    if ((time_from != "" || time_to != "") && !in_range(parse_server($1, $2))) next
     level = $3
     if (level != "ERROR" && level != "WARN") next
 

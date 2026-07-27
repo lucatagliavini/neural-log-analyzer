@@ -1,10 +1,11 @@
 # Distribuisce richieste con errore per endpoint (path normalizzato).
 # Parametri: -v status_filter="500|5xx|4xx|" (vuoto = tutti gli errori 4xx/5xx)
-#            -v time_window="2h|30m|"
+#            -v time_from="YYYY-MM-DDTHH:MM"  -v time_to="YYYY-MM-DDTHH:MM"
 
 BEGIN { FS = " "; max_rows = 20 }
 
 {
+    if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
     line = $0
 
     # Estrai status

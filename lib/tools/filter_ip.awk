@@ -2,7 +2,7 @@
 # Se ip_filter è specificato: mostra le richieste di quell'IP + statistiche.
 # Se ip_filter è vuoto: modalità top-clients — classifica IP per volume.
 # Parametri: -v ip_filter="172.30.169.1"   (vuoto = top-clients)
-#            -v time_window="2h|30m|"
+#            -v time_from="YYYY-MM-DDTHH:MM"  -v time_to="YYYY-MM-DDTHH:MM"
 #            -v top_n="10"                  (solo modalità top-clients)
 
 BEGIN {
@@ -12,6 +12,7 @@ BEGIN {
 }
 
 {
+    if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
     if (ip_filter != "" && index($0, ip_filter) == 0) next
 
     # Estrae IP dal primo campo

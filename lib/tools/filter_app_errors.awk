@@ -23,6 +23,7 @@ waiting_cause && /^}/ {
 
 # Pattern 1: riga JBoss con status= 5xx nel messaggio
 /^[0-9][0-9][0-9][0-9]-/ && /status= *5[0-9][0-9]/ {
+    if ((time_from != "" || time_to != "") && !in_range(parse_server($1, $2))) next
     pending_logger = short_logger($4)
     if (match($0, /status= *([0-9]+)/, sm)) pending_status = sm[1]+0
     else pending_status = 500
@@ -33,6 +34,7 @@ waiting_cause && /^}/ {
 
 # Pattern 2: riga JBoss con Exception o caused by nel messaggio diretto
 /^[0-9][0-9][0-9][0-9]-/ && /[Ee]xception|[Cc]aused [Bb]y:/ {
+    if ((time_from != "" || time_to != "") && !in_range(parse_server($1, $2))) next
     logger = short_logger($4)
     cause  = extract_cause($0)
     register_error("EXCEPTION", logger, cause, $1 " " $2)

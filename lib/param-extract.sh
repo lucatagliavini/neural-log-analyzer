@@ -1,24 +1,19 @@
 #!/bin/bash
 #
 # Estrae parametri strutturati da una query in linguaggio naturale.
-# Emette variabili shell: TIME_WINDOW, STATUS_CODE, THRESHOLD_MS, IP_FILTER, TAIL_N
+# Emette variabili shell: TIME_FROM, TIME_TO, DATE_FILTER,
+#                         STATUS_CODE, THRESHOLD_MS, IP_FILTER, TAIL_N, NAMED_LOG
 #
 # Uso: eval "$(./lib/param-extract.sh "errori 500 delle ultime 3 ore")"
 #
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/utils-time.sh"
+
 query="${1,,}"
 
-# Finestra temporale: "ultime N ore" / "ultimi N minuti" / "ultimo giorno"
-TIME_WINDOW=""
-if   echo "$query" | grep -qE "ultim[aei] ([0-9]+) or"; then
-    h=$(echo "$query" | grep -oE "([0-9]+) or" | grep -oE "[0-9]+")
-    TIME_WINDOW="${h}h"
-elif echo "$query" | grep -qE "ultim[aei] ([0-9]+) minut"; then
-    m=$(echo "$query" | grep -oE "([0-9]+) minut" | grep -oE "[0-9]+")
-    TIME_WINDOW="${m}m"
-elif echo "$query" | grep -qE "ultim[aei] (ora|giorn|giorno)"; then
-    echo "$query" | grep -q "giorn" && TIME_WINDOW="24h" || TIME_WINDOW="1h"
-fi
+# Finestra temporale — delegata a utils-time.sh
+eval "$(resolve_time_range "$query")"
 
 # Codice HTTP specifico: 200, 404, 500, 503, 4xx, 5xx ...
 STATUS_CODE=""
@@ -46,10 +41,13 @@ if echo "$query" | grep -qE "\b([0-9]{1,3}\.){3}[0-9]{1,3}\b"; then
     IP_FILTER=$(echo "$query" | grep -oE "\b([0-9]{1,3}\.){3}[0-9]{1,3}\b" | head -1)
 fi
 
-# Numero di righe per tail
+# Numero di righe per tail — richiede "ultime/ultimi N righe/righe/record/log"
+# per non confliggere con "ultime 2 ore" / "ultimi 30 minuti"
 TAIL_N="50"
-if echo "$query" | grep -qE "ultim[ei] [0-9]+"; then
+if echo "$query" | grep -qE "ultim[ei] [0-9]+ *(rig[ah]|record|log|linee|lin)"; then
     TAIL_N=$(echo "$query" | grep -oE "ultim[ei] [0-9]+" | grep -oE "[0-9]+" | head -1)
+elif echo "$query" | grep -qE "(mostra|dammi|visualizza) [0-9]+ *(rig[ah]|record|log|linee)"; then
+    TAIL_N=$(echo "$query" | grep -oE "[0-9]+" | head -1)
 fi
 
 # Nome log Guidewire specifico: "cc.log", "api.log", "database log", "messaging", ...
@@ -62,7 +60,9 @@ for _log_name in cc api database messaging performance_integr jgroups plugin rul
     fi
 done
 
-echo "TIME_WINDOW='${TIME_WINDOW}'"
+echo "TIME_FROM='${TIME_FROM}'"
+echo "TIME_TO='${TIME_TO}'"
+echo "DATE_FILTER='${DATE_FILTER}'"
 echo "STATUS_CODE='${STATUS_CODE}'"
 echo "THRESHOLD_MS='${THRESHOLD_MS}'"
 echo "IP_FILTER='${IP_FILTER}'"

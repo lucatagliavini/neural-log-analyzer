@@ -1,12 +1,13 @@
 # Richieste con tempo di risposta sopra soglia dall'access log Undertow.
 # Parametri: -v threshold_ms="1000"
-#            -v time_window="2h|30m|"
+#            -v time_from="YYYY-MM-DDTHH:MM"  -v time_to="YYYY-MM-DDTHH:MM"
 #
 # Formato campi: IP [datetime] "METHOD URL PROTO" STATUS BYTES TIME_MS CHAIN UA
 
 BEGIN { FS = " "; if (threshold_ms == "") threshold_ms = 1000; count = 0; max_rows = 30 }
 
 {
+    if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
     line = $0
 
     # Estrai tempo risposta (7° campo dopo la stringa HTTP)

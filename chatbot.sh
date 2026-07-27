@@ -107,7 +107,7 @@ fi
 # ─── Risoluzione log da env/nodo/app ─────────────────────────────────────────
 resolve_session_logs() {
     local resolved
-    resolved=$("$LIB_DIR/resolve-logs.sh" "$LOG_BASE_DIR" "$ACTIVE_ENV" "$ACTIVE_NODE" "$ACTIVE_APP") || {
+    resolved=$(DATE_FILTER="${DATE_FILTER:-}" "$LIB_DIR/resolve-logs.sh" "$LOG_BASE_DIR" "$ACTIVE_ENV" "$ACTIVE_NODE" "$ACTIVE_APP") || {
         echo "[ERROR] Impossibile risolvere i log per: env=$ACTIVE_ENV node=$ACTIVE_NODE app=$ACTIVE_APP" >&2
         return 1
     }
@@ -136,6 +136,9 @@ run_query() {
     [[ -n "$CTX_NODE" && "$CTX_NODE" != "$ACTIVE_NODE" ]] && { ACTIVE_NODE="$CTX_NODE"; ctx_changed=1; }
     [[ -n "$CTX_APP"  && "$CTX_APP"  != "$ACTIVE_APP"  ]] && { ACTIVE_APP="$CTX_APP";   ctx_changed=1; }
 
+    # Estrai DATE_FILTER prima di resolve — serve per selezionare il log ruotato giusto
+    eval "$("$LIB_DIR/param-extract.sh" "$query")"
+
     # Lazy resolution: se ancora senza log, tenta ora che potremmo avere il contesto
     if [[ -z "$ACCESS_LOG" ]]; then
         if [[ -z "$ACTIVE_ENV" ]]; then
@@ -144,7 +147,7 @@ run_query() {
         fi
         resolve_session_logs || return 1
         ctx_changed=1
-    elif [[ "$ctx_changed" -eq 1 && -n "$ACTIVE_ENV" ]]; then
+    elif [[ "$ctx_changed" -eq 1 && -n "$ACTIVE_ENV" ]] || [[ -n "${DATE_FILTER:-}" ]]; then
         resolve_session_logs || return 1
     fi
 
@@ -161,8 +164,6 @@ run_query() {
         echo "   Prova a riformulare la query."
         return
     fi
-
-    eval "$("$LIB_DIR/param-extract.sh" "$query")"
 
     echo "│  Tool attivati:"
     while IFS=' ' read -r tool prob; do

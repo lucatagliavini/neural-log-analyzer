@@ -1,12 +1,14 @@
 # Conta richieste HTTP per codice di stato dall'access log Undertow.
 # Parametri: -v status_filter="500|5xx|4xx|" (vuoto = tutti)
-#            -v time_window="2h|30m|" (vuoto = tutto il log)
+#            -v time_from="YYYY-MM-DDTHH:MM"  -v time_to="YYYY-MM-DDTHH:MM"
 #
 # Formato atteso: IP [DD/Mon/YYYY:HH:MM:SS +TZ] "METHOD URL PROTO" STATUS BYTES TIME CHAIN UA
 
 BEGIN { FS = " " }
 
 {
+    if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
+
     # Estrai data/ora: campo 2 = [DD/Mon/YYYY:HH:MM:SS
     gsub(/[\[\]]/, "", $2)
     datetime = $2

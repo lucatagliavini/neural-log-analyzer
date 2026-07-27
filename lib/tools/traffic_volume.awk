@@ -1,9 +1,10 @@
 # Volume di traffico per fascia oraria (bucketing a 10 minuti).
-# Parametri: -v time_window="2h|30m|"
+# Parametri: -v time_from="YYYY-MM-DDTHH:MM"  -v time_to="YYYY-MM-DDTHH:MM"
 
 BEGIN { FS = " " }
 
 {
+    if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
     # Estrai ora:minuto dal campo datetime
     if (!match($0, /\[([0-9]{2}\/[A-Za-z]+\/[0-9]{4}):([0-9]{2}):([0-9]{2})/, a)) next
     hour   = a[2]

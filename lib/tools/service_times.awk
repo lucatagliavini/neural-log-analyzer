@@ -1,10 +1,11 @@
 # Estrae e aggrega i tempi di esecuzione dei servizi SOA dal server.log.
 # Formato riga target: ... RETURN(service.name) in X msec. ...
-# Parametri: -v time_window="2h|30m|"
+# Parametri: -v time_from="YYYY-MM-DDTHH:MM"  -v time_to="YYYY-MM-DDTHH:MM"
 
 BEGIN { max_rows = 20 }
 
 /RETURN\(/ && /in [0-9]+ msec/ {
+    if ((time_from != "" || time_to != "") && !in_range(parse_server($1, $2))) next
     # Estrai nome servizio e tempo
     if (match($0, /RETURN\(([^)]+)\) in ([0-9]+) msec/, a)) {
         svc  = a[1]
