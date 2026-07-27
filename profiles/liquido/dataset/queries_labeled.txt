@@ -518,41 +518,41 @@ grep_named_log	errori nel cc.log
 grep_named_log	mostrami gli errori del cc
 grep_named_log	cerca errori nel cc.log
 grep_named_log	exception nel cc.log
-grep_named_log	eccezioni nel cc log
+grep_named_log	eccezioni nel cc.log
 grep_named_log	warning nel cc.log
-grep_named_log	warn del cc
+grep_named_log	warn nel cc.log
 grep_named_log	errori nel cc.log nell'ultima ora
 grep_named_log	errori nel cc.log di stamattina
 grep_named_log	errori nel api.log
 grep_named_log	mostrami gli errori del api
 grep_named_log	cerca errori nel api.log
 grep_named_log	exception nel api.log
-grep_named_log	eccezioni nel api log
+grep_named_log	eccezioni nel api.log
 grep_named_log	warning nel api.log
-grep_named_log	warn del api
+grep_named_log	warn nel api.log
 grep_named_log	errori nel api.log nell'ultima ora
 grep_named_log	errori nel api.log di stamattina
 grep_named_log	mostrami gli errori del database
 grep_named_log	cerca errori nel database.log
 grep_named_log	exception nel database.log
-grep_named_log	eccezioni nel database log
+grep_named_log	eccezioni nel database.log
 grep_named_log	warning nel database.log
-grep_named_log	warn del database
+grep_named_log	warn nel database.log
 grep_named_log	errori nel database.log nell'ultima ora
 grep_named_log	errori nel database.log di stamattina
 grep_named_log	mostrami gli errori del messaging
 grep_named_log	cerca errori nel messaging.log
 grep_named_log	exception nel messaging.log
-grep_named_log	eccezioni nel messaging log
+grep_named_log	eccezioni nel messaging.log
 grep_named_log	warning nel messaging.log
-grep_named_log	warn del messaging
+grep_named_log	warn nel messaging.log
 grep_named_log	errori nel messaging.log nell'ultima ora
 grep_named_log	errori nel messaging.log di stamattina
 grep_named_log	errori nel performance_integr.log
 grep_named_log	mostrami gli errori del performance_integr
 grep_named_log	cerca errori nel performance_integr.log
 grep_named_log	exception nel performance_integr.log
-grep_named_log	eccezioni nel performance_integr log
+grep_named_log	eccezioni nel performance_integr.log
 grep_named_log	warning nel performance_integr.log
 
 # ─── generati automaticamente 2026-07-27 ──────────────────────────────
@@ -767,39 +767,39 @@ filter_app_errors	exception nascoste nei log applicativi nelle ultime 2 ore
 filter_app_errors	errori interni loggati come info nelle ultime 2 ore
 filter_app_errors	errori applicativi nel server log nelle ultime 3 ore
 tail_named_log	cosa c'è nel cc.log recentemente
-tail_named_log	tail del cc log
+tail_named_log	tail del cc.log
 tail_named_log	ultimi eventi nel cc.log
 tail_named_log	dammi le ultime righe del cc.log
 tail_named_log	cosa sta loggando il cc.log
-tail_named_log	righe recenti del cc
+tail_named_log	righe recenti del cc.log
 tail_named_log	visualizza il cc.log
 tail_named_log	contenuto del cc.log
 tail_named_log	ultime righe del api.log
 tail_named_log	mostrami il api.log
 tail_named_log	cosa c'è nel api.log recentemente
-tail_named_log	tail del api log
+tail_named_log	tail del api.log
 tail_named_log	ultimi eventi nel api.log
 tail_named_log	dammi le ultime righe del api.log
 tail_named_log	cosa sta loggando il api.log
-tail_named_log	righe recenti del api
+tail_named_log	righe recenti del api.log
 tail_named_log	visualizza il api.log
 grep_named_log	filtra gli errori nel cc.log
-grep_named_log	cerca exception nel cc
+grep_named_log	cerca exception nel cc.log
 grep_named_log	filtra gli errori nel api.log
-grep_named_log	cerca exception nel api
+grep_named_log	cerca exception nel api.log
 grep_named_log	filtra gli errori nel database.log
-grep_named_log	cerca exception nel database
+grep_named_log	cerca exception nel database.log
 grep_named_log	filtra gli errori nel messaging.log
-grep_named_log	cerca exception nel messaging
-grep_named_log	warn del performance_integr
+grep_named_log	cerca exception nel messaging.log
+grep_named_log	warn nel performance_integr.log
 grep_named_log	errori nel performance_integr.log nell'ultima ora
 grep_named_log	errori nel performance_integr.log di stamattina
 grep_named_log	filtra gli errori nel performance_integr.log
-grep_named_log	cerca exception nel performance_integr
+grep_named_log	cerca exception nel performance_integr.log
 grep_named_log	errori nel jgroups.log
 grep_named_log	mostrami gli errori del jgroups
 grep_named_log	cerca errori nel jgroups.log
 grep_named_log	exception nel jgroups.log
-grep_named_log	eccezioni nel jgroups log
+grep_named_log	eccezioni nel jgroups.log
 grep_named_log	warning nel jgroups.log
-grep_named_log	warn del jgroups
+grep_named_log	warn nel jgroups.log
