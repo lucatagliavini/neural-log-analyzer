@@ -12,7 +12,7 @@
 
 # Numero totale di feature: len(UNIGRAMS) + len(BIGRAMS). Deve essere coerente
 # con MODEL_TOPOLOGY in domain.conf (primo valore = NUM_FEATURES).
-NUM_FEATURES=73
+NUM_FEATURES=74
 
 # ─── UNIGRAM ─────────────────────────────────────────────────────────────────
 UNIGRAMS=(
@@ -73,7 +73,7 @@ UNIGRAMS=(
     "\bip\b                    :: 1"
     "client|indirizz           :: 1"
     # [47-48] Visualizzazione
-    "mostr|visualizz|dammi     :: 1"
+    "mostr|visualizz|dammi|fammi|elenco|elenca|dimmi|fornisci :: 1"
     "recent|ultim              :: 1"
     # [49-52] Errori applicativi — discriminano filter_app_errors
     "applicat                  :: 1"
@@ -112,4 +112,6 @@ BIGRAMS=(
     "rig[ah]|tail\b               :: ultim|recent|recenti"
     # [72] log Guidewire + errore/filtr → grep_named_log (non tail_named_log)
     "cc\.log|api\.log|database\.log|messaging\.log|jgroups|performance.integr :: errore|errori|warn|filtr|cerca|eccezioni|exception"
+    # [73] log Guidewire + mostra/riga → tail_named_log (non grep_named_log)
+    "cc\.log|api\.log|database\.log|messaging\.log|jgroups|performance.integr :: mostr|visualizz|dammi|rig[ah]|ultim|cosa.c.*nel|tail\b"
 )

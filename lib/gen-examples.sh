@@ -95,7 +95,7 @@ emit() {
     [[ "${TOOL_LIMIT[$tool]:-0}" -le 0 ]] && return
     [[ "${TOOL_GEN_COUNT[$tool]:-0}" -ge "${TOOL_LIMIT[$tool]}" ]] && return
     [[ -n "${SEEN_QUERIES[$query]:-}" ]] && return
-    validate_example "$tool" "$query" || return
+    validate_example "$tool" "$query" || return 0
     SEEN_QUERIES["$query"]=1
     TOOL_GEN_COUNT[$tool]=$(( ${TOOL_GEN_COUNT[$tool]} + 1 ))
     OUTPUT_LINES+=("${tool}"$'\t'"${query}")
@@ -107,7 +107,7 @@ emit() {
 
 # Verbi generici di visualizzazione
 SYN_SHOW=(  "mostrami" "dammi" "fammi vedere" "visualizza" "elenca"
-            "voglio vedere" "mostra" "dimmi" "recupera" "fornisci" )
+            "mostra" "dimmi" "recupera" "fornisci" )
 
 # Verbi di conteggio
 SYN_COUNT=( "conta" "quanti" "quante" "numero di" "totale di"
@@ -233,6 +233,13 @@ gen_slow_requests() {
     emit "slow_requests" "chiamate con response time alto"
     emit "slow_requests" "richieste che superano i 500 ms"
     emit "slow_requests" "quali url rispondono lentamente"
+    # Confine negativo vs filter_errors: slow_requests opera sull'access log, non sul server.log
+    emit "slow_requests" "tempi di risposta nell'access log"
+    emit "slow_requests" "richieste lente nel log undertow"
+    emit "slow_requests" "latenza delle richieste http nell'access log"
+    emit "slow_requests" "quali url hanno response time alto nell'access log"
+    emit "slow_requests" "top endpoint lenti nell'access log di oggi"
+    emit "slow_requests" "richieste più lente registrate nel log di accesso"
 }
 
 gen_traffic_volume() {
@@ -246,7 +253,7 @@ gen_traffic_volume() {
     done
     for v in "${SYN_SHOW[@]}"; do
         emit "traffic_volume" "${v} il traffico per ora"
-        emit "traffic_volume" "${v} i picchi di richieste"
+        emit "traffic_volume" "${v} il picco di richieste"
         emit "traffic_volume" "${v} le richieste al minuto"
     done
     # Esempi con keyword 57 (volume/andamento/picco) senza keyword temporali
@@ -280,6 +287,13 @@ gen_filter_errors() {
     emit "filter_errors" "righe di errore nel server.log"
     emit "filter_errors" "exception e warning nel log jboss"
     emit "filter_errors" "cosa ha lanciato eccezioni nel log"
+    # Confine negativo vs slow_requests: filter_errors opera sul server.log, non sull'access log
+    emit "filter_errors" "errori nel server log applicativo jboss"
+    emit "filter_errors" "eccezioni java nel log del server"
+    emit "filter_errors" "warning e exception nel server.log di oggi"
+    emit "filter_errors" "stack trace nel log applicativo"
+    emit "filter_errors" "cosa è andato in errore nel server log"
+    emit "filter_errors" "exception loggati nel server log dell'applicazione"
     # Leva B: temporali colloquiali
     for tc in "${SYN_TIMECOLL[@]}"; do
         emit "filter_errors" "errori ${tc} nel server log"
@@ -365,6 +379,22 @@ gen_correlate_gc_slow() {
     emit "correlate_gc_slow" "il garbage collection rallenta il server"
     emit "correlate_gc_slow" "slow request dopo una pausa garbage collector"
     emit "correlate_gc_slow" "memoria e latenza alta sono correlate"
+    # Varianti aggiuntive per raggiungere il target
+    for t in "${SYN_TIME[@]}"; do
+        emit "correlate_gc_slow" "heap alta e latenze ${t}"
+        emit "correlate_gc_slow" "pause gc e timeout ${t}"
+    done
+    for v in "${SYN_SHOW[@]}"; do
+        emit "correlate_gc_slow" "${v} quando gc causa latenza"
+        emit "correlate_gc_slow" "${v} correlazione gc e slow request"
+    done
+    emit "correlate_gc_slow" "garbage collection e response time degradato"
+    emit "correlate_gc_slow" "richieste lente durante le pause jvm"
+    emit "correlate_gc_slow" "il gc rallenta le risposte http"
+    emit "correlate_gc_slow" "coincidenza pause gc e picchi di latenza"
+    emit "correlate_gc_slow" "timeout durante il garbage collector"
+    emit "correlate_gc_slow" "performance degradate per gc frequente"
+    emit "correlate_gc_slow" "latenza anomala in corrispondenza del gc"
 }
 
 gen_tail_log() {

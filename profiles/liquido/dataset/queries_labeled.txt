@@ -554,3 +554,252 @@ grep_named_log	cerca errori nel performance_integr.log
 grep_named_log	exception nel performance_integr.log
 grep_named_log	eccezioni nel performance_integr log
 grep_named_log	warning nel performance_integr.log
+
+# ─── generati automaticamente 2026-07-27 ──────────────────────────────
+count_status	quante 503 ricevuti
+count_status	quante richieste con status code 400
+count_status	numero di 500 nell'access log
+count_status	numero di richieste con status 500
+count_status	numero di errori 4xx
+count_status	numero di risposte http con errore
+count_status	numero di 503 ricevuti
+count_status	numero di richieste con status code 400
+count_status	totale di 500 nell'access log
+count_status	totale di richieste con status 500
+count_status	totale di errori 4xx
+count_status	totale di risposte http con errore
+count_status	totale di 503 ricevuti
+count_status	totale di richieste con status code 400
+count_status	dammi il numero di 500 nell'access log
+count_status	dammi il numero di richieste con status 500
+count_status	dammi il numero di errori 4xx
+count_status	dammi il numero di risposte http con errore
+count_status	dammi il numero di 503 ricevuti
+count_status	dammi il numero di richieste con status code 400
+distribute_status	distribuzione degli errori per url
+distribute_status	distribuzione dei 500 per url
+distribute_status	breakdown degli errori per url
+distribute_status	breakdown dei 500 per url
+distribute_status	raggruppamento degli errori per url
+distribute_status	raggruppamento dei 500 per url
+distribute_status	suddivisione degli errori per url
+distribute_status	suddivisione dei 500 per url
+distribute_status	ripartizione degli errori per url
+distribute_status	ripartizione dei 500 per url
+distribute_status	distribuzione degli errori per path
+distribute_status	distribuzione dei 500 per path
+distribute_status	breakdown degli errori per path
+distribute_status	breakdown dei 500 per path
+distribute_status	raggruppamento degli errori per path
+distribute_status	raggruppamento dei 500 per path
+distribute_status	suddivisione degli errori per path
+distribute_status	suddivisione dei 500 per path
+distribute_status	ripartizione degli errori per path
+distribute_status	ripartizione dei 500 per path
+slow_requests	chiamate sopra 1000 ms nelle ultime 2 ore
+slow_requests	latenza alta nelle ultime 2 ore
+slow_requests	richieste lente nelle ultime 3 ore
+slow_requests	chiamate sopra 1000 ms nelle ultime 3 ore
+slow_requests	latenza alta nelle ultime 3 ore
+slow_requests	richieste lente nell'ultima ora
+slow_requests	chiamate sopra 1000 ms nell'ultima ora
+slow_requests	latenza alta nell'ultima ora
+slow_requests	richieste lente nelle ultime 6 ore
+slow_requests	chiamate sopra 1000 ms nelle ultime 6 ore
+slow_requests	latenza alta nelle ultime 6 ore
+slow_requests	richieste lente nelle ultime 24 ore
+slow_requests	chiamate sopra 1000 ms nelle ultime 24 ore
+slow_requests	latenza alta nelle ultime 24 ore
+slow_requests	richieste lente degli ultimi 30 minuti
+slow_requests	chiamate sopra 1000 ms degli ultimi 30 minuti
+slow_requests	latenza alta degli ultimi 30 minuti
+slow_requests	richieste lente di oggi
+slow_requests	chiamate sopra 1000 ms di oggi
+slow_requests	latenza alta di oggi
+traffic_volume	traffico degli ultimi 30 minuti
+traffic_volume	volume di richieste degli ultimi 30 minuti
+traffic_volume	quante chiamate degli ultimi 30 minuti
+traffic_volume	andamento del traffico degli ultimi 30 minuti
+traffic_volume	traffico di oggi
+traffic_volume	volume di richieste di oggi
+traffic_volume	quante chiamate di oggi
+traffic_volume	andamento del traffico di oggi
+traffic_volume	volume di richieste di ieri
+traffic_volume	quante chiamate di ieri
+traffic_volume	andamento del traffico di ieri
+traffic_volume	mostrami il traffico per ora
+traffic_volume	mostrami i picchi di richieste
+traffic_volume	mostrami le richieste al minuto
+traffic_volume	dammi il traffico per ora
+traffic_volume	dammi i picchi di richieste
+traffic_volume	dammi le richieste al minuto
+traffic_volume	fammi vedere il traffico per ora
+traffic_volume	fammi vedere le richieste al minuto
+traffic_volume	visualizza il traffico per ora
+filter_errors	anomalie recenti nel log applicativo
+filter_errors	errori gravi nel server log
+filter_errors	errori gravi recenti nel log applicativo
+filter_errors	messaggi di errore nel server log
+filter_errors	messaggi di errore recenti nel log applicativo
+filter_errors	errori nel server log nelle ultime 2 ore
+filter_errors	eccezioni nel log applicativo nelle ultime 2 ore
+filter_errors	errori nel server log nelle ultime 3 ore
+filter_errors	eccezioni nel log applicativo nelle ultime 3 ore
+filter_errors	errori nel server log nell'ultima ora
+filter_errors	eccezioni nel log applicativo nell'ultima ora
+filter_errors	errori nel server log nelle ultime 6 ore
+filter_errors	eccezioni nel log applicativo nelle ultime 6 ore
+service_times	elenca la latenza dei web service
+service_times	elenca i servizi più lenti
+service_times	elenca le performance dei servizi backend
+service_times	voglio vedere i tempi di risposta dei servizi soa
+service_times	voglio vedere la latenza dei web service
+service_times	voglio vedere i servizi più lenti
+service_times	voglio vedere le performance dei servizi backend
+service_times	mostra i tempi di risposta dei servizi soa
+service_times	mostra la latenza dei web service
+service_times	mostra i servizi più lenti
+service_times	mostra le performance dei servizi backend
+service_times	dimmi i tempi di risposta dei servizi soa
+service_times	dimmi la latenza dei web service
+service_times	dimmi i servizi più lenti
+service_times	dimmi le performance dei servizi backend
+service_times	recupera i tempi di risposta dei servizi soa
+service_times	recupera la latenza dei web service
+gc_stats	voglio vedere le pause gc
+gc_stats	voglio vedere l'utilizzo della heap
+gc_stats	voglio vedere la memoria jvm
+gc_stats	mostra le statistiche del garbage collector
+gc_stats	mostra le pause gc
+gc_stats	mostra l'utilizzo della heap
+gc_stats	mostra la memoria jvm
+gc_stats	dimmi le statistiche del garbage collector
+gc_stats	dimmi le pause gc
+gc_stats	dimmi l'utilizzo della heap
+gc_stats	dimmi la memoria jvm
+gc_stats	recupera le statistiche del garbage collector
+gc_stats	recupera le pause gc
+gc_stats	recupera l'utilizzo della heap
+gc_stats	recupera la memoria jvm
+gc_stats	fornisci le statistiche del garbage collector
+gc_stats	fornisci le pause gc
+gc_stats	fornisci l'utilizzo della heap
+gc_stats	fornisci la memoria jvm
+gc_stats	statistiche gc nelle ultime 2 ore
+correlate_gc_slow	il garbage collector causa latenze di ieri
+correlate_gc_slow	gc e slow request di ieri
+correlate_gc_slow	le pause gc coincidono con i timeout
+correlate_gc_slow	quando fa gc le richieste rallentano
+correlate_gc_slow	impatto delle pause gc sul response time
+correlate_gc_slow	richieste lente in corrispondenza del garbage collector
+correlate_gc_slow	quanto impatta il gc sulla latenza
+correlate_gc_slow	le pause gc peggiorano i tempi di risposta
+correlate_gc_slow	gc e lentezza nelle richieste http
+correlate_gc_slow	il garbage collection rallenta il server
+correlate_gc_slow	slow request dopo una pausa garbage collector
+correlate_gc_slow	memoria e latenza alta sono correlate
+correlate_gc_slow	heap alta e latenze nelle ultime 2 ore
+correlate_gc_slow	pause gc e timeout nelle ultime 2 ore
+correlate_gc_slow	heap alta e latenze nelle ultime 3 ore
+correlate_gc_slow	pause gc e timeout nelle ultime 3 ore
+correlate_gc_slow	heap alta e latenze nell'ultima ora
+correlate_gc_slow	pause gc e timeout nell'ultima ora
+correlate_gc_slow	heap alta e latenze nelle ultime 6 ore
+correlate_gc_slow	pause gc e timeout nelle ultime 6 ore
+tail_log	voglio vedere le ultime righe del log
+tail_log	voglio vedere gli ultimi accessi
+tail_log	voglio vedere le ultime 100 righe dell'access log
+tail_log	voglio vedere gli ultimi eventi nel log
+tail_log	mostra le ultime righe del log
+tail_log	mostra gli ultimi accessi
+tail_log	mostra le ultime 100 righe dell'access log
+tail_log	mostra gli ultimi eventi nel log
+tail_log	dimmi le ultime righe del log
+tail_log	dimmi gli ultimi accessi
+tail_log	dimmi le ultime 100 righe dell'access log
+tail_log	dimmi gli ultimi eventi nel log
+tail_log	recupera le ultime righe del log
+tail_log	recupera gli ultimi accessi
+tail_log	recupera le ultime 100 righe dell'access log
+tail_log	recupera gli ultimi eventi nel log
+tail_log	fornisci le ultime righe del log
+tail_log	fornisci gli ultimi accessi
+tail_log	fornisci le ultime 100 righe dell'access log
+tail_log	fornisci gli ultimi eventi nel log
+filter_ip	attività dall'indirizzo 198.51.100.3
+filter_ip	accessi dall'ip 198.51.100.3 nelle ultime ore
+filter_ip	errori http dall'ip 198.51.100.3
+filter_ip	richieste dall'ip 172.16.0.50
+filter_ip	cosa ha fatto l'ip 172.16.0.50
+filter_ip	traffico dal client 172.16.0.50
+filter_ip	attività dall'indirizzo 172.16.0.50
+filter_ip	accessi dall'ip 172.16.0.50 nelle ultime ore
+filter_ip	errori http dall'ip 172.16.0.50
+filter_ip	richieste dall'ip 10.10.20.30
+filter_ip	cosa ha fatto l'ip 10.10.20.30
+filter_ip	traffico dal client 10.10.20.30
+filter_ip	attività dall'indirizzo 10.10.20.30
+filter_ip	accessi dall'ip 10.10.20.30 nelle ultime ore
+filter_ip	errori http dall'ip 10.10.20.30
+filter_ip	filtra le richieste per indirizzo ip
+filter_ip	filtra per un ip specifico
+filter_ip	filtra per client ip
+filter_ip	cerca le richieste per indirizzo ip
+filter_ip	cerca per un ip specifico
+filter_app_errors	mostra gli errori applicativi nel server log
+filter_app_errors	mostra le exception loggati come info
+filter_app_errors	mostra i problemi applicativi nascosti nel log
+filter_app_errors	mostra le eccezioni interne dell'applicazione
+filter_app_errors	dimmi gli errori applicativi nel server log
+filter_app_errors	dimmi le exception loggati come info
+filter_app_errors	dimmi i problemi applicativi nascosti nel log
+filter_app_errors	dimmi le eccezioni interne dell'applicazione
+filter_app_errors	recupera gli errori applicativi nel server log
+filter_app_errors	recupera le exception loggati come info
+filter_app_errors	recupera i problemi applicativi nascosti nel log
+filter_app_errors	recupera le eccezioni interne dell'applicazione
+filter_app_errors	fornisci gli errori applicativi nel server log
+filter_app_errors	fornisci le exception loggati come info
+filter_app_errors	fornisci i problemi applicativi nascosti nel log
+filter_app_errors	fornisci le eccezioni interne dell'applicazione
+filter_app_errors	errori applicativi nel server log nelle ultime 2 ore
+filter_app_errors	exception nascoste nei log applicativi nelle ultime 2 ore
+filter_app_errors	errori interni loggati come info nelle ultime 2 ore
+filter_app_errors	errori applicativi nel server log nelle ultime 3 ore
+tail_named_log	cosa c'è nel cc.log recentemente
+tail_named_log	tail del cc log
+tail_named_log	ultimi eventi nel cc.log
+tail_named_log	dammi le ultime righe del cc.log
+tail_named_log	cosa sta loggando il cc.log
+tail_named_log	righe recenti del cc
+tail_named_log	visualizza il cc.log
+tail_named_log	contenuto del cc.log
+tail_named_log	ultime righe del api.log
+tail_named_log	mostrami il api.log
+tail_named_log	cosa c'è nel api.log recentemente
+tail_named_log	tail del api log
+tail_named_log	ultimi eventi nel api.log
+tail_named_log	dammi le ultime righe del api.log
+tail_named_log	cosa sta loggando il api.log
+tail_named_log	righe recenti del api
+tail_named_log	visualizza il api.log
+grep_named_log	filtra gli errori nel cc.log
+grep_named_log	cerca exception nel cc
+grep_named_log	filtra gli errori nel api.log
+grep_named_log	cerca exception nel api
+grep_named_log	filtra gli errori nel database.log
+grep_named_log	cerca exception nel database
+grep_named_log	filtra gli errori nel messaging.log
+grep_named_log	cerca exception nel messaging
+grep_named_log	warn del performance_integr
+grep_named_log	errori nel performance_integr.log nell'ultima ora
+grep_named_log	errori nel performance_integr.log di stamattina
+grep_named_log	filtra gli errori nel performance_integr.log
+grep_named_log	cerca exception nel performance_integr
+grep_named_log	errori nel jgroups.log
+grep_named_log	mostrami gli errori del jgroups
+grep_named_log	cerca errori nel jgroups.log
+grep_named_log	exception nel jgroups.log
+grep_named_log	eccezioni nel jgroups log
+grep_named_log	warning nel jgroups.log
+grep_named_log	warn del jgroups

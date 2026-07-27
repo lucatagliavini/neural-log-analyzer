@@ -27,6 +27,7 @@ fi
 
 export PROFILE_DIR
 source "$PROFILE_DIR/domain.conf"
+source "$PROFILE_DIR/vocab.sh"
 
 LABELED="$PROFILE_DIR/dataset/queries_labeled.txt"
 DATASET_FILE="$PROFILE_DIR/dataset/queries.txt"

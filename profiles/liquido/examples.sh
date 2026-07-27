@@ -32,6 +32,9 @@ gen_grep_named_log() {
         # Con finestra temporale
         emit "grep_named_log" "errori nel ${log} nell'ultima ora"
         emit "grep_named_log" "errori nel ${log} di stamattina"
+        # Confine negativo vs tail_named_log: filtro esplicito, non semplice visualizzazione
+        emit "grep_named_log" "filtra gli errori nel ${log}"
+        emit "grep_named_log" "cerca exception nel ${lname}"
     done
 }
 
@@ -46,5 +49,9 @@ gen_tail_named_log() {
         emit "tail_named_log" "dammi le ultime righe del ${log}"
         emit "tail_named_log" "cosa sta loggando il ${log}"
         emit "tail_named_log" "righe recenti del ${lname}"
+        # Confine negativo vs grep_named_log: visualizzazione pura, nessun errore
+        emit "tail_named_log" "visualizza il ${log}"
+        emit "tail_named_log" "apri il ${log}"
+        emit "tail_named_log" "contenuto del ${log}"
     done
 }
