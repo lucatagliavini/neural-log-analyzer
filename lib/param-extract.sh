@@ -50,6 +50,16 @@ elif echo "$query" | grep -qE "(mostra|dammi|visualizza) [0-9]+ *(rig[ah]|record
     TAIL_N=$(echo "$query" | grep -oE "[0-9]+" | head -1)
 fi
 
+# Livello log per grep_named_log: "errori/error" → ERROR, "warning/warn" → WARN, "info" → INFO
+LOG_LEVEL="ERROR"
+if   echo "$query" | grep -qE "\bwarn(ing)?\b|\bavviso\b"; then
+    LOG_LEVEL="WARN"
+elif echo "$query" | grep -qE "\binfo\b|\binformazioni\b"; then
+    LOG_LEVEL="INFO"
+elif echo "$query" | grep -qE "\btutti?\b.*livell|\ball\b.*level|ogni.livell"; then
+    LOG_LEVEL="ALL"
+fi
+
 # Nome log Guidewire specifico: "cc.log", "api.log", "database log", "messaging", ...
 NAMED_LOG=""
 for _log_name in cc api database messaging performance_integr jgroups plugin ruleengine studio \
@@ -68,3 +78,4 @@ echo "THRESHOLD_MS='${THRESHOLD_MS}'"
 echo "IP_FILTER='${IP_FILTER}'"
 echo "TAIL_N='${TAIL_N}'"
 echo "NAMED_LOG='${NAMED_LOG}'"
+echo "LOG_LEVEL='${LOG_LEVEL}'"

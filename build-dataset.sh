@@ -59,6 +59,11 @@ while IFS=$'\t' read -r labels query; do
         fi
     done
 
+    # Scarta esempi con vettore output tutto-zero (label non riconosciuto)
+    has_label=0
+    for v in "${output_vec[@]}"; do [[ "$v" != "0" ]] && { has_label=1; break; }; done
+    [[ "$has_label" -eq 0 ]] && { echo "[WARN] build-dataset: label sconosciuto '$labels', riga scartata" >&2; continue; }
+
     echo "$features ${output_vec[*]}" >> "$DATASET_FILE"
     count=$((count + 1))
 done < "$LABELED"

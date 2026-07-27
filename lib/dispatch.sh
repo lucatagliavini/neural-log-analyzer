@@ -81,8 +81,7 @@ dispatch_tool() {
             ;;
         filter_app_errors)
             [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile per filter_app_errors"; return; }
-            eval gawk -f "$TOOLS_DIR/filter_app_errors.awk" \
-                -v time_window="$TIME_WINDOW" \
+            eval gawk "$tw_args" -f "$TOOLS_DIR/filter_app_errors.awk" \
                 "$(open_log "$server")"
             ;;
         tail_named_log)
@@ -112,6 +111,37 @@ dispatch_tool() {
             fi
             echo "  Log: $log_path"
             eval gawk -f "$TOOLS_DIR/tail_log.awk" \
+                -v tail_n="${TAIL_N:-50}" \
+                "$(open_log "$log_path")"
+            ;;
+        grep_named_log)
+            local gw_dir="${GUIDEWIRE_LOG_DIR:-}"
+            local named_log="${NAMED_LOG:-}"
+            if [[ -z "$named_log" ]]; then
+                echo "[SKIP] Nessun log Guidewire specificato nella query"
+                return
+            fi
+            local log_path=""
+            if [[ -n "$gw_dir" ]]; then
+                log_path=$(find "$gw_dir" -maxdepth 1 -name "*-${named_log}.log" 2>/dev/null | head -1)
+                if [[ -z "$log_path" ]]; then
+                    log_path=$(find "$gw_dir" -maxdepth 1 \
+                        \( -name "*${named_log}.log" -o -name "*${named_log}.log.gz" \) \
+                        2>/dev/null | grep -v "[0-9]\{10\}" | head -1)
+                fi
+                if [[ -z "$log_path" ]]; then
+                    log_path=$(find "$gw_dir" -maxdepth 1 \
+                        \( -name "*${named_log}*.log" -o -name "*${named_log}*.log.gz" \) \
+                        2>/dev/null | grep -v "[0-9]\{10\}" | sort | head -1)
+                fi
+            fi
+            if [[ -z "$log_path" ]]; then
+                echo "[SKIP] Log '$named_log' non trovato in ${gw_dir:-<gw_dir non impostata>}"
+                return
+            fi
+            echo "  Log: $log_path  (level=${LOG_LEVEL:-ERROR})"
+            eval gawk "$tw_args" -f "$TOOLS_DIR/grep_named_log.awk" \
+                -v level="${LOG_LEVEL:-ERROR}" \
                 -v tail_n="${TAIL_N:-50}" \
                 "$(open_log "$log_path")"
             ;;

@@ -12,7 +12,7 @@
 
 # Numero totale di feature: len(UNIGRAMS) + len(BIGRAMS). Deve essere coerente
 # con MODEL_TOPOLOGY in domain.conf (primo valore = NUM_FEATURES).
-NUM_FEATURES=72
+NUM_FEATURES=73
 
 # ─── UNIGRAM ─────────────────────────────────────────────────────────────────
 UNIGRAMS=(
@@ -110,4 +110,6 @@ BIGRAMS=(
     "volum|andament|picco         :: ora |ore |ultim|minut|giorn"
     # [71] righe/tail + recente → tail_log (non traffic_volume)
     "rig[ah]|tail\b               :: ultim|recent|recenti"
+    # [72] log Guidewire + errore/filtr → grep_named_log (non tail_named_log)
+    "cc\.log|api\.log|database\.log|messaging\.log|jgroups|performance.integr :: errore|errori|warn|filtr|cerca|eccezioni|exception"
 )

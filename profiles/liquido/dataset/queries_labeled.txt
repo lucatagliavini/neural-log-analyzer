@@ -512,3 +512,45 @@ tail_named_log	errori nel claimnumgen log
 tail_named_log	performance delle integrazioni nel log
 tail_named_log	controlla il log delle performance delle integrazioni
 tail_named_log	latenze delle integrazioni nel performance log
+
+# ─── generati automaticamente 2026-07-27 ──────────────────────────────
+grep_named_log	errori nel cc.log
+grep_named_log	mostrami gli errori del cc
+grep_named_log	cerca errori nel cc.log
+grep_named_log	exception nel cc.log
+grep_named_log	eccezioni nel cc log
+grep_named_log	warning nel cc.log
+grep_named_log	warn del cc
+grep_named_log	errori nel cc.log nell'ultima ora
+grep_named_log	errori nel cc.log di stamattina
+grep_named_log	errori nel api.log
+grep_named_log	mostrami gli errori del api
+grep_named_log	cerca errori nel api.log
+grep_named_log	exception nel api.log
+grep_named_log	eccezioni nel api log
+grep_named_log	warning nel api.log
+grep_named_log	warn del api
+grep_named_log	errori nel api.log nell'ultima ora
+grep_named_log	errori nel api.log di stamattina
+grep_named_log	mostrami gli errori del database
+grep_named_log	cerca errori nel database.log
+grep_named_log	exception nel database.log
+grep_named_log	eccezioni nel database log
+grep_named_log	warning nel database.log
+grep_named_log	warn del database
+grep_named_log	errori nel database.log nell'ultima ora
+grep_named_log	errori nel database.log di stamattina
+grep_named_log	mostrami gli errori del messaging
+grep_named_log	cerca errori nel messaging.log
+grep_named_log	exception nel messaging.log
+grep_named_log	eccezioni nel messaging log
+grep_named_log	warning nel messaging.log
+grep_named_log	warn del messaging
+grep_named_log	errori nel messaging.log nell'ultima ora
+grep_named_log	errori nel messaging.log di stamattina
+grep_named_log	errori nel performance_integr.log
+grep_named_log	mostrami gli errori del performance_integr
+grep_named_log	cerca errori nel performance_integr.log
+grep_named_log	exception nel performance_integr.log
+grep_named_log	eccezioni nel performance_integr log
+grep_named_log	warning nel performance_integr.log

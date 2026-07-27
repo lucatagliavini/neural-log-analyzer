@@ -17,6 +17,24 @@ GW_LOGS=(
     "jgroups.log"
 )
 
+gen_grep_named_log() {
+    for log in "${GW_LOGS[@]}"; do
+        local lname="${log%.log}"
+        # Errori ERROR (default e più comune)
+        emit "grep_named_log" "errori nel ${log}"
+        emit "grep_named_log" "mostrami gli errori del ${lname}"
+        emit "grep_named_log" "cerca errori nel ${log}"
+        emit "grep_named_log" "exception nel ${log}"
+        emit "grep_named_log" "eccezioni nel ${lname} log"
+        # Warning
+        emit "grep_named_log" "warning nel ${log}"
+        emit "grep_named_log" "warn del ${lname}"
+        # Con finestra temporale
+        emit "grep_named_log" "errori nel ${log} nell'ultima ora"
+        emit "grep_named_log" "errori nel ${log} di stamattina"
+    done
+}
+
 gen_tail_named_log() {
     for log in "${GW_LOGS[@]}"; do
         local lname="${log%.log}"
