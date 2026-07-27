@@ -15,20 +15,28 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../config.sh"
 
+# PROFILE_DIR può essere passata come variabile d'ambiente o via --profile
 TARGET=30
 APPLY=0
 TOOL_ARG="all"
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --target) TARGET="$2"; shift 2 ;;
-        --apply)  APPLY=1; shift ;;
-        *)        TOOL_ARG="$1"; shift ;;
+        --profile) PROFILE_DIR="$(cd "$2" && pwd)"; export PROFILE_DIR; shift 2 ;;
+        --target)  TARGET="$2"; shift 2 ;;
+        --apply)   APPLY=1; shift ;;
+        *)         TOOL_ARG="$1"; shift ;;
     esac
 done
 
-DATASET="$SCRIPT_DIR/../dataset/queries_labeled.txt"
+if [[ -z "${PROFILE_DIR:-}" ]]; then
+    echo "[ERROR] gen-examples: PROFILE_DIR non impostata. Usa --profile <dir> oppure esportala." >&2
+    exit 1
+fi
+
+source "$PROFILE_DIR/domain.conf"
+
+DATASET="$PROFILE_DIR/dataset/queries_labeled.txt"
 
 # Conta esempi nel dataset per un tool (considera anche multi-label)
 current_count() {
@@ -457,6 +465,19 @@ run_gen() {
         tail_log)          gen_tail_log ;;
         filter_ip)         gen_filter_ip ;;
         filter_app_errors) gen_filter_app_errors ;;
+        tail_named_log)
+            # tail_named_log è specifico di profili con log Guidewire (es. liquido)
+            local GW_LOGS=("cc.log" "api.log" "database.log" "messaging.log"
+                           "performance_integr.log" "jgroups.log")
+            for log in "${GW_LOGS[@]}"; do
+                local lname="${log%.log}"
+                emit "tail_named_log" "ultime righe del ${log}"
+                emit "tail_named_log" "mostrami il ${log}"
+                emit "tail_named_log" "cosa c'è nel ${log} recentemente"
+                emit "tail_named_log" "tail del ${lname} log"
+                emit "tail_named_log" "ultimi eventi nel ${log}"
+            done
+            ;;
         *) echo "[ERROR] tool sconosciuto: $1" >&2; exit 1 ;;
     esac
 }

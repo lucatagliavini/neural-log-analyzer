@@ -1,17 +1,35 @@
 #!/bin/bash
 #
-# Genera il dataset di training da dataset/queries_labeled.txt.
-# Formato sorgente: <etichette_tool_separati_da_virgola> TAB <testo_query>
-# Esempio:  count_status,distribute_status   quanti errori 500 ci sono stati oggi
+# Genera il dataset di training da profiles/<n>/dataset/queries_labeled.txt.
+# Output: profiles/<n>/dataset/queries.txt
 #
-# Output: dataset/queries.txt — NUM_FEATURES colonne feature + NUM_TOOLS colonne output.
-# Il numero esatto di colonne è determinato da config.sh (NUM_FEATURES, NUM_TOOLS).
+# Uso: ./build-dataset.sh --profile <dir>
+# Es:  ./build-dataset.sh --profile profiles/liquido
 #
 
 set -euo pipefail
-source "$(dirname "$0")/config.sh"
 
-LABELED="$ANALYZER_DIR/dataset/queries_labeled.txt"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/lib"
+
+PROFILE_DIR=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --profile) PROFILE_DIR="$(cd "$2" && pwd)"; shift 2 ;;
+        *) echo "[ERROR] opzione sconosciuta: $1" >&2; exit 1 ;;
+    esac
+done
+
+if [[ -z "$PROFILE_DIR" ]]; then
+    echo "[ERROR] --profile obbligatorio. Es: ./build-dataset.sh --profile profiles/liquido" >&2
+    exit 1
+fi
+
+export PROFILE_DIR
+source "$PROFILE_DIR/domain.conf"
+
+LABELED="$PROFILE_DIR/dataset/queries_labeled.txt"
+DATASET_FILE="$PROFILE_DIR/dataset/queries.txt"
 
 if [[ ! -f "$LABELED" ]]; then
     echo "[ERROR] File sorgente non trovato: $LABELED" >&2
@@ -19,18 +37,15 @@ if [[ ! -f "$LABELED" ]]; then
 fi
 
 echo "# Neural Log Analyzer — intent classification dataset" > "$DATASET_FILE"
-echo "# ${NUM_FEATURES} feature input (unigram + bigram) + ${NUM_TOOLS} tool output (multi-label)" >> "$DATASET_FILE"
+echo "# Profilo: $(basename "$PROFILE_DIR") | ${NUM_FEATURES:-?} feature + $NUM_TOOLS tool output (multi-label)" >> "$DATASET_FILE"
 echo "# Generato da build-dataset.sh — non modificare a mano" >> "$DATASET_FILE"
 
 count=0
 while IFS=$'\t' read -r labels query; do
     [[ -z "$query" || "$query" == \#* ]] && continue
 
-    # Genera vettore feature
     features=$("$LIB_DIR/query-to-features.sh" "$query")
 
-    # Genera vettore output: 1.0 per il tool primario (primo nella lista etichette),
-    # 0.7 per tool secondari (soft label), 0 per i tool assenti.
     IFS=',' read -ra label_list <<< "$labels"
     primary_tool="${label_list[0]}"
     output_vec=()

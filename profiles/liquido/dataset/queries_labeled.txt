@@ -1,0 +1,514 @@
+# Formato: <tool1,tool2,...>	<query>
+# Tool: count_status distribute_status slow_requests traffic_volume
+#        filter_errors service_times gc_stats correlate_gc_slow tail_log filter_ip
+
+# ─── count_status ────────────────────────────────────────────────────────────
+count_status	quanti errori ci sono stati
+count_status	conta le richieste con errore
+count_status	numero di 500
+count_status	quanti 404 oggi
+count_status	totale richieste fallite
+count_status	quante richieste hanno status 503
+count_status	contami gli http 400
+count_status	dammi il numero di errori http
+count_status	quanti 5xx ha avuto il server
+count_status	totale 4xx nell'access log
+count_status	conta le risposte 200
+count_status	quante richieste andate a buon fine
+count_status	numero di richieste per codice http
+count_status	quanti errori di autenticazione
+count_status	conta le risposte di errore
+
+# ─── distribute_status ───────────────────────────────────────────────────────
+distribute_status	distribuzione degli errori per endpoint
+distribute_status	quali endpoint hanno più errori 500
+distribute_status	raggruppa i 404 per url
+distribute_status	lista degli errori per ip
+distribute_status	distribuzione degli errori per ora
+distribute_status	quali api hanno più fallimenti
+distribute_status	per quale endpoint ci sono più 500
+distribute_status	distribuzione status per client
+distribute_status	raggruppa richieste fallite per path
+distribute_status	quali path hanno più 404
+distribute_status	frequenza errori per endpoint
+distribute_status	distribuzione dei codici di stato
+distribute_status	quali url hanno più problemi
+distribute_status	per quale api si concentrano gli errori
+distribute_status	breakdown degli status http per endpoint
+distribute_status	errori 503 divisi per path
+count_status,distribute_status	quanti errori 500 e la loro distribuzione per endpoint
+count_status,distribute_status	dammi il numero di 500 e raggruppali per api
+
+# ─── slow_requests ───────────────────────────────────────────────────────────
+slow_requests	richieste lente
+slow_requests	mostrami le richieste più lente
+slow_requests	quali richieste hanno latenza alta
+slow_requests	richieste che hanno impiegato più di 2000 ms
+slow_requests	endpoint con tempo di risposta alto
+slow_requests	richieste lente delle ultime 2 ore
+slow_requests	api più lente
+slow_requests	timeout nelle richieste
+slow_requests	richieste sopra i 1000 ms
+slow_requests	quali chiamate sono state più lente
+slow_requests	latenza alta nell'access log
+slow_requests	richieste con response time elevato
+slow_requests	dammi le chiamate lente
+slow_requests	performance degradate
+slow_requests	richieste che hanno impiegato più di 500 ms
+
+# ─── traffic_volume ──────────────────────────────────────────────────────────
+traffic_volume	volume di traffico per ora
+traffic_volume	quante richieste al minuto
+traffic_volume	traffico delle ultime 3 ore
+traffic_volume	andamento richieste nel tempo
+traffic_volume	picchi di traffico
+traffic_volume	richieste per fascia oraria
+traffic_volume	traffico nelle ultime 2 ore
+traffic_volume	quante chiamate al secondo
+traffic_volume	volume giornaliero di richieste
+traffic_volume	distribuzione del traffico per minuto
+traffic_volume	richieste nelle ultime 6 ore
+traffic_volume	quante richieste totali oggi
+traffic_volume	traffico di ieri
+traffic_volume	andamento del traffico
+traffic_volume	picco di richieste nell'ultima ora
+
+# ─── filter_errors ───────────────────────────────────────────────────────────
+filter_errors	errori nel server log
+filter_errors	mostrami le eccezioni
+filter_errors	ci sono exception nel log
+filter_errors	warning nel server log
+filter_errors	dammi i messaggi di errore
+filter_errors	righe con errore nel log applicativo
+filter_errors	stack trace nel log
+filter_errors	exception java nel log
+filter_errors	errori del applicazione
+filter_errors	warn nel server.log
+filter_errors	cosa c'è di strano nel server log
+filter_errors	eccezioni nelle ultime ore
+filter_errors	errori gravi nel log
+filter_errors	messaggi di warning
+filter_errors	null pointer exception nel log
+filter_errors	ultimi errori nel log applicativo
+filter_errors	eccezioni recenti nel server log
+filter_errors	warn delle ultime 2 ore nel log
+filter_errors	exception nell'ultima ora
+filter_errors	stack trace recenti
+filter_errors	errori critici nelle ultime ore
+filter_errors	warning recenti nel server.log
+filter_errors	cosa ha lanciato exception di recente
+
+# ─── service_times ───────────────────────────────────────────────────────────
+service_times	tempi dei servizi soa
+service_times	quanto ci mette il servizio
+service_times	latenza dei servizi interni
+service_times	tempo di risposta dei web service
+service_times	servizi più lenti
+service_times	performance dei servizi backend
+service_times	tempi di esecuzione dei servizi
+service_times	quale servizio è più lento
+service_times	SOA response time
+service_times	tempi delle chiamate interne
+service_times	durata delle chiamate di servizio
+service_times	quanto impiega rSGetPartiesByFilter
+service_times	performance del backend soa
+service_times	tempi di risposta web service
+service_times	servizi con latenza alta
+
+# ─── gc_stats ────────────────────────────────────────────────────────────────
+gc_stats	statistiche gc
+gc_stats	garbage collection
+gc_stats	pausa gc
+gc_stats	heap usage
+gc_stats	utilizzo della memoria
+gc_stats	quante volte ha fatto gc
+gc_stats	gc log delle ultime ore
+gc_stats	memoria jvm
+gc_stats	pause garbage collector
+gc_stats	heap dopo gc
+gc_stats	frequenza delle raccolte gc
+gc_stats	quanto dura la pausa gc
+gc_stats	old regions nel gc
+gc_stats	memoria heap utilizzata
+gc_stats	gc events nell'ultima ora
+
+# ─── correlate_gc_slow ───────────────────────────────────────────────────────
+correlate_gc_slow	le richieste lente coincidono con il gc
+correlate_gc_slow	gc e performance degradate
+correlate_gc_slow	il garbage collector causa latenze
+correlate_gc_slow	pausa gc e richieste lente nello stesso momento
+correlate_gc_slow	correlazione tra gc e slow request
+correlate_gc_slow	le pause gc impattano le richieste
+correlate_gc_slow	durante il gc ci sono stati timeout
+correlate_gc_slow	richieste lente durante garbage collection
+correlate_gc_slow	impatto del gc sulla latenza
+correlate_gc_slow	memoria e performance
+correlate_gc_slow	gc e latenza alta
+correlate_gc_slow	quando il gc parte le richieste rallentano
+correlate_gc_slow	pausa garbage collector e risposta lenta
+correlate_gc_slow	il gc rallenta il server
+correlate_gc_slow	slow request dopo una pausa gc
+gc_stats,correlate_gc_slow	analisi gc e impatto sulle richieste
+slow_requests,correlate_gc_slow	richieste lente e correlazione gc
+gc_stats,slow_requests,correlate_gc_slow	heap e latenza delle ultime 2 ore
+
+# ─── tail_log ────────────────────────────────────────────────────────────────
+tail_log	ultime righe del log
+tail_log	mostrami le ultime 100 richieste
+tail_log	cosa è successo di recente
+tail_log	ultimi 50 accessi
+tail_log	log più recenti
+tail_log	dammi le ultime richieste
+tail_log	ultime 20 righe
+tail_log	eventi più recenti
+tail_log	cosa è successo nell'access log
+tail_log	mostra gli ultimi log
+tail_log	ultime richieste al server
+tail_log	visualizza log recenti
+tail_log	mostrami le ultime 50 righe
+tail_log	cosa è successo negli ultimi minuti
+tail_log	accessi più recenti
+tail_log	le ultime 200 righe del log
+
+# ─── filter_ip ───────────────────────────────────────────────────────────────
+filter_ip	richieste dall'ip 172.30.169.1
+filter_ip	traffico dal client 10.156.7.250
+filter_ip	cosa ha fatto l'ip 79.19.6.166
+filter_ip	filtra per indirizzo ip
+filter_ip	richieste da uno specifico client
+filter_ip	attività dell'ip 172.30.152.15
+filter_ip	chiamate dall'indirizzo 172.30.180.236
+filter_ip	traffico dall'ip 78.210.241.191
+filter_ip	richieste da un client specifico
+filter_ip	accessi da un determinato ip
+count_status,filter_ip	quanti errori ha fatto l'ip 172.30.169.1
+distribute_status,filter_ip	distribuzione errori per l'ip 79.19.6.166
+
+# ─── filter_app_errors ───────────────────────────────────────────────────────
+filter_app_errors	errori applicativi nel server log
+filter_app_errors	exception loggati come info
+filter_app_errors	errori nascosti nel log
+filter_app_errors	status 500 loggati dall'applicazione
+filter_app_errors	eccezioni java nel log info
+filter_app_errors	errori interni dell'applicazione
+filter_app_errors	null pointer exception nel log info
+filter_app_errors	chiamate interne fallite con 500
+filter_app_errors	errori di business nel server log
+filter_app_errors	exception nei log applicativi info
+filter_app_errors	quali errori lancia l'applicazione
+filter_app_errors	quante exception ci sono nel log applicativo
+filter_app_errors	errori loggati come informazioni
+filter_app_errors	root cause delle eccezioni applicative
+filter_app_errors	problemi applicativi nascosti nel log
+
+# ─── combinazioni multi-tool ─────────────────────────────────────────────────
+count_status,distribute_status	quanti errori 500 ci sono stati e per quale endpoint
+slow_requests,traffic_volume	richieste lente e volume di traffico delle ultime 2 ore
+filter_errors,service_times	eccezioni e tempi dei servizi soa
+count_status,slow_requests	errori e latenza alta nell'ultima ora
+traffic_volume,filter_errors	picchi di traffico con errori nel server log
+gc_stats,service_times	memoria e performance dei servizi backend
+count_status,distribute_status,slow_requests	errori 500 e richieste lente per endpoint
+filter_errors,tail_log	ultimi errori nel server log
+filter_ip,slow_requests	richieste lente da uno specifico ip
+service_times,slow_requests	servizi lenti e richieste con alta latenza
+
+# ─── generati automaticamente 2026-07-26 ──────────────────────────────
+count_status	conta 500 nell'access log
+count_status	conta richieste con status 500
+count_status	conta errori 4xx
+count_status	conta risposte http con errore
+count_status	conta 503 ricevuti
+count_status	conta richieste con status code 400
+count_status	quanti 500 nell'access log
+count_status	quanti richieste con status 500
+count_status	quanti errori 4xx
+distribute_status	distribuzione dei 500 per endpoint
+distribute_status	breakdown degli errori per endpoint
+distribute_status	breakdown dei 500 per endpoint
+distribute_status	raggruppamento degli errori per endpoint
+distribute_status	raggruppamento dei 500 per endpoint
+distribute_status	suddivisione degli errori per endpoint
+distribute_status	suddivisione dei 500 per endpoint
+distribute_status	ripartizione degli errori per endpoint
+distribute_status	ripartizione dei 500 per endpoint
+slow_requests	chiamate http lente
+slow_requests	richieste con latenza alta
+slow_requests	chiamate http con latenza alta
+slow_requests	chiamate http con response time elevato
+slow_requests	richieste sopra soglia
+slow_requests	chiamate http sopra soglia
+slow_requests	richieste che impiegano troppo
+slow_requests	chiamate http che impiegano troppo
+traffic_volume	volume di richieste nelle ultime 2 ore
+traffic_volume	quante chiamate nelle ultime 2 ore
+traffic_volume	andamento del traffico nelle ultime 2 ore
+traffic_volume	traffico nelle ultime 3 ore
+traffic_volume	volume di richieste nelle ultime 3 ore
+traffic_volume	quante chiamate nelle ultime 3 ore
+traffic_volume	andamento del traffico nelle ultime 3 ore
+traffic_volume	traffico nell'ultima ora
+traffic_volume	volume di richieste nell'ultima ora
+traffic_volume	quante chiamate nell'ultima ora
+traffic_volume	andamento del traffico nell'ultima ora
+traffic_volume	traffico nelle ultime 6 ore
+traffic_volume	volume di richieste nelle ultime 6 ore
+filter_errors	errori recenti nel log applicativo
+filter_errors	eccezioni nel server log
+filter_errors	eccezioni recenti nel log applicativo
+filter_errors	exception nel server log
+service_times	mostrami i tempi di risposta dei servizi soa
+service_times	mostrami la latenza dei web service
+service_times	mostrami i servizi più lenti
+service_times	mostrami le performance dei servizi backend
+service_times	dammi i tempi di risposta dei servizi soa
+service_times	dammi la latenza dei web service
+service_times	dammi i servizi più lenti
+service_times	dammi le performance dei servizi backend
+service_times	fammi vedere i tempi di risposta dei servizi soa
+service_times	fammi vedere la latenza dei web service
+service_times	fammi vedere i servizi più lenti
+service_times	fammi vedere le performance dei servizi backend
+gc_stats	mostrami le statistiche del garbage collector
+gc_stats	mostrami le pause gc
+gc_stats	mostrami l'utilizzo della heap
+gc_stats	mostrami la memoria jvm
+gc_stats	dammi le statistiche del garbage collector
+gc_stats	dammi le pause gc
+gc_stats	dammi l'utilizzo della heap
+gc_stats	dammi la memoria jvm
+gc_stats	fammi vedere le statistiche del garbage collector
+gc_stats	fammi vedere le pause gc
+gc_stats	fammi vedere l'utilizzo della heap
+gc_stats	fammi vedere la memoria jvm
+correlate_gc_slow	correlazione tra gc e richieste lente nelle ultime 2 ore
+correlate_gc_slow	il garbage collector causa latenze nelle ultime 2 ore
+correlate_gc_slow	gc e slow request nelle ultime 2 ore
+correlate_gc_slow	correlazione tra gc e richieste lente nelle ultime 3 ore
+correlate_gc_slow	il garbage collector causa latenze nelle ultime 3 ore
+correlate_gc_slow	gc e slow request nelle ultime 3 ore
+correlate_gc_slow	correlazione tra gc e richieste lente nell'ultima ora
+correlate_gc_slow	il garbage collector causa latenze nell'ultima ora
+correlate_gc_slow	gc e slow request nell'ultima ora
+correlate_gc_slow	correlazione tra gc e richieste lente nelle ultime 6 ore
+correlate_gc_slow	il garbage collector causa latenze nelle ultime 6 ore
+correlate_gc_slow	gc e slow request nelle ultime 6 ore
+tail_log	mostrami le ultime righe del log
+tail_log	mostrami gli ultimi accessi
+tail_log	mostrami le ultime 100 righe dell'access log
+tail_log	mostrami gli ultimi eventi nel log
+tail_log	dammi le ultime righe del log
+tail_log	dammi gli ultimi accessi
+tail_log	dammi le ultime 100 righe dell'access log
+tail_log	dammi gli ultimi eventi nel log
+tail_log	fammi vedere le ultime righe del log
+tail_log	fammi vedere gli ultimi accessi
+tail_log	fammi vedere le ultime 100 righe dell'access log
+tail_log	fammi vedere gli ultimi eventi nel log
+tail_log	visualizza le ultime righe del log
+filter_ip	richieste dall'ip 172.30.100.5
+filter_ip	cosa ha fatto l'ip 172.30.100.5
+filter_ip	traffico dal client 172.30.100.5
+filter_ip	attività dall'indirizzo 172.30.100.5
+filter_ip	accessi dall'ip 172.30.100.5 nelle ultime ore
+filter_ip	errori http dall'ip 172.30.100.5
+filter_ip	richieste dall'ip 10.0.1.25
+filter_ip	cosa ha fatto l'ip 10.0.1.25
+filter_ip	traffico dal client 10.0.1.25
+filter_ip	attività dall'indirizzo 10.0.1.25
+filter_ip	accessi dall'ip 10.0.1.25 nelle ultime ore
+filter_ip	errori http dall'ip 10.0.1.25
+filter_ip	richieste dall'ip 192.168.50.10
+filter_ip	cosa ha fatto l'ip 192.168.50.10
+filter_ip	traffico dal client 192.168.50.10
+filter_ip	attività dall'indirizzo 192.168.50.10
+filter_ip	accessi dall'ip 192.168.50.10 nelle ultime ore
+filter_app_errors	mostrami gli errori applicativi nel server log
+filter_app_errors	mostrami le exception loggati come info
+filter_app_errors	mostrami i problemi applicativi nascosti nel log
+filter_app_errors	mostrami le eccezioni interne dell'applicazione
+filter_app_errors	dammi gli errori applicativi nel server log
+filter_app_errors	dammi le exception loggati come info
+filter_app_errors	dammi i problemi applicativi nascosti nel log
+filter_app_errors	dammi le eccezioni interne dell'applicazione
+filter_app_errors	fammi vedere gli errori applicativi nel server log
+filter_app_errors	fammi vedere le exception loggati come info
+filter_app_errors	fammi vedere i problemi applicativi nascosti nel log
+filter_app_errors	fammi vedere le eccezioni interne dell'applicazione
+filter_app_errors	visualizza gli errori applicativi nel server log
+filter_app_errors	visualizza le exception loggati come info
+filter_app_errors	visualizza i problemi applicativi nascosti nel log
+
+# ─── generati automaticamente 2026-07-26 ──────────────────────────────
+count_status	quanti risposte http con errore
+count_status	quanti 503 ricevuti
+count_status	quanti richieste con status code 400
+count_status	quante 500 nell'access log
+count_status	quante richieste con status 500
+distribute_status	distribuzione degli errori per api
+distribute_status	distribuzione dei 500 per api
+distribute_status	breakdown degli errori per api
+distribute_status	breakdown dei 500 per api
+distribute_status	raggruppamento degli errori per api
+slow_requests	richieste molto lente
+slow_requests	chiamate http molto lente
+slow_requests	richieste con tempi elevati
+slow_requests	chiamate http con tempi elevati
+slow_requests	richieste con risposta ritardata
+traffic_volume	quante chiamate nelle ultime 6 ore
+traffic_volume	andamento del traffico nelle ultime 6 ore
+traffic_volume	traffico nelle ultime 24 ore
+traffic_volume	volume di richieste nelle ultime 24 ore
+traffic_volume	quante chiamate nelle ultime 24 ore
+filter_errors	exception recenti nel log applicativo
+filter_errors	warning recenti nel log applicativo
+filter_errors	problemi nel server log
+filter_errors	problemi recenti nel log applicativo
+filter_errors	anomalie nel server log
+service_times	visualizza i tempi di risposta dei servizi soa
+service_times	visualizza la latenza dei web service
+service_times	visualizza i servizi più lenti
+service_times	visualizza le performance dei servizi backend
+service_times	elenca i tempi di risposta dei servizi soa
+gc_stats	visualizza le statistiche del garbage collector
+gc_stats	visualizza le pause gc
+gc_stats	visualizza l'utilizzo della heap
+gc_stats	visualizza la memoria jvm
+gc_stats	elenca le statistiche del garbage collector
+correlate_gc_slow	correlazione tra gc e richieste lente nelle ultime 24 ore
+correlate_gc_slow	il garbage collector causa latenze nelle ultime 24 ore
+correlate_gc_slow	gc e slow request nelle ultime 24 ore
+correlate_gc_slow	correlazione tra gc e richieste lente degli ultimi 30 minuti
+correlate_gc_slow	il garbage collector causa latenze degli ultimi 30 minuti
+tail_log	visualizza gli ultimi accessi
+tail_log	visualizza le ultime 100 righe dell'access log
+tail_log	visualizza gli ultimi eventi nel log
+tail_log	elenca le ultime righe del log
+tail_log	elenca gli ultimi accessi
+filter_ip	errori http dall'ip 192.168.50.10
+filter_ip	richieste dall'ip 203.0.113.1
+filter_ip	cosa ha fatto l'ip 203.0.113.1
+filter_ip	traffico dal client 203.0.113.1
+filter_ip	attività dall'indirizzo 203.0.113.1
+filter_app_errors	visualizza le eccezioni interne dell'applicazione
+filter_app_errors	elenca gli errori applicativi nel server log
+filter_app_errors	elenca le exception loggati come info
+filter_app_errors	elenca i problemi applicativi nascosti nel log
+filter_app_errors	elenca le eccezioni interne dell'applicazione
+
+# ─── Leva B: finestre temporali colloquiali ───────────────────────────────────
+filter_errors	errori di stamattina nel server log
+filter_errors	exception di stanotte nel log
+traffic_volume	traffico di stamattina
+traffic_volume	quante richieste stamattina
+traffic_volume	andamento del traffico stanotte
+tail_log	log di stamattina
+tail_log	righe di stanotte nell'access log
+count_status	quanti 500 di stamattina
+filter_errors	warning di questa mattina nel log applicativo
+traffic_volume	volume di richieste di questa sera
+filter_errors	cosa è successo poco fa nel log
+tail_log	ultime righe di poco fa
+count_status	errori avvenuti poco fa
+
+# ─── Leva A: linguaggio colloquiale/informale ─────────────────────────────────
+filter_errors	cosa ha rotto il server
+filter_errors	c'è qualcosa che non va nel server log
+filter_errors	qualcosa di strano nel log applicativo
+filter_errors	vediamo cosa ha lanciato eccezioni
+slow_requests	vediamo le richieste più lente
+count_status	vediamo quanti errori ci sono stati
+filter_errors	dammi un'occhiata agli errori nel log
+filter_errors	il server non funziona cosa dice il log
+filter_errors	cosa non va nel log jboss
+slow_requests	il server risponde lento cosa è successo
+gc_stats	qualcosa non va con la memoria jvm
+filter_app_errors	c'è qualcosa di strano nel log applicativo nascosto
+filter_errors	c'è un problema nel server log
+
+# ─── Leva C: backend/web service espliciti ───────────────────────────────────
+service_times	web service lenti
+service_times	il backend è lento
+service_times	latenza del backend
+service_times	web service con latenza alta
+service_times	il backend risponde lentamente
+service_times	performance del web service
+service_times	backend con response time elevato
+slow_requests,service_times	le richieste e il backend sono lenti
+
+# ─── generati automaticamente 2026-07-26 ──────────────────────────────
+count_status	quante errori 4xx
+count_status	quante risposte http con errore
+distribute_status	raggruppamento dei 500 per api
+distribute_status	suddivisione degli errori per api
+distribute_status	suddivisione dei 500 per api
+distribute_status	ripartizione degli errori per api
+distribute_status	ripartizione dei 500 per api
+slow_requests	chiamate http con risposta ritardata
+slow_requests	richieste lente nelle ultime 2 ore
+traffic_volume	andamento del traffico nelle ultime 24 ore
+gc_stats	elenca le pause gc
+gc_stats	elenca l'utilizzo della heap
+gc_stats	elenca la memoria jvm
+gc_stats	voglio vedere le statistiche del garbage collector
+correlate_gc_slow	gc e slow request degli ultimi 30 minuti
+correlate_gc_slow	correlazione tra gc e richieste lente di oggi
+correlate_gc_slow	il garbage collector causa latenze di oggi
+correlate_gc_slow	gc e slow request di oggi
+correlate_gc_slow	correlazione tra gc e richieste lente di ieri
+tail_log	elenca le ultime 100 righe dell'access log
+tail_log	elenca gli ultimi eventi nel log
+filter_ip	accessi dall'ip 203.0.113.1 nelle ultime ore
+filter_ip	errori http dall'ip 203.0.113.1
+filter_ip	richieste dall'ip 198.51.100.3
+filter_ip	cosa ha fatto l'ip 198.51.100.3
+filter_ip	traffico dal client 198.51.100.3
+filter_app_errors	voglio vedere gli errori applicativi nel server log
+filter_app_errors	voglio vedere le exception loggati come info
+filter_app_errors	voglio vedere i problemi applicativi nascosti nel log
+filter_app_errors	voglio vedere le eccezioni interne dell'applicazione
+
+# ── tail_named_log — log Guidewire specifici ──────────────────────────────────
+tail_named_log	mostrami il cc.log
+tail_named_log	ultime righe del cc.log
+tail_named_log	dammi le ultime 100 righe del cc.log
+tail_named_log	cosa c'è nel cc.log
+tail_named_log	leggi il cc.log
+tail_named_log	apri il cc.log
+tail_named_log	mostrami l'api.log
+tail_named_log	ultime righe dell'api.log
+tail_named_log	cosa dice l'api.log
+tail_named_log	errori nell'api.log
+tail_named_log	controlla l'api.log
+tail_named_log	mostrami il database.log
+tail_named_log	ultime righe del database log
+tail_named_log	cosa c'è nel database.log
+tail_named_log	errori nel database.log
+tail_named_log	mostrami il messaging.log
+tail_named_log	ultime righe del messaging.log
+tail_named_log	messaggi in coda non processati nel messaging.log
+tail_named_log	cosa dice il messaging log
+tail_named_log	errori nel messaging.log
+tail_named_log	mostrami il performance_integrations log
+tail_named_log	ultime righe del performance_integr log
+tail_named_log	performance delle integrazioni nel log
+tail_named_log	latenze nel performance_integrations.log
+tail_named_log	mostrami il jgroups.log
+tail_named_log	ultime righe del jgroups.log
+tail_named_log	errori di cluster nel jgroups log
+tail_named_log	cosa dice il jgroups.log
+tail_named_log	mostrami il plugin log
+tail_named_log	errori nei plugin nel log
+tail_named_log	ultime righe del ruleengine log
+tail_named_log	regole di business nel ruleengine log
+tail_named_log	cosa c'è nel ruleengine.log
+tail_named_log	mostrami il ccJBatch log
+tail_named_log	errori nel batch log
+tail_named_log	ultime righe del ccJBatch
+tail_named_log	mostrami il studio.log
+tail_named_log	cosa c'è nel velocity.log
+tail_named_log	ultime righe del contactsearch.log
+tail_named_log	errori nel claimnumgen log
+tail_named_log	performance delle integrazioni nel log
+tail_named_log	controlla il log delle performance delle integrazioni
+tail_named_log	latenze delle integrazioni nel performance log

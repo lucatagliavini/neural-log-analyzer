@@ -1,13 +1,17 @@
 #!/bin/bash
 #
-# Addestra il classificatore di intent sul dataset queries.txt.
+# Addestra il classificatore di intent per un profilo.
 #
-# Uso: ./train.sh [--epochs N] [--lr RATE] [--optimizer OPT]
+# Uso: ./train.sh --profile <dir> [--epochs N] [--lr RATE] [--optimizer OPT]
+# Es:  ./train.sh --profile profiles/liquido --epochs 5000
 #
 
 set -euo pipefail
-source "$(dirname "$0")/config.sh"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NNET_RUN="$SCRIPT_DIR/../nnet-run.sh"
+
+PROFILE_DIR=""
 EPOCHS=5000
 LR=0.01
 OPTIMIZER=adam
@@ -16,6 +20,7 @@ PATIENCE=100
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --profile)   PROFILE_DIR="$(cd "$2" && pwd)"; shift 2 ;;
         --epochs)    EPOCHS="$2";    shift 2 ;;
         --lr)        LR="$2";        shift 2 ;;
         --optimizer) OPTIMIZER="$2"; shift 2 ;;
@@ -25,18 +30,33 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ -z "$PROFILE_DIR" ]]; then
+    echo "[ERROR] --profile obbligatorio. Es: ./train.sh --profile profiles/liquido" >&2
+    exit 1
+fi
+
+source "$PROFILE_DIR/domain.conf"
+
+MODEL_DIR="$PROFILE_DIR/models/intent_classifier"
+DATASET_FILE="$PROFILE_DIR/dataset/queries.txt"
+LABELED_FILE="$PROFILE_DIR/dataset/queries_labeled.txt"
+
 if [[ ! -d "$MODEL_DIR" ]]; then
-    echo "[ERROR] Modello non inizializzato. Esegui prima ./setup.sh" >&2
+    echo "[ERROR] Modello non inizializzato. Esegui prima: ./setup.sh --profile $PROFILE_DIR" >&2
     exit 1
 fi
 
 if [[ ! -f "$DATASET_FILE" ]]; then
-    echo "[ERROR] Dataset non trovato: $DATASET_FILE" >&2
-    echo "        Esegui ./build-dataset.sh per generarlo." >&2
+    if [[ -f "$LABELED_FILE" ]]; then
+        echo "[INFO] Dataset numerico non trovato — esegui prima: ./build-dataset.sh --profile $PROFILE_DIR" >&2
+    else
+        echo "[ERROR] Dataset non trovato: $DATASET_FILE" >&2
+        echo "        Crea $LABELED_FILE e poi esegui ./build-dataset.sh --profile $PROFILE_DIR" >&2
+    fi
     exit 1
 fi
 
-echo "[INFO] Training intent classifier"
+echo "[INFO] Training intent classifier — profilo: $(basename "$PROFILE_DIR")"
 echo "[INFO] Dataset: $DATASET_FILE"
 echo "[INFO] Epochs: $EPOCHS | LR: $LR | Optimizer: $OPTIMIZER | min-delta: $MIN_DELTA | patience: $PATIENCE"
 echo ""
@@ -50,4 +70,4 @@ echo ""
     --patience "$PATIENCE"
 
 echo ""
-echo "[OK] Training completato. Usa ./chatbot.sh per interrogare i log."
+echo "[OK] Training completato. Usa: ./chatbot.sh --profile $PROFILE_DIR"

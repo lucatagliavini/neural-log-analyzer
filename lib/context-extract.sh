@@ -4,9 +4,15 @@
 # Emette variabili shell: CTX_ENV, CTX_NODE, CTX_APP  (vuote se non menzionati)
 #
 # Uso: eval "$(./lib/context-extract.sh "errori 500 in coll nodo 2")"
+# Richiede: PROFILE_DIR esportata dal chiamante.
 #
 
-source "$(dirname "$0")/../config.sh"
+if [[ -z "${PROFILE_DIR:-}" ]]; then
+    echo "echo '[ERROR] context-extract: PROFILE_DIR non impostata' >&2" >&2
+    exit 1
+fi
+
+source "$PROFILE_DIR/system.conf"
 
 query="${1,,}"
 
@@ -20,17 +26,14 @@ for env_name in "${!ENV_NODE_CODE[@]}"; do
 done
 
 # ─── Nodo ────────────────────────────────────────────────────────────────────
-# "nodo 2", "nodo 02", "nodo numero 3", "sul nodo 1", "node 2"
 CTX_NODE=""
 if echo "$query" | grep -qE "\bnodo\b.*[0-9]+|sul nodo [0-9]+"; then
     CTX_NODE=$(echo "$query" | grep -oE "\bnodo\b[^0-9]*([0-9]+)" | grep -oE "[0-9]+" | head -1)
 fi
-# Forma esplicita: lx??jbliq01, lx??jbliq02, ...
 if [[ -z "$CTX_NODE" ]]; then
     node_full=$(echo "$query" | grep -oE "lx[a-z]{2}jbliq[0-9]+" | head -1)
     if [[ -n "$node_full" ]]; then
         CTX_NODE=$(echo "$node_full" | grep -oE "[0-9]+$")
-        # Sovrascrive anche env se deducibile dal codice nodo
         if [[ -z "$CTX_ENV" ]]; then
             node_code="${node_full:2:2}"
             for env_name in "${!ENV_NODE_CODE[@]}"; do
@@ -38,7 +41,7 @@ if [[ -z "$CTX_NODE" ]]; then
                     CTX_ENV="$env_name"
                     break
                 fi
-        done
+            done
         fi
     fi
 fi
@@ -47,18 +50,22 @@ fi
 CTX_APP=""
 for app in "${AVAILABLE_APPS[@]}"; do
     app_lower="${app,,}"
-    # Cerca forma abbreviata o completa: "claimcenter", "claim center", "cc"
     if echo "$query" | grep -qiE "\b${app_lower}\b"; then
         CTX_APP="$app"
         break
     fi
 done
-# Abbreviazioni comuni
+# Abbreviazioni comuni (cc → ClaimCenter, cm → ContactManager)
 if [[ -z "$CTX_APP" ]]; then
     if echo "$query" | grep -qE "\bcc\b"; then
-        CTX_APP="ClaimCenter"
+        # Verifica che ClaimCenter esista nelle app del profilo
+        for app in "${AVAILABLE_APPS[@]}"; do
+            [[ "$app" == "ClaimCenter" ]] && { CTX_APP="ClaimCenter"; break; }
+        done
     elif echo "$query" | grep -qE "\bcm\b|contact.?manager"; then
-        CTX_APP="ContactManager"
+        for app in "${AVAILABLE_APPS[@]}"; do
+            [[ "$app" == "ContactManager" ]] && { CTX_APP="ContactManager"; break; }
+        done
     fi
 fi
 
