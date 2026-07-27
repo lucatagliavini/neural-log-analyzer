@@ -32,6 +32,7 @@ SERVER_LOG=""
 GC_LOG=""
 INTERACTIVE=1
 QUERY=""
+RESOLVED_DATE_FILTER=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -68,6 +69,9 @@ export PROFILE_DIR
 # Carica configurazione di sistema e dominio
 source "$PROFILE_DIR/system.conf"
 source "$PROFILE_DIR/domain.conf"
+
+# Allinea TZ di sistema con quella dei log del server (tutti i sottoprocessi la ereditano)
+[[ -n "${LOG_TZ:-}" ]] && export TZ="$LOG_TZ"
 
 # Override base dir se passato esplicitamente
 [[ -n "$BASE_DIR_OVERRIDE" ]] && LOG_BASE_DIR="$BASE_DIR_OVERRIDE"
@@ -136,8 +140,11 @@ run_query() {
     [[ -n "$CTX_NODE" && "$CTX_NODE" != "$ACTIVE_NODE" ]] && { ACTIVE_NODE="$CTX_NODE"; ctx_changed=1; }
     [[ -n "$CTX_APP"  && "$CTX_APP"  != "$ACTIVE_APP"  ]] && { ACTIVE_APP="$CTX_APP";   ctx_changed=1; }
 
-    # Estrai DATE_FILTER prima di resolve — serve per selezionare il log ruotato giusto
+    # Estrai parametri strutturati (TIME_FROM, TIME_TO, DATE_FILTER, ...) prima di resolve
     eval "$("$LIB_DIR/param-extract.sh" "$query")"
+
+    # DATE_FILTER è una dimensione del contesto: se cambia → re-resolve
+    [[ "${DATE_FILTER:-}" != "$RESOLVED_DATE_FILTER" ]] && { RESOLVED_DATE_FILTER="${DATE_FILTER:-}"; ctx_changed=1; }
 
     # Lazy resolution: se ancora senza log, tenta ora che potremmo avere il contesto
     if [[ -z "$ACCESS_LOG" ]]; then
@@ -146,8 +153,7 @@ run_query() {
             return
         fi
         resolve_session_logs || return 1
-        ctx_changed=1
-    elif [[ "$ctx_changed" -eq 1 && -n "$ACTIVE_ENV" ]] || [[ -n "${DATE_FILTER:-}" ]]; then
+    elif [[ "$ctx_changed" -eq 1 && -n "$ACTIVE_ENV" ]]; then
         resolve_session_logs || return 1
     fi
 
