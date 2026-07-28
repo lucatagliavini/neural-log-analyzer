@@ -840,3 +840,45 @@ service_times	tempi di risposta del backend indipendenti dal gc
 service_times	web service lenti non legati al garbage collector
 service_times	performance dei servizi backend questa mattina
 service_times	response time dei servizi nelle ultime 2 ore
+
+# ── C14: show_help ────────────────────────────────────────────────────────────
+show_help	aiuto
+show_help	help
+show_help	?
+show_help	aiutami
+show_help	cosa sai fare
+show_help	cosa puoi fare
+show_help	che cosa sai fare
+show_help	cosa fai
+show_help	che strumenti hai
+show_help	che cosa puoi fare
+show_help	quali strumenti hai a disposizione
+show_help	mostrami i comandi disponibili
+show_help	elenca cosa sai fare
+show_help	quali analisi puoi fare
+show_help	che tipo di analisi fai
+show_help	cosa puoi analizzare
+show_help	dimmi cosa sai fare
+show_help	come funzioni
+show_help	come posso usarti
+show_help	come ti uso
+show_help	che funzionalità hai
+show_help	lista degli strumenti
+show_help	elenco strumenti disponibili
+show_help	cosa posso chiederti
+show_help	che query posso fare
+show_help	dammi l'help
+show_help	fammi vedere cosa sai fare
+show_help	che analisi posso chiedere
+show_help	spiegami cosa puoi fare
+show_help	come faccio a sapere cosa puoi fare
+show_help	non so cosa chiederti
+show_help	cosa posso fare con te
+show_help	quali log sai analizzare
+show_help	che tipo di log sai leggere
+show_help	come si usa questo bot
+show_help	istruzioni
+show_help	guida
+show_help	menu
+show_help	opzioni disponibili
+show_help	capabilities

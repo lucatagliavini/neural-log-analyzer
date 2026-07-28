@@ -12,7 +12,7 @@
 
 # Numero totale di feature: len(UNIGRAMS) + len(BIGRAMS). Deve essere coerente
 # con MODEL_TOPOLOGY in domain.conf (primo valore = NUM_FEATURES).
-NUM_FEATURES=75
+NUM_FEATURES=77
 
 # ─── UNIGRAM ─────────────────────────────────────────────────────────────────
 UNIGRAMS=(
@@ -89,6 +89,9 @@ UNIGRAMS=(
     "rott[oa]|non.va\b|non.funz :: 1"
     "c.è.*problem|qualcosa.*stran :: 1"
     "vediamo|un.occhiat         :: 1"
+    # [75-76] Help / assistenza — intent C14
+    "aiuto|help\b|\baiutami\b         :: 2"
+    "cosa.sai|cosa.puoi|cosa.fai|che.strumenti|comandi.disponibili :: 2"
     # [60-67] Log Guidewire specifici — tail_named_log
     "cc\.log|claimcenter.log     :: 2"
     "api\.log                    :: 2"

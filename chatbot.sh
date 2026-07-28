@@ -181,7 +181,7 @@ run_query() {
 
     if [[ -z "$tools" ]]; then
         echo "└─ [INFO] Nessun tool attivato con confidenza >= $TOOL_THRESHOLD"
-        echo "   Prova a riformulare la query."
+        echo "   Prova a riformulare la query. Digita \033[1maiuto\033[0m per vedere cosa so fare."
         return
     fi
 
@@ -219,18 +219,22 @@ profile_name=$(basename "$PROFILE_DIR")
 if [[ "$INTERACTIVE" -eq 0 ]]; then
     run_query "${QUERY:-}"
 else
-    echo "Neural Log Analyzer — profilo: $profile_name"
-    context_line
-    [[ -n "${SERVER_LOG:-}" ]] && echo "     server.log: $SERVER_LOG"
-    [[ -n "${GC_LOG:-}"     ]] && echo "     gc.log:     $GC_LOG"
-    echo "Digita la tua domanda (Ctrl+C per uscire)"
-    echo ""
+    printf "\033[1mNeural Log Analyzer\033[0m — profilo: \033[36m${profile_name}\033[0m\n"
+    printf "$(context_line)\n"
+    [[ -n "${SERVER_LOG:-}" ]] && printf "     server.log: \033[2m$SERVER_LOG\033[0m\n"
+    [[ -n "${GC_LOG:-}"     ]] && printf "     gc.log:     \033[2m$GC_LOG\033[0m\n"
+    printf "\033[2mDigita la tua domanda (Ctrl+C per uscire) — \033[0m\033[1maiuto\033[0m\033[2m per la lista degli strumenti\033[0m\n\n"
 
     while true; do
         printf "> "
         read -r query || break
         [[ -z "$query" ]] && continue
         [[ "$query" == "exit" || "$query" == "quit" ]] && break
+        # Keyword detection help — intercetta prima del classificatore
+        if echo "$query" | grep -qiE "^(aiuto|help|\?|cosa (sai|puoi|fai)|che (cosa )?(sai|puoi|fai)|strumenti|comandi)$"; then
+            print_help
+            continue
+        fi
         run_query "$query"
     done
 fi
