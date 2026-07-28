@@ -8,8 +8,10 @@
 BEGIN {
     FS = " "
     if (threshold_ms == "") threshold_ms = 500
-    gc_margin_s = 2  # finestra di correlazione: ±2 secondi dalla pausa GC
+    gc_margin_s = 2
     gc_n = 0
+    RED = "\033[31m"; YELLOW = "\033[33m"; BOLD = "\033[1m"; RESET = "\033[0m"
+    DIM = "\033[2m"
 }
 
 # Fase 1: file gc.log — raccoglie timestamp e durata pause
@@ -26,16 +28,13 @@ FILENAME ~ /gc/ && /Pause (Young|Full|Mixed)/ && /[0-9]+\.[0-9]+ms$/ {
 
 # Fase 2: file access.log — verifica richieste lente
 FILENAME ~ /access|undertow/ {
-    # Estrai tempo risposta
     if (!match($0, /" [0-9]+ [0-9]+ ([0-9]+) /, a)) next
     resp_ms = a[1] + 0
     if (resp_ms < threshold_ms + 0) next
 
-    # Estrai ora dalla data
     if (!match($0, /:([0-9][0-9]):([0-9][0-9]):([0-9][0-9]) /, b)) next
     req_s = b[1]*3600 + b[2]*60 + b[3]+0
 
-    # Cerca correlazione con una pausa GC
     correlated = 0
     for (i = 1; i <= gc_n; i++) {
         diff = req_s - gc_ts[i]
@@ -47,16 +46,21 @@ FILENAME ~ /access|undertow/ {
     if (correlated) correlated_count++
 
     if (correlated && correlated_count <= 20) {
-        if (match($0, /"([A-Z]+) ([^ ]+) HTTP/, c))
-            printf "CORRELATA  %d ms  %s %s\n", resp_ms, c[1], substr(c[2],1,60)
+        if (match($0, /"([A-Z]+) ([^ ]+) HTTP/, c)) {
+            color = (resp_ms >= 5000) ? RED : YELLOW
+            printf "%sCORRELATA%s  %s%d ms%s  %s %s\n", \
+                color, RESET, color, resp_ms, RESET, c[1], c[2]
+        }
     }
 }
 
 END {
     print ""
-    printf "Richieste lente (>%d ms): %d\n", threshold_ms, total_slow+0
     pct_corr = total_slow > 0 ? correlated_count*100/total_slow : 0
-    printf "Di cui correlate a pausa GC (±%ds): %d (%.0f%%)\n",
-        gc_margin_s, correlated_count+0, pct_corr
-    printf "Pause GC analizzate: %d\n", gc_n
+    col_pct  = (pct_corr >= 50) ? RED : (pct_corr >= 20) ? YELLOW : ""
+
+    printf "Richieste lente (>%d ms): %d\n", threshold_ms, total_slow+0
+    printf "Di cui correlate a pausa GC (±%ds): %s%d (%.0f%%)%s\n", \
+        gc_margin_s, col_pct, correlated_count+0, pct_corr, (col_pct!="") ? RESET : ""
+    printf "%sPause GC analizzate: %d%s\n", DIM, gc_n, RESET
 }

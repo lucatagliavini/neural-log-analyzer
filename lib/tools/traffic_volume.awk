@@ -1,18 +1,19 @@
 # Volume di traffico per fascia oraria (bucketing a 10 minuti).
 # Parametri: -v time_from="YYYY-MM-DDTHH:MM"  -v time_to="YYYY-MM-DDTHH:MM"
 
-BEGIN { FS = " " }
+BEGIN {
+    FS = " "
+    RED = "\033[31m"; YELLOW = "\033[33m"; DIM = "\033[2m"; RESET = "\033[0m"
+}
 
 {
     if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
-    # Estrai ora:minuto dal campo datetime
     if (!match($0, /\[([0-9]{2}\/[A-Za-z]+\/[0-9]{4}):([0-9]{2}):([0-9]{2})/, a)) next
     hour   = a[2]
     minute = a[3] + 0
     bucket = hour ":" sprintf("%02d", int(minute/10)*10)
     volume[bucket]++
 
-    # Traccia status per bucket
     if (match($0, /" ([0-9]{3}) /, b)) {
         st = b[1]
         if (substr(st, 1, 1) == "5") errors5xx[bucket]++
@@ -22,8 +23,14 @@ BEGIN { FS = " " }
 }
 
 END {
-    printf "%-10s  %7s  %6s  %6s\n", "FASCIA", "TOTALE", "4xx", "5xx"
-    printf "%-10s  %7s  %6s  %6s\n", "──────────", "───────", "──────", "──────"
+    if (total == 0) { print "Nessuna richiesta trovata."; exit }
+
+    # Calcola picco per barra proporzionale
+    max_vol = 0
+    for (bk in volume) if (volume[bk] > max_vol) max_vol = volume[bk]
+
+    printf "%-10s  %7s  %6s  %6s  %s\n", "FASCIA", "TOTALE", "4xx", "5xx", "ANDAMENTO"
+    printf "%-10s  %7s  %6s  %6s\n",     "──────────", "───────", "──────", "──────"
 
     n = 0
     for (bk in volume) keys[++n] = bk
@@ -33,9 +40,25 @@ END {
         keys[j+1] = tk
     }
 
+    bar_max = 30
     for (i = 1; i <= n; i++) {
-        bk = keys[i]
-        printf "%-10s  %7d  %6d  %6d\n", bk, volume[bk], errors4xx[bk]+0, errors5xx[bk]+0
+        bk   = keys[i]
+        e4   = errors4xx[bk]+0
+        e5   = errors5xx[bk]+0
+        col4 = (e4 > 0) ? YELLOW : ""
+        col5 = (e5 > 0) ? RED    : ""
+        rst  = RESET
+
+        # Barra proporzionale al picco
+        bar_len = int(volume[bk] * bar_max / max_vol)
+        bar = ""
+        for (k = 1; k <= bar_len; k++) bar = bar "▪"
+
+        printf "%-10s  %7d  %s%6d%s  %s%6d%s  %s%s%s\n", \
+            bk, volume[bk], \
+            col4, e4, (col4!="") ? rst : "", \
+            col5, e5, (col5!="") ? rst : "", \
+            DIM, bar, rst
     }
-    printf "\nTotale richieste: %d in %d bucket da 10 minuti\n", total, n
+    printf "\nTotale richieste: %d in %d fasce da 10 minuti\n", total, n
 }

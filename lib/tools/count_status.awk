@@ -4,20 +4,13 @@
 #
 # Formato atteso: IP [DD/Mon/YYYY:HH:MM:SS +TZ] "METHOD URL PROTO" STATUS BYTES TIME CHAIN UA
 
-BEGIN { FS = " " }
+BEGIN {
+    FS = " "
+    RED = "\033[31m"; YELLOW = "\033[33m"; RESET = "\033[0m"
+}
 
 {
     if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
-
-    # Estrai data/ora: campo 2 = [DD/Mon/YYYY:HH:MM:SS
-    gsub(/[\[\]]/, "", $2)
-    datetime = $2
-    split(datetime, dt, /[\/: ]/)
-    # dt[1]=DD dt[2]=Mon dt[3]=YYYY dt[4]=HH dt[5]=MM dt[6]=SS
-
-    # Estrai status: campo 5 (dopo chiusura virgolette)
-    # Formato: ... "METHOD URL PROTO" STATUS BYTES TIME ...
-    # Conta i campi dentro le virgolette per trovare STATUS
     line = $0
     if (match(line, /" ([0-9]{3}) /, a)) {
         status = a[1]
@@ -25,7 +18,6 @@ BEGIN { FS = " " }
         next
     }
 
-    # Filtro per status
     if (status_filter != "") {
         if (status_filter ~ /xx$/) {
             prefix = substr(status_filter, 1, 1)
@@ -42,14 +34,21 @@ BEGIN { FS = " " }
 END {
     printf "%-10s  %s\n", "STATUS", "COUNT"
     printf "%-10s  %s\n", "──────────", "──────"
-    # Stampa in ordine crescente di status code
+
     n = 0
     for (s in count) keys[++n] = s
     for (i = 1; i <= n; i++)
         for (j = i+1; j <= n; j++)
             if (keys[i]+0 > keys[j]+0) { t=keys[i]; keys[i]=keys[j]; keys[j]=t }
-    for (i = 1; i <= n; i++)
-        printf "%-10s  %d\n", keys[i], count[keys[i]]
+
+    for (i = 1; i <= n; i++) {
+        s = keys[i]
+        if (substr(s,1,1) == "5")      color = RED
+        else if (substr(s,1,1) == "4") color = YELLOW
+        else                           color = ""
+        reset = (color != "") ? RESET : ""
+        printf "%s%-10s%s  %d\n", color, s, reset, count[s]
+    }
     printf "%-10s  %s\n", "──────────", "──────"
     printf "%-10s  %d\n", "TOTALE", total
 }

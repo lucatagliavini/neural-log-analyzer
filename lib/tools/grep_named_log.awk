@@ -16,17 +16,14 @@ BEGIN {
     max_rows = (tail_n+0 > 0) ? tail_n+0 : 50
     if (level == "") level = "ERROR"
     count = 0; shown = 0
+    RED = "\033[31m"; YELLOW = "\033[33m"; DIM = "\033[2m"; RESET = "\033[0m"
 }
 
 /^[0-9]{4}-[0-9]{2}-[0-9]{2}/ {
-    # Filtro temporale
     if ((time_from != "" || time_to != "") && !in_range(parse_server($1, $2))) next
 
-    # Filtro per livello
     row_level = $3
     if (level != "ALL" && row_level != level) next
-
-    # Filtro pattern aggiuntivo
     if (pattern != "" && $0 !~ pattern) next
 
     count++
@@ -37,8 +34,14 @@ BEGIN {
         msg = ""
         for (i = 6; i <= NF; i++) msg = msg " " $i
         sub(/^ /, "", msg)
-        printf "[%s %s] %-5s  %-35s  %s\n",
-            $1, $2, row_level, substr(logger, 1, 35), substr(msg, 1, 72)
+
+        color = (row_level == "ERROR") ? RED : (row_level == "WARN") ? YELLOW : ""
+        rst   = (color != "") ? RESET : ""
+
+        printf "%s[%s %s] %-5s%s  %s%-35s%s  %s\n", \
+            color, $1, $2, row_level, rst, \
+            DIM, substr(logger, 1, 35), rst, \
+            substr(msg, 1, 90)
     }
 }
 
