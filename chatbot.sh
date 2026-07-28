@@ -33,6 +33,7 @@ GC_LOG=""
 INTERACTIVE=1
 QUERY=""
 RESOLVED_DATE_FILTER=""
+ACTIVE_NAMED_LOG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -143,6 +144,14 @@ run_query() {
     # Estrai parametri strutturati (TIME_FROM, TIME_TO, DATE_FILTER, ...) prima di resolve
     eval "$("$LIB_DIR/param-extract.sh" "$query")"
 
+    # NAMED_LOG: aggiorna il contesto solo se la query specifica un log esplicito;
+    # altrimenti riusa l'ultimo log menzionato in sessione (es. "stessa cosa" / "nello stesso log")
+    if [[ -n "$NAMED_LOG" ]]; then
+        ACTIVE_NAMED_LOG="$NAMED_LOG"
+    else
+        NAMED_LOG="$ACTIVE_NAMED_LOG"
+    fi
+
     # DATE_FILTER è una dimensione del contesto: se cambia → re-resolve
     [[ "${DATE_FILTER:-}" != "$RESOLVED_DATE_FILTER" ]] && { RESOLVED_DATE_FILTER="${DATE_FILTER:-}"; ctx_changed=1; }
 
@@ -157,7 +166,12 @@ run_query() {
         resolve_session_logs || return 1
     fi
 
-    [[ "$ctx_changed" -eq 1 ]] && echo "  [Contesto: env=$ACTIVE_ENV  nodo=$ACTIVE_NODE  app=$ACTIVE_APP]"
+    if [[ "$ctx_changed" -eq 1 ]]; then
+        local ctx_msg="  [Contesto: env=$ACTIVE_ENV  nodo=$ACTIVE_NODE  app=$ACTIVE_APP"
+        [[ -n "$ACTIVE_NAMED_LOG" ]] && ctx_msg+="  log=$ACTIVE_NAMED_LOG"
+        ctx_msg+="]"
+        echo "$ctx_msg"
+    fi
 
     echo ""
     echo "┌─ Query: $query"
@@ -190,7 +204,9 @@ run_query() {
 # ─── Main ────────────────────────────────────────────────────────────────────
 context_line() {
     if [[ -n "$ACTIVE_ENV" ]]; then
-        echo "Contesto: $ACTIVE_ENV  nodo $ACTIVE_NODE  ($ACTIVE_APP)"
+        local ctx="Contesto: $ACTIVE_ENV  nodo $ACTIVE_NODE  ($ACTIVE_APP)"
+        [[ -n "$ACTIVE_NAMED_LOG" ]] && ctx+="  log=$ACTIVE_NAMED_LOG"
+        echo "$ctx"
     elif [[ -n "$ACCESS_LOG" ]]; then
         echo "Log: $ACCESS_LOG"
     else

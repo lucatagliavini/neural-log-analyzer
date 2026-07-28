@@ -804,6 +804,18 @@ grep_named_log	eccezioni nel jgroups.log
 grep_named_log	warning nel jgroups.log
 grep_named_log	warn nel jgroups.log
 
+# ─── grep_named_log: warning/stesso log — discrimina da filter_errors ─────────
+grep_named_log	warning nel cc.log
+grep_named_log	warning nel api.log
+grep_named_log	warning nel database.log
+grep_named_log	warning nel messaging.log
+grep_named_log	warn nello stesso log
+grep_named_log	warning nello stesso log
+grep_named_log	stessi warning nel log corrente
+grep_named_log	altri warning nel cc.log
+grep_named_log	altri errori nello stesso log guidewire
+grep_named_log	warning nel log guidewire corrente
+
 # ─── bigram [74]: GC + lentezza → correlate_gc_slow vs service_times ──────────
 # Esempi positivi correlate_gc_slow con bigram [74] attivo
 correlate_gc_slow	gc e lentezza delle richieste
