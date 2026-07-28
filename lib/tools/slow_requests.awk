@@ -27,12 +27,10 @@ BEGIN {
     status = c[1]
 
     count++
-    if (count <= max_rows) {
-        buf_status[count] = status
-        buf_method[count] = method
-        buf_url[count]    = url
-        buf_time[count]   = resp_time
-    }
+    buf_status[count] = status
+    buf_method[count] = method
+    buf_url[count]    = url
+    buf_time[count]   = resp_time
     total_time += resp_time
     if (resp_time > max_time) { max_time = resp_time; max_url = url }
 }
@@ -43,7 +41,19 @@ END {
         exit
     }
 
-    # Larghezza massima URL tra le righe bufferizzate
+    # Ordina per tempo di risposta discendente (insertion sort)
+    for (i = 2; i <= count; i++) {
+        ts = buf_status[i]; tm = buf_method[i]; tu = buf_url[i]; tt = buf_time[i]
+        j = i - 1
+        while (j >= 1 && buf_time[j] < tt) {
+            buf_status[j+1] = buf_status[j]; buf_method[j+1] = buf_method[j]
+            buf_url[j+1]    = buf_url[j];    buf_time[j+1]   = buf_time[j]
+            j--
+        }
+        buf_status[j+1] = ts; buf_method[j+1] = tm; buf_url[j+1] = tu; buf_time[j+1] = tt
+    }
+
+    # Larghezza massima URL tra le prime max_rows righe (già ordinate)
     shown = (count < max_rows) ? count : max_rows
     col_url = length("URL")
     for (i = 1; i <= shown; i++)
@@ -61,7 +71,7 @@ END {
             color, buf_status[i], RESET, buf_method[i], col_url, buf_url[i], buf_time[i]
     }
 
-    if (count > max_rows) printf "... (mostrate %d di %d)\n", max_rows, count
+    if (count > max_rows) printf "... (mostrate le %d più lente di %d)\n", max_rows, count
     printf "\nTotale richieste lente: %d (soglia: %d ms)\n", count, threshold_ms
     printf "Risposta più lenta: %d ms → %s\n", max_time, max_url
     printf "Latenza media (lente): %.0f ms\n", total_time / count
