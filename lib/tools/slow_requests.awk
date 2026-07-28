@@ -4,7 +4,12 @@
 #
 # Formato campi: IP [datetime] "METHOD URL PROTO" STATUS BYTES TIME_MS CHAIN UA
 
-BEGIN { FS = " "; if (threshold_ms == "") threshold_ms = 1000; count = 0; max_rows = 30 }
+BEGIN { FS = " "; if (threshold_ms == "") threshold_ms = 1000; count = 0; max_rows = 30; col_url = 52 }
+
+function trunc_end(s, n,    r) {
+    if (length(s) <= n) return s
+    return "…" substr(s, length(s) - n + 2)
+}
 
 {
     if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
@@ -26,7 +31,7 @@ BEGIN { FS = " "; if (threshold_ms == "") threshold_ms = 1000; count = 0; max_ro
 
     count++
     if (count <= max_rows) {
-        printf "%-8s  %-6s  %-50s  %d ms\n", status, method, substr(url, 1, 50), resp_time
+        printf "%-8s  %-6s  %-*s  %d ms\n", status, method, col_url, trunc_end(url, col_url), resp_time
     }
     total_time += resp_time
     if (resp_time > max_time) { max_time = resp_time; max_url = url }

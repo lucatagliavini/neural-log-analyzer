@@ -2,7 +2,12 @@
 # Parametri: -v status_filter="500|5xx|4xx|" (vuoto = tutti gli errori 4xx/5xx)
 #            -v time_from="YYYY-MM-DDTHH:MM"  -v time_to="YYYY-MM-DDTHH:MM"
 
-BEGIN { FS = " "; max_rows = 20 }
+BEGIN { FS = " "; max_rows = 20; col_ep = 52 }
+
+function trunc_end(s, n,    r) {
+    if (length(s) <= n) return s
+    return "…" substr(s, length(s) - n + 2)
+}
 
 {
     if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
@@ -43,8 +48,8 @@ BEGIN { FS = " "; max_rows = 20 }
 }
 
 END {
-    printf "%-50s  %-8s  %s\n", "ENDPOINT", "STATUS", "COUNT"
-    printf "%-50s  %-8s  %s\n", "──────────────────────────────────────────────────", "────────", "──────"
+    printf "%-*s  %-8s  %s\n", col_ep, "ENDPOINT", "STATUS", "COUNT"
+    printf "%-*s  %-8s  %s\n", col_ep, substr("────────────────────────────────────────────────────────────", 1, col_ep), "────────", "──────"
 
     # Ordina per totale decrescente (insertion sort)
     n = 0
@@ -59,7 +64,7 @@ END {
     for (i = 1; i <= n && shown < max_rows; i++) {
         ep = keys[i]
         for (st in endpoint_count[ep]) {
-            printf "%-50s  %-8s  %d\n", ep, st, endpoint_count[ep][st]
+            printf "%-*s  %-8s  %d\n", col_ep, trunc_end(ep, col_ep), st, endpoint_count[ep][st]
             shown++
         }
     }
