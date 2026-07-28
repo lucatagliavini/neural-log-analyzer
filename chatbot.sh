@@ -69,6 +69,8 @@ export PROFILE_DIR
 
 # Carica configurazione di sistema e dominio
 source "$PROFILE_DIR/system.conf"
+# Override locale (non deployato) — per variabili specifiche dell'ambiente di produzione
+[[ -f "$PROFILE_DIR/system.local.conf" ]] && source "$PROFILE_DIR/system.local.conf"
 source "$PROFILE_DIR/domain.conf"
 
 # Allinea TZ di sistema con quella dei log del server (tutti i sottoprocessi la ereditano)
@@ -127,6 +129,36 @@ elif [[ -n "$ACCESS_LOG" && ! -f "$ACCESS_LOG" ]]; then
     exit 1
 fi
 
+# ─── Query logging ───────────────────────────────────────────────────────────
+_QUERY_LOG_FILE=""
+
+_init_query_log() {
+    [[ -z "${QUERY_LOG_DIR:-}" ]] && return
+    mkdir -p "$QUERY_LOG_DIR" 2>/dev/null || return
+    _QUERY_LOG_FILE="${QUERY_LOG_DIR}/chatbot-$(date +%Y-%m-%d).log"
+}
+
+log_query() {
+    [[ -z "$_QUERY_LOG_FILE" ]] && return
+    local query="$1" tools="$2"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$(date '+%Y-%m-%dT%H:%M:%S')" \
+        "${ACTIVE_ENV:-?}" "${ACTIVE_NODE:-?}" \
+        "$query" \
+        "$tools" \
+        "${profile_name:-}" \
+        >> "$_QUERY_LOG_FILE" 2>/dev/null || true
+}
+
+_rotate_query_logs() {
+    [[ -z "${QUERY_LOG_DIR:-}" ]] && return
+    local days="${QUERY_LOG_RETENTION_DAYS:-15}"
+    find "$QUERY_LOG_DIR" -maxdepth 1 -name 'chatbot-*.log' \
+        -mtime "+${days}" -delete 2>/dev/null || true
+}
+
+trap '_rotate_query_logs' EXIT
+
 # ─── Esecuzione query ────────────────────────────────────────────────────────
 run_query() {
     local query="$1"
@@ -167,38 +199,45 @@ run_query() {
     fi
 
     if [[ "$ctx_changed" -eq 1 ]]; then
-        local ctx_msg="  [Contesto: env=$ACTIVE_ENV  nodo=$ACTIVE_NODE  app=$ACTIVE_APP"
-        [[ -n "$ACTIVE_NAMED_LOG" ]] && ctx_msg+="  log=$ACTIVE_NAMED_LOG"
-        ctx_msg+="]"
-        echo "$ctx_msg"
+        local ctx_msg
+        printf "  \033[2m[Contesto: \033[0m\033[1m%s\033[0m\033[2m  nodo \033[0m\033[1m%s\033[0m\033[2m  %s" \
+            "$ACTIVE_ENV" "$ACTIVE_NODE" "$ACTIVE_APP"
+        [[ -n "$ACTIVE_NAMED_LOG" ]] && printf "\033[2m  log=\033[0m\033[1m%s\033[0m" "$ACTIVE_NAMED_LOG"
+        printf "\033[2m]\033[0m\n"
     fi
 
-    echo ""
-    echo "┌─ Query: $query"
+    printf "\n\033[1m┌─\033[0m Query: %s\n" "$query"
 
     local tools
     tools=$("$LIB_DIR/infer.sh" "$query" 2>/dev/null)
 
     if [[ -z "$tools" ]]; then
-        echo "└─ [INFO] Nessun tool attivato con confidenza >= $TOOL_THRESHOLD"
-        echo "   Prova a riformulare la query. Digita \033[1maiuto\033[0m per vedere cosa so fare."
+        log_query "$query" "none"
+        printf "\033[1m└─\033[0m \033[2m[INFO] Nessun tool attivato con confidenza >= %s\033[0m\n" "$TOOL_THRESHOLD"
+        printf "   Prova a riformulare la query. Digita \033[1maiuto\033[0m per vedere cosa so fare.\n"
         return
     fi
 
-    echo "│  Tool attivati:"
+    # Loga: tool attivati come "tool1:pct,tool2:pct"
+    local tools_log
+    tools_log=$(awk '{printf "%s:%d%%,", $1, $2*100}' <<< "$tools" | sed 's/,$//')
+    log_query "$query" "$tools_log"
+
+    printf "\033[1m│\033[0m  Tool attivati:\n"
     while IFS=' ' read -r tool prob; do
         pct=$(awk -v p="$prob" 'BEGIN { printf "%.0f", p * 100 }')
-        echo "│    ▸ $tool (${pct}%) — ${TOOL_DESC[$tool]:-}"
+        printf "\033[1m│\033[0m    \033[1m▸ %s\033[0m \033[2m(%s%%)\033[0m — %s\n" \
+            "$tool" "$pct" "${TOOL_DESC[$tool]:-}"
     done <<< "$tools"
-    echo "│"
+    printf "\033[1m│\033[0m\n"
 
     while IFS=' ' read -r tool _prob; do
-        echo "├─── $tool ─────────────────────────────"
+        printf "\033[1m├─── %s\033[0m ─────────────────────────────\n" "$tool"
         dispatch_tool "$tool"
         echo ""
     done <<< "$tools"
 
-    echo "└──────────────────────────────────────────"
+    printf "\033[1m└──────────────────────────────────────────\033[0m\n"
 }
 
 # ─── Main ────────────────────────────────────────────────────────────────────
@@ -215,6 +254,7 @@ context_line() {
 }
 
 profile_name=$(basename "$PROFILE_DIR")
+_init_query_log
 
 if [[ "$INTERACTIVE" -eq 0 ]]; then
     run_query "${QUERY:-}"

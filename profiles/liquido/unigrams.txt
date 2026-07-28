@@ -1,0 +1,120 @@
+# Vocabolario unigram per il profilo "liquido" (Guidewire/JBoss).
+# Formato: <pattern ERE> :: <peso>   (peso 1 o 2)
+# Righe vuote e righe che iniziano con # sono ignorate.
+# L'ordine determina l'indice della feature nel vettore — non riordinare.
+# Modificare questo file RICHIEDE rebuild del dataset e riaddestramento.
+
+# ── Status HTTP ───────────────────────────────────────────────────────────────
+errore|errori             :: 2
+500                       :: 1
+400                       :: 1
+404                       :: 1
+503                       :: 1
+5xx                       :: 1
+4xx                       :: 1
+status|stato              :: 1
+http                      :: 1
+
+# ── Tempo / finestre temporali ────────────────────────────────────────────────
+ora |ore |ora$            :: 2
+minut                     :: 2
+giorn                     :: 1
+ieri                      :: 1
+oggi                      :: 1
+ultim                     :: 2
+dall[ea]                  :: 1
+recent                    :: 1
+
+# ── Tempo colloquiale ─────────────────────────────────────────────────────────
+stamatt|stanott           :: 1
+questa.matt|questa.sera   :: 1
+poco.fa|adesso\b          :: 1
+
+# ── Distribuzione / aggregazione ─────────────────────────────────────────────
+distribuzion              :: 1
+quant[eo]|quanti          :: 1
+conta|contami             :: 1
+total[ei]                 :: 1
+raggrupp                  :: 1
+frequen                   :: 1
+per                       :: 1
+list[ae]                  :: 1
+tutt[ie]                  :: 1
+numero|numer              :: 1
+
+# ── Performance / latenza ─────────────────────────────────────────────────────
+lent[oaie]|slow           :: 2
+latenz                    :: 1
+\bms\b|millisec           :: 1
+prestazion|performanc     :: 1
+alto|sopra.i\b|tempi.alt|risposta.alt|tempi.elev :: 1
+response.time|sopra.soglia|impiegano.troppo|risposta.ritardat|ritardat :: 1
+timeout                   :: 1
+
+# ── Server log ────────────────────────────────────────────────────────────────
+warn                      :: 1
+exception|eccezion        :: 1
+stack.trace|stacktrace    :: 1
+crash|fatal               :: 1
+log.applicat|server.log   :: 1
+
+# ── GC / JVM ─────────────────────────────────────────────────────────────────
+gc|garbage                :: 1
+heap                      :: 1
+memori[ae]|jvm            :: 1
+
+# ── Endpoint / URL ────────────────────────────────────────────────────────────
+endpoint                  :: 1
+url|path                  :: 1
+api                       :: 1
+
+# ── IP / client ───────────────────────────────────────────────────────────────
+\bip\b                    :: 1
+client|indirizz           :: 1
+\bchi\b|\bchiunque\b|\bchi.ha\b :: 1
+
+# ── Visualizzazione ───────────────────────────────────────────────────────────
+mostr|visualizz|dammi|fammi|elenco|elenca|dimmi|fornisci :: 1
+recent|ultim              :: 1
+
+# ── Errori applicativi ────────────────────────────────────────────────────────
+applicat                  :: 1
+nascost|intern            :: 1
+root.cause|business       :: 1
+loggat|loggati            :: 1
+
+# ── Discriminatori di classe ──────────────────────────────────────────────────
+servizi|servizio|backend|web.?service :: 1
+soa\b                     :: 1
+rig[ah]|tail\b            :: 1
+volum|picch|picco|andament :: 1
+
+# ── Colloquiale / informale ───────────────────────────────────────────────────
+rott[oa]|non.va\b|non.funz :: 1
+c.è.*problem|qualcosa.*stran :: 1
+vediamo|un.occhiat         :: 1
+
+# ── Ricerca cross-log (C15) ───────────────────────────────────────────────────
+cerca\b|trova\b|ricerca\b|search\b :: 2
+dove.appare|dove.si.trova|in.quali.log|cerca.ovunque|tutti.i.log :: 2
+
+# ── Help / assistenza (C14) ───────────────────────────────────────────────────
+aiuto|help\b|\baiutami\b         :: 2
+cosa.sai|cosa.puoi|cosa.fai|che.strumenti|comandi.disponibili :: 2
+come.funzion|come.si.usa|come.posso.usar|come.ti.uso :: 2
+istruzion|guida\b|menu\b|capabilit|funzionalit :: 2
+quali.log.sai|che.tipo.di.log|quali.analisi|che.*analisi|che.query :: 2
+opzioni.disponibil|strumenti.disponibil|strumenti.*hai :: 2
+
+# ── Log Guidewire specifici ───────────────────────────────────────────────────
+cc\.log|claimcenter.log     :: 2
+api\.log                    :: 2
+database\.log|db\.log       :: 2
+messaging\.log              :: 2
+performance.integr|perf.int  :: 2
+jgroups                     :: 2
+plugin[s.]|ruleengine|studio :: 1
+coda|queue\b|batch\b        :: 1
+velocity\.log|velocity\b    :: 2
+\bdice\b|\bcosa.dice\b      :: 1
+\bguidewire\b               :: 2

@@ -161,7 +161,7 @@ tail_log	log più recenti
 tail_log	dammi le ultime richieste
 tail_log	ultime 20 righe
 tail_log	eventi più recenti
-tail_log	cosa è successo nell'access log
+tail_log	cosa è successo di recente nell'access log
 tail_log	mostra gli ultimi log
 tail_log	ultime richieste al server
 tail_log	visualizza log recenti
@@ -844,7 +844,6 @@ service_times	response time dei servizi nelle ultime 2 ore
 # ── C14: show_help ────────────────────────────────────────────────────────────
 show_help	aiuto
 show_help	help
-show_help	?
 show_help	aiutami
 show_help	cosa sai fare
 show_help	cosa puoi fare
@@ -852,11 +851,11 @@ show_help	che cosa sai fare
 show_help	cosa fai
 show_help	che strumenti hai
 show_help	che cosa puoi fare
-show_help	quali strumenti hai a disposizione
+show_help	che strumenti hai a disposizione
 show_help	mostrami i comandi disponibili
 show_help	elenca cosa sai fare
 show_help	quali analisi puoi fare
-show_help	che tipo di analisi fai
+show_help	che tipo di analisi puoi fare
 show_help	cosa puoi analizzare
 show_help	dimmi cosa sai fare
 show_help	come funzioni
@@ -865,15 +864,15 @@ show_help	come ti uso
 show_help	che funzionalità hai
 show_help	lista degli strumenti
 show_help	elenco strumenti disponibili
-show_help	cosa posso chiederti
+show_help	cosa posso chiederti e che analisi fai
 show_help	che query posso fare
 show_help	dammi l'help
 show_help	fammi vedere cosa sai fare
 show_help	che analisi posso chiedere
 show_help	spiegami cosa puoi fare
 show_help	come faccio a sapere cosa puoi fare
-show_help	non so cosa chiederti
-show_help	cosa posso fare con te
+show_help	non so cosa chiederti mostrami le opzioni disponibili
+show_help	cosa posso fare con te che funzionalità hai
 show_help	quali log sai analizzare
 show_help	che tipo di log sai leggere
 show_help	come si usa questo bot
@@ -882,3 +881,120 @@ show_help	guida
 show_help	menu
 show_help	opzioni disponibili
 show_help	capabilities
+
+# ── Fix 1: "problemi/anomalie" su log named → grep_named_log (non tail_named_log) ──
+grep_named_log	problemi nel cc.log
+grep_named_log	problemi sul cc.log
+grep_named_log	ci sono problemi nel cc.log
+grep_named_log	anomalie nel cc.log
+grep_named_log	cosa non va nel cc.log
+grep_named_log	errori anomali nel cc.log
+grep_named_log	problemi nel api.log
+grep_named_log	ci sono problemi nell'api.log
+grep_named_log	anomalie nel api.log
+grep_named_log	problemi nel database.log
+grep_named_log	anomalie nel database.log
+grep_named_log	problemi nel messaging.log
+grep_named_log	anomalie nel messaging.log
+grep_named_log	il cc.log segnala problemi
+grep_named_log	problemi nel log guidewire
+grep_named_log	problemi nel cc.log guidewire
+
+# ── Fix 2: "distribuzione" → count_status negativo (evita false positive) ──
+count_status	distribuzione degli status http
+count_status	distribuzione dei codici di risposta
+count_status	quante richieste per ogni status
+count_status	distribuzione del traffico per status
+count_status	quanti status diversi ci sono
+count_status	conta le risposte per codice http
+count_status	che distribuzione hanno gli status
+
+# ── Fix 3: negativi C14 — "dammi/mostrami" + contesto performance NON è help ──
+slow_requests	dammi le chiamate con latenza alta
+slow_requests	mostrami le richieste lente di stamattina
+slow_requests	fammi vedere le chiamate lente in produzione
+slow_requests	elencami le richieste più lente sul nodo 5
+slow_requests	mostrami le richieste con tempo di risposta alto
+slow_requests	dammi le 30 chiamate più lente di oggi
+slow_requests	mostrami le chiamate sopra i 5000ms
+slow_requests	fammi vedere i tempi di risposta peggiori
+traffic_volume	mostrami il volume di traffico di stamattina
+traffic_volume	dammi l'andamento del traffico nelle ultime ore
+traffic_volume	mostrami i picchi di traffico di oggi
+traffic_volume	fammi vedere il volume richieste per ora
+tail_named_log	mostrami le ultime righe del cc.log
+tail_named_log	dammi la coda del cc.log
+tail_named_log	fammi vedere la fine del api.log
+tail_named_log	mostrami le ultime 100 righe del database.log
+
+# ── Fix vocab 2026-07-28: slow_requests "alto/sopra", filter_ip "chi", distribute_status "quali endpoint" ──
+
+# slow_requests — tempo alto / sopra soglia
+slow_requests	richieste con tempo di risposta alto
+slow_requests	chiamate con latenza alta
+slow_requests	tempi di risposta alti stamattina
+slow_requests	chiamate sopra i 5000ms
+slow_requests	richieste sopra i 3 secondi
+slow_requests	chiamate con tempi elevati
+slow_requests	richieste con risposta lenta
+slow_requests	tempi alti sul nodo 7
+
+# filter_ip — chi ha fatto richieste
+filter_ip	chi ha fatto più richieste sul nodo 2
+filter_ip	chi ha generato più traffico
+filter_ip	chi ha fatto più chiamate stamattina
+filter_ip	chi ha causato più errori
+filter_ip	quale ip ha fatto più richieste
+filter_ip	chi ha bombardato il server
+
+# distribute_status — quali endpoint / api senza "distribuzione" esplicita
+distribute_status	quali endpoint generano più errori 400
+distribute_status	quali api hanno più errori 500
+distribute_status	quali path hanno più 404
+distribute_status	quale endpoint ha più fallimenti
+distribute_status	quale api genera più errori
+distribute_status	quali url producono più 5xx
+distribute_status	su quale endpoint si concentrano i 500
+distribute_status	quali endpoint hanno problemi
+
+# ── C15: search_all_logs — ricerca cross-log ──────────────────────────────────
+search_all_logs	cerca NullPointerException nei log
+search_all_logs	cerca NullPointerException in tutti i log
+search_all_logs	trova NullPointerException nei log del nodo 5
+search_all_logs	dove appare il sinistro 1-8101-2026-0473954
+search_all_logs	dove si trova il claim 1-8101-2026-0473954
+search_all_logs	in quali log c'è il claim 1-8101-2026-0473954
+search_all_logs	cerca ovunque ABContactSystemPlugin
+search_all_logs	trova DAOLavaParametri in tutti i log
+search_all_logs	cerca il pattern PtfInfoAF nei log
+search_all_logs	in quali log appare l'errore AssignmentException
+search_all_logs	cerca l'utente MARIO ROSSI nei log
+search_all_logs	dove appare l'ip 10.156.7.250
+search_all_logs	trova il transaction id abc123 nei log
+search_all_logs	cerca Exception in tutti i log del nodo 12
+search_all_logs	in quali log compare ClaimValidation
+search_all_logs	dove è loggato il claim 1-8001-2026-0205405
+search_all_logs	cerca il codice sinistro 1-8101-2025-0029063
+search_all_logs	trova timeout in tutti i log
+search_all_logs	cerca connection refused nei log
+search_all_logs	dove appare OutOfMemoryError
+search_all_logs	trova StackOverflowError ovunque
+search_all_logs	cerca in tutti i log il messaggio deadlock
+search_all_logs	in quali log c'è il codice utente UGA06429
+search_all_logs	trova l'errore ConcurrentModificationException
+search_all_logs	cerca il servizio WsUtility in tutti i log
+search_all_logs	dove compare il batch ccJBatch nei log
+search_all_logs	ricerca cross-log per DAOLavaParametri
+search_all_logs	cerca ABContactSystemPlugin ovunque nel nodo 3
+search_all_logs	trova il pattern SIUStatus nei log
+search_all_logs	cerca in tutti i log AssegnazionePolicySuffix
+search_all_logs	dove appare l'eccezione ValidateTokenJWT
+search_all_logs	in quali log si trova l'utente FRANCESCA DJALALI
+search_all_logs	cerca il codice errore CLV00404
+search_all_logs	trova il messaggio credentialToJWT in tutti i log
+search_all_logs	cerca ManualFindPolicyStep nei log del nodo 5
+search_all_logs	trova il claim number 1-8001-2026-0211995 ovunque
+search_all_logs	dove è loggato l'ip 172.30.169.1
+search_all_logs	cerca AnnoSinistroPolicySuffix in tutti i log
+search_all_logs	trova il pattern ContactManager nei log
+search_all_logs	dove appare l'errore AFeiDispatcher

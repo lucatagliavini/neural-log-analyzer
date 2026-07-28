@@ -50,7 +50,8 @@ elif echo "$query" | grep -qE "(mostra|dammi|visualizza) [0-9]+ *(rig[ah]|record
     TAIL_N=$(echo "$query" | grep -oE "[0-9]+" | head -1)
 fi
 
-# Livello log per grep_named_log: "errori/error" → ERROR, "warning/warn" → WARN, "info" → INFO
+# Livello log per grep_named_log: "problemi/anomalie" → WARN+ (ERROR+WARN),
+# "errori/error" → ERROR, "warning/warn" → WARN, "info" → INFO, "tutti/all" → ALL
 LOG_LEVEL="ERROR"
 if   echo "$query" | grep -qE "\bwarn(ing)?\b|\bavviso\b"; then
     LOG_LEVEL="WARN"
@@ -58,6 +59,8 @@ elif echo "$query" | grep -qE "\binfo\b|\binformazioni\b"; then
     LOG_LEVEL="INFO"
 elif echo "$query" | grep -qE "\btutti?\b.*livell|\ball\b.*level|ogni.livell"; then
     LOG_LEVEL="ALL"
+elif echo "$query" | grep -qE "\bprobl[ei]|anomal|cosa.non.va|non.va\b|incident|stran"; then
+    LOG_LEVEL="WARN+"
 fi
 
 # Nome log Guidewire specifico: "cc.log", "api.log", "database log", "messaging", ...
@@ -70,6 +73,20 @@ for _log_name in cc api database messaging performance_integr jgroups plugin rul
     fi
 done
 
+# Pattern di ricerca libero per search_all_logs.
+# Estratto da: "cerca X", "trova X", "dove appare X", "in quali log c'è X",
+# "cerca ovunque X", "cerca in tutti i log X"
+SEARCH_PATTERN=""
+_sq="${1,,}"  # query originale in minuscolo
+if echo "$_sq" | grep -qiE "\bcerca\b|\btrova\b|\bdove.appare\b|\bdove.si.trova\b|in.quali.log|cerca.ovunque|cerca.in.tutti"; then
+    # Estrai il token dopo il verbo / la frase trigger
+    SEARCH_PATTERN=$(echo "$_sq" | \
+        sed -E 's/.*(cerca ovunque|cerca in tutti i log|in quali log c.è|in quali log|dove appare|dove si trova|cerca|trova)[[:space:]]*//' | \
+        sed -E 's/^(il pattern|il testo|la stringa|il sinistro|l.utente|l.errore|il codice|il messaggio)[[:space:]]*//' | \
+        sed -E 's/[[:space:]]*(nei log|ovunque|in tutti i log|nei vari log)$//' | \
+        sed 's/^ *//' | sed 's/ *$//')
+fi
+
 echo "TIME_FROM='${TIME_FROM}'"
 echo "TIME_TO='${TIME_TO}'"
 echo "DATE_FILTER='${DATE_FILTER}'"
@@ -79,3 +96,4 @@ echo "IP_FILTER='${IP_FILTER}'"
 echo "TAIL_N='${TAIL_N}'"
 echo "NAMED_LOG='${NAMED_LOG}'"
 echo "LOG_LEVEL='${LOG_LEVEL}'"
+echo "SEARCH_PATTERN='${SEARCH_PATTERN}'"

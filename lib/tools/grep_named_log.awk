@@ -1,58 +1,84 @@
 # Filtra un log Guidewire per livello (ERROR/WARN/INFO) e/o pattern testuale.
-# A differenza di tail_named_log, non restituisce le ultime N righe ma le righe
-# che corrispondono ai criteri di filtro (utile per trovare errori nel cc.log, ecc.)
 #
 # Parametri:
-#   -v level="ERROR"        livello da filtrare (ERROR|WARN|INFO|"" per tutti)
-#   -v pattern=""           pattern ERE aggiuntivo (vuoto = nessun filtro pattern)
+#   -v level="ERROR"        livello (ERROR|WARN|INFO|WARN+|ALL)
+#   -v pattern=""           pattern ERE aggiuntivo (vuoto = nessun filtro)
 #   -v tail_n=50            massimo righe di output
 #   -v time_from="YYYY-MM-DDTHH:MM"
 #   -v time_to="YYYY-MM-DDTHH:MM"
 #
-# Formato atteso: YYYY-MM-DD HH:MM:SS,mmm LEVEL [classe] (thread) messaggio
+# Formato Guidewire: [thread] USER YYYY-MM-DDTHH:MM:SS,mmm LEVEL messaggio
+# Il timestamp è in posizione variabile — estratto con regex.
 
 BEGIN {
     FS = " "
-    max_rows = (tail_n+0 > 0) ? tail_n+0 : 50
+    n = (tail_n+0 > 0) ? tail_n+0 : 50
     if (level == "") level = "ERROR"
-    count = 0; shown = 0
+    count = 0
     RED = "\033[31m"; YELLOW = "\033[33m"; DIM = "\033[2m"; RESET = "\033[0m"
+    GW_RE = "([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]+) (ERROR|WARN|INFO|DEBUG|TRACE)(.*)"
 }
 
-/^[0-9]{4}-[0-9]{2}-[0-9]{2}/ {
-    if ((time_from != "" || time_to != "") && !in_range(parse_server($1, $2))) next
+{
+    if (!match($0, GW_RE, m)) next
 
-    row_level = $3
-    if (level != "ALL" && row_level != level) next
+    row_ts    = m[1]
+    row_level = m[2]
+    row_msg   = m[3]
+    sub(/^ /, "", row_msg)
+
+    if (level == "WARN+") {
+        if (row_level != "ERROR" && row_level != "WARN") next
+    } else if (level != "ALL" && row_level != level) next
+
     if (pattern != "" && $0 !~ pattern) next
 
-    count++
-
-    if (shown < max_rows) {
-        shown++
-        logger = $4; gsub(/[\[\]]/, "", logger)
-        msg = ""
-        for (i = 6; i <= NF; i++) msg = msg " " $i
-        sub(/^ /, "", msg)
-
-        color = (row_level == "ERROR") ? RED : (row_level == "WARN") ? YELLOW : ""
-        rst   = (color != "") ? RESET : ""
-
-        printf "%s[%s %s] %-5s%s  %s%-35s%s  %s\n", \
-            color, $1, $2, row_level, rst, \
-            DIM, substr(logger, 1, 35), rst, \
-            substr(msg, 1, 90)
+    if (time_from != "" || time_to != "") {
+        ts_str = row_ts
+        gsub(/T/, " ", ts_str); gsub(/,.*/, "", ts_str)
+        split(ts_str, dt, " ")
+        split(dt[1], d, "-"); split(dt[2], t, ":")
+        epoch = mktime(d[1] " " d[2] " " d[3] " " t[1] " " t[2] " " t[3])
+        if (!in_range(epoch)) next
     }
+
+    # Ring buffer: tieni le ultime n righe corrispondenti
+    thread = $0
+    if (match(thread, /\[([^\]]+)\]/, th)) thread = th[1]
+    else thread = ""
+
+    buf_ts[count % n]     = row_ts
+    buf_level[count % n]  = row_level
+    buf_msg[count % n]    = row_msg
+    buf_thread[count % n] = thread
+    count++
 }
 
 END {
     if (count == 0) {
         printf "Nessuna riga trovata"
-        if (level != "ALL") printf " (level=%s)", level
-        if (pattern != "")  printf " (pattern=%s)", pattern
+        if (level == "WARN+")    printf " (level=ERROR+WARN)"
+        else if (level != "ALL") printf " (level=%s)", level
+        if (pattern != "")       printf " (pattern=%s)", pattern
         print "."
-    } else {
-        if (count > shown) printf "... (mostrate %d di %d)\n", shown, count
-        printf "Totale: %d righe\n", count
+        exit
     }
+
+    shown = (count < n) ? count : n
+    start = (count < n) ? 0 : (count % n)
+    for (i = 0; i < shown; i++) {
+        idx = (start + i) % n
+        rl  = buf_level[idx]
+        color = (rl == "ERROR") ? RED : (rl == "WARN") ? YELLOW : ""
+        rst   = (color != "") ? RESET : ""
+        printf "%s%-5s%s  %s%s%s  %s\n", \
+            color, rl, rst, \
+            DIM, substr(buf_ts[idx], 1, 19), RESET, \
+            substr(buf_msg[idx], 1, 100)
+        if (buf_thread[idx] != "")
+            printf "       %s[%s]%s\n", DIM, substr(buf_thread[idx], 1, 60), RESET
+    }
+
+    if (count > shown) printf "\n... (mostrate ultime %d di %d totali)\n", shown, count
+    else printf "\nTotale: %d righe\n", count
 }

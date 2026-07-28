@@ -26,8 +26,7 @@ if [[ -z "$PROFILE_DIR" ]]; then
 fi
 
 export PROFILE_DIR
-source "$PROFILE_DIR/domain.conf"
-source "$PROFILE_DIR/vocab.sh"
+source "$PROFILE_DIR/domain.conf"   # include già vocab.sh internamente
 
 LABELED="$PROFILE_DIR/dataset/queries_labeled.txt"
 DATASET_FILE="$PROFILE_DIR/dataset/queries.txt"
@@ -42,10 +41,19 @@ echo "# Profilo: $(basename "$PROFILE_DIR") | ${NUM_FEATURES:-?} feature + $NUM_
 echo "# Generato da build-dataset.sh — non modificare a mano" >> "$DATASET_FILE"
 
 count=0
+zero_vec_count=0
+declare -a zero_vec_examples=()
+
 while IFS=$'\t' read -r labels query; do
-    [[ -z "$query" || "$query" == \#* ]] && continue
+    [[ -z "$query" || "$query" == \#* || "$labels" == \#* ]] && continue
 
     features=$("$LIB_DIR/query-to-features.sh" "$query")
+
+    # Linter: vettore feature tutto-zero → la query non attiva alcun pattern del vocab
+    if echo "$features" | awk '{s=0; for(i=1;i<=NF;i++) s+=$i+0; exit (s==0)?0:1}'; then
+        zero_vec_count=$(( zero_vec_count + 1 ))
+        zero_vec_examples+=("[$labels] \"$query\"")
+    fi
 
     IFS=',' read -ra label_list <<< "$labels"
     primary_tool="${label_list[0]}"
@@ -70,3 +78,15 @@ while IFS=$'\t' read -r labels query; do
 done < "$LABELED"
 
 echo "[OK] Dataset generato: $count esempi → $DATASET_FILE"
+
+# ─── Linter: report vettori zero ──────────────────────────────────────────────
+if [[ "$zero_vec_count" -gt 0 ]]; then
+    echo "" >&2
+    echo "[WARN] vocab-linter: $zero_vec_count esempi con feature vector tutto-zero (la rete non può imparare da questi):" >&2
+    for ex in "${zero_vec_examples[@]}"; do
+        echo "         → $ex" >&2
+    done
+    echo "" >&2
+    echo "       Suggerimento: estendi vocab.sh con un pattern che copra queste query," >&2
+    echo "       oppure riformula gli esempi usando termini già nel vocabolario." >&2
+fi

@@ -65,6 +65,11 @@ print_help() {
     printf "  ${DIM}%-20s${RESET}  ${DIM}%s${RESET}\n" "" "es: \"ultime 100 righe del api.log sul nodo 9\""
     printf "\n"
 
+    printf "  ${CYAN}${BOLD}Ricerca cross-log${RESET}\n"
+    printf "  ${BOLD}%-20s${RESET}  %s\n"  "cerca ovunque"        "Cerca un pattern in tutti i log del nodo (access, server, GC, Guidewire)"
+    printf "  ${DIM}%-20s${RESET}  ${DIM}%s${RESET}\n" "" "es: \"cerca NullPointerException nei log del nodo 5\""
+    printf "\n"
+
     printf "  ${DIM}Specifica sempre env e nodo nella query (es: \"in prod nodo 4\") o all'avvio con --env / --node.${RESET}\n"
     printf "  ${DIM}Digita ${RESET}${BOLD}aiuto${RESET}${DIM} in qualsiasi momento per rivedere questa lista.${RESET}\n\n"
 }
@@ -194,6 +199,61 @@ dispatch_tool() {
                 -v tail_n="${TAIL_N:-50}" \
                 "$(open_log "$log_path")"
             ;;
+        search_all_logs)
+            local sp="${SEARCH_PATTERN:-}"
+            if [[ -z "$sp" ]]; then
+                echo "[SKIP] Nessun pattern di ricerca specificato nella query"
+                return
+            fi
+            local total=0
+            local searched=0
+
+            # Funzione interna: esegue il tool su un singolo log e aggiorna totale
+            _search_one() {
+                local label="$1" path="$2"
+                [[ -z "$path" ]] && return
+                local out
+                out=$(eval gawk \
+                    -f "'$TOOLS_DIR/search_all_logs.awk'" \
+                    -v pattern="'$sp'" \
+                    -v log_label="'$label'" \
+                    -v context_n=1 \
+                    -v max_matches=20 \
+                    "$(open_log "$path")" 2>/dev/null)
+                searched=$(( searched + 1 ))
+                local hits
+                hits=$(printf '%s\n' "$out" | awk '/^__MATCHES__/ {print $3}')
+                total=$(( total + ${hits:-0} ))
+                # Stampa tutto tranne la riga __MATCHES__
+                printf '%s\n' "$out" | grep -v "^__MATCHES__"
+            }
+
+            # Log HTTP
+            [[ -n "$access" ]] && _search_one "access.log" "$access"
+            # Log JBoss
+            [[ -n "$server" ]] && _search_one "server.log" "$server"
+            # Log GC
+            [[ -n "$gc"     ]] && _search_one "gc.log"     "$gc"
+            # Log Guidewire — tutti i .log nella directory
+            local gw_dir="${GUIDEWIRE_LOG_DIR:-}"
+            if [[ -n "$gw_dir" && -d "$gw_dir" ]]; then
+                while IFS= read -r gw_file; do
+                    local gw_label
+                    gw_label=$(basename "$gw_file")
+                    _search_one "$gw_label" "$gw_file"
+                done < <(find "$gw_dir" -maxdepth 1 \
+                    \( -name "*.log" -o -name "*.log.gz" \) \
+                    2>/dev/null | grep -v "[0-9]\{10\}" | sort)
+            fi
+
+            echo ""
+            if [[ "$total" -eq 0 ]]; then
+                printf "Nessuna occorrenza di \033[1m%s\033[0m trovata in %d log.\n" "$sp" "$searched"
+            else
+                printf "\033[1mTotale:\033[0m %d occorrenze in %d log analizzati.\n" "$total" "$searched"
+            fi
+            ;;
+
         show_help)
             print_help
             ;;
