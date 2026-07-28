@@ -2,11 +2,9 @@
 # Parametri: -v status_filter="500|5xx|4xx|" (vuoto = tutti gli errori 4xx/5xx)
 #            -v time_from="YYYY-MM-DDTHH:MM"  -v time_to="YYYY-MM-DDTHH:MM"
 
-BEGIN { FS = " "; max_rows = 20; col_ep = 52 }
-
-function trunc_end(s, n,    r) {
-    if (length(s) <= n) return s
-    return "…" substr(s, length(s) - n + 2)
+BEGIN {
+    FS = " "; max_rows = 20
+    RED = "\033[31m"; YELLOW = "\033[33m"; RESET = "\033[0m"
 }
 
 {
@@ -48,10 +46,7 @@ function trunc_end(s, n,    r) {
 }
 
 END {
-    printf "%-*s  %-8s  %s\n", col_ep, "ENDPOINT", "STATUS", "COUNT"
-    printf "%-*s  %-8s  %s\n", col_ep, substr("────────────────────────────────────────────────────────────", 1, col_ep), "────────", "──────"
-
-    # Ordina per totale decrescente (insertion sort)
+    # Calcola larghezza massima endpoint tra quelli che verranno mostrati
     n = 0
     for (ep in endpoint_total) { keys[++n] = ep; vals[n] = endpoint_total[ep] }
     for (i = 2; i <= n; i++) {
@@ -60,11 +55,28 @@ END {
         keys[j+1] = tk; vals[j+1] = tv
     }
 
+    col_ep = length("ENDPOINT")
     shown = 0
     for (i = 1; i <= n && shown < max_rows; i++) {
         ep = keys[i]
         for (st in endpoint_count[ep]) {
-            printf "%-*s  %-8s  %d\n", col_ep, trunc_end(ep, col_ep), st, endpoint_count[ep][st]
+            if (length(ep) > col_ep) col_ep = length(ep)
+            shown++
+        }
+    }
+
+    sep = ""
+    for (k = 1; k <= col_ep; k++) sep = sep "─"
+
+    printf "%-*s  %-8s  %s\n", col_ep, "ENDPOINT", "STATUS", "COUNT"
+    printf "%-*s  %-8s  %s\n", col_ep, sep, "────────", "──────"
+
+    shown = 0
+    for (i = 1; i <= n && shown < max_rows; i++) {
+        ep = keys[i]
+        for (st in endpoint_count[ep]) {
+            color = (substr(st,1,1) == "5") ? RED : YELLOW
+            printf "%-*s  %s%-8s%s  %d\n", col_ep, ep, color, st, RESET, endpoint_count[ep][st]
             shown++
         }
     }
