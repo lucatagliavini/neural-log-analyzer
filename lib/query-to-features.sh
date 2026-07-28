@@ -34,14 +34,25 @@ for entry in "${UNIGRAMS[@]}"; do
 done
 
 # ─── BIGRAM (co-presenza) ─────────────────────────────────────────────────────
+# Formato: "patA :: patB"          — peso implicito 1
+#          "patA :: patB :: N"     — peso esplicito N
 for bigram in "${BIGRAMS[@]}"; do
     patA="${bigram%%::*}"
-    patB="${bigram##*::}"
     patA="${patA// /}"
-    patB="${patB// /}"
+    last="${bigram##*::}"
+    last="${last// /}"
+    if [[ "$last" =~ ^[0-9]+$ ]]; then
+        weight="$last"
+        rest="${bigram#*::}"
+        patB="${rest%%::*}"
+        patB="${patB// /}"
+    else
+        weight="1"
+        patB="$last"
+    fi
     if echo "$query" | grep -qE "$patA" 2>/dev/null && \
        echo "$query" | grep -qE "$patB" 2>/dev/null; then
-        features+=("1")
+        features+=("$weight")
     else
         features+=("0")
     fi

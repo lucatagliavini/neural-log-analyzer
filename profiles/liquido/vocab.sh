@@ -12,7 +12,7 @@
 
 # Numero totale di feature: len(UNIGRAMS) + len(BIGRAMS). Deve essere coerente
 # con MODEL_TOPOLOGY in domain.conf (primo valore = NUM_FEATURES).
-NUM_FEATURES=74
+NUM_FEATURES=75
 
 # ─── UNIGRAM ─────────────────────────────────────────────────────────────────
 UNIGRAMS=(
@@ -110,8 +110,10 @@ BIGRAMS=(
     "volum|andament|picco         :: ora |ore |ultim|minut|giorn"
     # [71] righe/tail + recente → tail_log (non traffic_volume)
     "rig[ah]|tail\b               :: ultim|recent|recenti"
-    # [72] log Guidewire + errore/filtr → grep_named_log (non tail_named_log)
-    "cc\.log|api\.log|database\.log|messaging\.log|jgroups|performance.integr :: errore|errori|warn|filtr|cerca|eccezioni|exception"
+    # [72] log Guidewire + errore/filtr → grep_named_log (non tail_named_log) — peso 2 per battere unigram errore[0]
+    "cc\.log|api\.log|database\.log|messaging\.log|jgroups|performance.integr :: errore|errori|warn|filtr|cerca|eccezioni|exception :: 2"
     # [73] log Guidewire + mostra/riga → tail_named_log (non grep_named_log)
     "cc\.log|api\.log|database\.log|messaging\.log|jgroups|performance.integr :: mostr|visualizz|dammi|rig[ah]|ultim|cosa.c.*nel|tail\b"
+    # [74] GC + lentezza/latenza → correlate_gc_slow (non gc_stats o service_times) — peso 2
+    "gc\b|garbage|jvm\b|g1gc :: lent[oaie]|latenz|slow\b|impatto|degrada|rallent :: 2"
 )

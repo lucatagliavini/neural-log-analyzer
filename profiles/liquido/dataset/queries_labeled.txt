@@ -478,37 +478,37 @@ tail_named_log	apri il cc.log
 tail_named_log	mostrami l'api.log
 tail_named_log	ultime righe dell'api.log
 tail_named_log	cosa dice l'api.log
-tail_named_log	errori nell'api.log
+grep_named_log	errori nell'api.log
 tail_named_log	controlla l'api.log
 tail_named_log	mostrami il database.log
 tail_named_log	ultime righe del database log
 tail_named_log	cosa c'è nel database.log
-tail_named_log	errori nel database.log
+grep_named_log	errori nel database.log
 tail_named_log	mostrami il messaging.log
 tail_named_log	ultime righe del messaging.log
 tail_named_log	messaggi in coda non processati nel messaging.log
 tail_named_log	cosa dice il messaging log
-tail_named_log	errori nel messaging.log
+grep_named_log	errori nel messaging.log
 tail_named_log	mostrami il performance_integrations log
 tail_named_log	ultime righe del performance_integr log
 tail_named_log	performance delle integrazioni nel log
 tail_named_log	latenze nel performance_integrations.log
 tail_named_log	mostrami il jgroups.log
 tail_named_log	ultime righe del jgroups.log
-tail_named_log	errori di cluster nel jgroups log
+grep_named_log	errori di cluster nel jgroups log
 tail_named_log	cosa dice il jgroups.log
 tail_named_log	mostrami il plugin log
-tail_named_log	errori nei plugin nel log
+grep_named_log	errori nei plugin nel log
 tail_named_log	ultime righe del ruleengine log
 tail_named_log	regole di business nel ruleengine log
 tail_named_log	cosa c'è nel ruleengine.log
 tail_named_log	mostrami il ccJBatch log
-tail_named_log	errori nel batch log
+grep_named_log	errori nel batch log
 tail_named_log	ultime righe del ccJBatch
 tail_named_log	mostrami il studio.log
 tail_named_log	cosa c'è nel velocity.log
 tail_named_log	ultime righe del contactsearch.log
-tail_named_log	errori nel claimnumgen log
+grep_named_log	errori nel claimnumgen log
 tail_named_log	performance delle integrazioni nel log
 tail_named_log	controlla il log delle performance delle integrazioni
 tail_named_log	latenze delle integrazioni nel performance log
@@ -803,3 +803,28 @@ grep_named_log	exception nel jgroups.log
 grep_named_log	eccezioni nel jgroups.log
 grep_named_log	warning nel jgroups.log
 grep_named_log	warn nel jgroups.log
+
+# ─── bigram [74]: GC + lentezza → correlate_gc_slow vs service_times ──────────
+# Esempi positivi correlate_gc_slow con bigram [74] attivo
+correlate_gc_slow	gc e lentezza delle richieste
+correlate_gc_slow	garbage collector e latenza alta
+correlate_gc_slow	jvm lenta durante il gc
+correlate_gc_slow	degrado delle performance durante gc
+correlate_gc_slow	il gc rallenta le richieste http
+correlate_gc_slow	latenza alta correlata al garbage collector
+correlate_gc_slow	richieste degradate durante le pause jvm
+correlate_gc_slow	gc causa lentezza nel server
+correlate_gc_slow	slow request legata al gc
+correlate_gc_slow	latenza degradata durante garbage collection
+# Esempi negativi: gc_stats senza correlazione con richieste lente
+gc_stats	statistiche gc senza impatto sulla latenza
+gc_stats	quante pause gc ci sono state
+gc_stats	frequenza del garbage collector oggi
+gc_stats	durata media delle pause gc
+gc_stats	heap usage durante il gc
+# Esempi negativi: service_times senza gc
+service_times	latenza dei servizi soa senza gc
+service_times	tempi di risposta del backend indipendenti dal gc
+service_times	web service lenti non legati al garbage collector
+service_times	performance dei servizi backend questa mattina
+service_times	response time dei servizi nelle ultime 2 ore

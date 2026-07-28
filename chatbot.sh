@@ -46,7 +46,7 @@ while [[ $# -gt 0 ]]; do
         --gc-log)     GC_LOG="$2";              shift 2 ;;
         --query)      QUERY="$2"; INTERACTIVE=0; shift 2 ;;
         -h|--help)
-            grep "^#" "$0" | head -16 | sed 's/^# \?//'
+            grep "^#" "$0" | grep -v "^#!" | head -16 | sed 's/^# \?//'
             exit 0
             ;;
         *) echo "[ERROR] opzione sconosciuta: $1" >&2; exit 1 ;;
