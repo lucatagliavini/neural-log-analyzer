@@ -1,7 +1,12 @@
 #!/bin/bash
 #
 # Risolve i path dei file di log data la tupla (base_dir, env, nodo, app).
-# Emette variabili shell: ACCESS_LOG, SERVER_LOG, GC_LOG, GUIDEWIRE_LOG_DIR
+# Emette variabili shell: ACCESS_LOG, ACCESS_LOG_DIR, ACCESS_LOG_BASE,
+#                         SERVER_LOG, GC_LOG, GC_LOG_DIR, GC_LOG_BASE,
+#                         GUIDEWIRE_LOG_DIR
+#
+# La selezione temporale dei file di rotazione è delegata a utils-logfiles.sh
+# (chiamata in open_logs() dentro dispatch.sh ad ogni query).
 #
 # Uso: eval "$(./lib/resolve-logs.sh <base_dir> <env> <nodo_num> [<app>])"
 #
@@ -68,35 +73,20 @@ resolve_log_file() {
 }
 
 SERVER_LOG_PATH=$(resolve_log_file "$APP_DIR/server.log")
-GC_LOG_PATH=$(resolve_log_file "$APP_DIR/gc.log")
 
-DATE_FILTER="${DATE_FILTER:-}"
-
-if [[ -n "$DATE_FILTER" ]]; then
-    # Cerca il log ruotato per la data specifica (es. "ieri")
-    ACCESS_LOG_PATH=$(
-        { find "$APP_DIR" -maxdepth 1 \
-            -name "undertow_access_log.${DATE_FILTER}.log" -o \
-            -name "undertow_access_log.${DATE_FILTER}.log.gz"; } 2>/dev/null \
-        | sort -r | head -1
-    )
-    if [[ -z "$ACCESS_LOG_PATH" ]]; then
-        echo "echo '[WARN] resolve-logs: nessun log per data $DATE_FILTER in $APP_DIR — uso log corrente' >&2"
-    fi
-fi
-
+# Access log: path del file corrente (usato solo per validazione esistenza)
+ACCESS_LOG_PATH=$(resolve_log_file "$APP_DIR/undertow_access_log.log")
 if [[ -z "$ACCESS_LOG_PATH" ]]; then
-    ACCESS_LOG_PATH=$(
-        { find "$APP_DIR" -maxdepth 1 -name "undertow_access_log*.log" -o \
-                                       -name "undertow_access_log*.log.gz"; } 2>/dev/null \
-        | sort -r | head -1
-    )
+    # fallback: qualsiasi file undertow presente
+    ACCESS_LOG_PATH=$(find "$APP_DIR" -maxdepth 1 -name "undertow_access_log*" 2>/dev/null | sort -r | head -1)
 fi
-
 if [[ -z "$ACCESS_LOG_PATH" ]]; then
     echo "echo '[ERROR] resolve-logs: nessun undertow_access_log in $APP_DIR' >&2" >&2
     exit 1
 fi
+
+# GC log: path del file corrente (usato solo per validazione esistenza)
+GC_LOG_PATH=$(resolve_log_file "$APP_DIR/gc.log")
 
 # ─── Guidewire log dir (opzionale, vuoto se GUIDEWIRE_SUBPATH è vuoto) ────────
 GW_LOG_DIR=""
@@ -106,8 +96,14 @@ fi
 
 # ─── Output ──────────────────────────────────────────────────────────────────
 echo "ACCESS_LOG='${ACCESS_LOG_PATH}'"
+echo "ACCESS_LOG_DIR='${APP_DIR}'"
+echo "ACCESS_LOG_BASE='undertow_access_log'"
 echo "SERVER_LOG='${SERVER_LOG_PATH}'"
-echo "GC_LOG='${GC_LOG_PATH}'"
+echo "SERVER_LOG_DIR='${APP_DIR}'"
+echo "SERVER_LOG_BASE='server'"
+echo "GC_LOG='${GC_LOG_PATH:-}'"
+echo "GC_LOG_DIR='${APP_DIR}'"
+echo "GC_LOG_BASE='gc'"
 echo "ACTIVE_NODE='${NODE_NUM}'"
 echo "ACTIVE_ENV='${ENV_NAME}'"
 echo "ACTIVE_APP='${APP}'"

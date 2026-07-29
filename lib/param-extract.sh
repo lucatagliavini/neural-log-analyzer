@@ -10,6 +10,11 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/utils-time.sh"
 
+# Carica gli ambienti del profilo per costruire il pattern di stop-word dinamico
+if [[ -n "${PROFILE_DIR:-}" && -f "$PROFILE_DIR/system.conf" ]]; then
+    source "$PROFILE_DIR/system.conf"
+fi
+
 query="${1,,}"
 
 # Finestra temporale — delegata a utils-time.sh
@@ -79,11 +84,24 @@ done
 SEARCH_PATTERN=""
 _sq="${1,,}"  # query originale in minuscolo
 if echo "$_sq" | grep -qiE "\bcerca\b|\btrova\b|\bdove.appare\b|\bdove.si.trova\b|in.quali.log|cerca.ovunque|cerca.in.tutti"; then
-    # Estrai il token dopo il verbo / la frase trigger
+    # Pattern di stop-word ambienti costruito dinamicamente dagli ambienti del profilo
+    # (fallback sulla lista statica se system.conf non è disponibile)
+    if declare -p ENV_NODE_CODE &>/dev/null && [[ "${#ENV_NODE_CODE[@]}" -gt 0 ]]; then
+        _env_pat=$(IFS='|'; echo "${!ENV_NODE_CODE[*]}")
+    else
+        _env_pat="prod|euro|inte|cert|coll|test"
+    fi
+    # Sinonimi italiani degli ambienti (sempre presenti)
+    _env_synonyms="produzion[ei]|integrazion[ei]|collaudo|certificazion[ei]"
+    _ctx_pat="${_env_pat}|${_env_synonyms}"
+
+    # Estrai il token dopo il verbo / la frase trigger, poi tronca ai qualificatori
     SEARCH_PATTERN=$(echo "$_sq" | \
         sed -E 's/.*(cerca ovunque|cerca in tutti i log|in quali log c.è|in quali log|dove appare|dove si trova|cerca|trova)[[:space:]]*//' | \
         sed -E 's/^(il pattern|il testo|la stringa|il sinistro|l.utente|l.errore|il codice|il messaggio)[[:space:]]*//' | \
         sed -E 's/[[:space:]]*(nei log|ovunque|in tutti i log|nei vari log)$//' | \
+        sed -E "s/[[:space:]]+(di |in |su )?(oggi|ieri|stamattina|mattinata|pomeriggio|stasera|stanotte|questa settimana|${_ctx_pat}|nodo [0-9]+|nel log|nei log|su nodo|ovunque)[[:space:]].*\$//" | \
+        sed -E "s/[[:space:]]+(di |in |su )?(oggi|ieri|stamattina|mattinata|pomeriggio|stasera|stanotte|questa settimana|${_ctx_pat}|nodo [0-9]+|nel log|nei log|su nodo|ovunque)\$//" | \
         sed 's/^ *//' | sed 's/ *$//')
 fi
 

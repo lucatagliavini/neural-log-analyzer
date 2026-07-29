@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # vocab-gap.sh — individua token frequenti nel dataset non coperti dal vocabolario.
-# Non modifica nulla. Produce un report per guidare l'espansione di vocab.sh.
+# Non modifica nulla. Produce un report per guidare l'espansione del vocabolario.
 #
 # Uso: ./vocab-gap.sh --profile profiles/liquido [--min-count N] [--top N]
 #
@@ -40,7 +40,7 @@ if [[ ! -f "$PROFILE_DIR/unigrams.txt" || ! -f "$PROFILE_DIR/bigrams.txt" ]]; th
 fi
 
 # ─── Costruisce regex combinata da tutti i pattern del vocab ──────────────────
-# Legge direttamente dai file .txt — più semplice di sourceare vocab.sh
+# Legge direttamente dai file .txt — più semplice di sourceare domain.conf
 COMBINED_RE=$(
     grep -hv '^[[:space:]]*#\|^[[:space:]]*$' \
         "$PROFILE_DIR/unigrams.txt" \
@@ -126,4 +126,4 @@ awk -F'\t' -v min_count="$MIN_COUNT" '
 END { if (prev != "") printf "\n" }
 '
 
-printf "${DIM}Suggerimento: valuta se aggiungere questi token come unigram o estendere un pattern esistente in vocab.sh.${RESET}\n\n"
+printf "${DIM}Suggerimento: valuta se aggiungere questi token come unigram o estendere un pattern esistente in unigrams.txt.${RESET}\n\n"

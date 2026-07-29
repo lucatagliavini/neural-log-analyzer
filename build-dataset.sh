@@ -26,7 +26,7 @@ if [[ -z "$PROFILE_DIR" ]]; then
 fi
 
 export PROFILE_DIR
-source "$PROFILE_DIR/domain.conf"   # include già vocab.sh internamente
+source "$PROFILE_DIR/domain.conf"   # carica vocabolario e configurazione dominio
 
 LABELED="$PROFILE_DIR/dataset/queries_labeled.txt"
 DATASET_FILE="$PROFILE_DIR/dataset/queries.txt"
@@ -87,6 +87,6 @@ if [[ "$zero_vec_count" -gt 0 ]]; then
         echo "         → $ex" >&2
     done
     echo "" >&2
-    echo "       Suggerimento: estendi vocab.sh con un pattern che copra queste query," >&2
+    echo "       Suggerimento: estendi unigrams.txt con un pattern che copra queste query," >&2
     echo "       oppure riformula gli esempi usando termini già nel vocabolario." >&2
 fi

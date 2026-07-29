@@ -86,3 +86,8 @@ echo ""
 
 echo ""
 echo "[OK] Training completato. Usa: ./chatbot.sh --profile $PROFILE_DIR"
+
+# ── Gap report post-training ──────────────────────────────────────────────────
+if [[ -f "$SCRIPT_DIR/gap-report.sh" ]]; then
+    bash "$SCRIPT_DIR/gap-report.sh" --profile "$PROFILE_DIR" --compact
+fi

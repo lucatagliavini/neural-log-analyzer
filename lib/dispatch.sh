@@ -8,6 +8,8 @@
 #   TIME_WINDOW, STATUS_CODE, THRESHOLD_MS, IP_FILTER, TAIL_N, NAMED_LOG
 #
 
+source "$(dirname "${BASH_SOURCE[0]}")/utils-logfiles.sh"
+
 # Apre un log plain o .gz in modo trasparente per gawk.
 # Restituisce un'espressione da usare con eval gawk ... $(open_log "$f")
 open_log() {
@@ -19,6 +21,32 @@ open_log() {
         echo "'$f'"
     fi
 }
+
+# Seleziona e apre tutti i file di log per un tipo (access o gc),
+# filtrando per range temporale tramite utils-logfiles.sh.
+# Uso: eval gawk ... $(open_logs_for DIR BASE)
+open_logs_for() {
+    local dir="$1" base="$2"
+    local list
+    list=$(select_log_files "$dir" "$base" "${TIME_FROM:-}" "${TIME_TO:-}")
+    local out=""
+    IFS='|' read -ra _files <<< "$list"
+    for f in "${_files[@]}"; do
+        [[ -z "$f" ]] && continue
+        out+=" $(open_log "$f")"
+    done
+    # fallback se select_log_files non trova nulla (es. range fuori range disponibile)
+    if [[ -z "$out" ]]; then
+        local fallback="${dir}/${base}.log"
+        [[ -f "$fallback" ]] && out=" $(open_log "$fallback")"
+    fi
+    echo "$out"
+}
+
+# Shorthand per access log e gc log usando le variabili di contesto sessione
+open_logs()        { open_logs_for "${ACCESS_LOG_DIR:-$(dirname "$ACCESS_LOG")}" "${ACCESS_LOG_BASE:-undertow_access_log}"; }
+open_gc_logs()     { open_logs_for "${GC_LOG_DIR:-$(dirname "$GC_LOG")}"         "${GC_LOG_BASE:-gc}"; }
+open_server_logs() { open_logs_for "${SERVER_LOG_DIR:-$(dirname "$SERVER_LOG")}" "${SERVER_LOG_BASE:-server}"; }
 
 print_help() {
     local BOLD="\033[1m"
@@ -76,58 +104,58 @@ dispatch_tool() {
         count_status)
             eval gawk "$tw_args" -f "$TOOLS_DIR/count_status.awk" \
                 -v status_filter="$STATUS_CODE" \
-                "$(open_log "$access")"
+                "$(open_logs)"
             ;;
         distribute_status)
             eval gawk "$tw_args" -f "$TOOLS_DIR/distribute_status.awk" \
                 -v status_filter="$STATUS_CODE" \
-                "$(open_log "$access")"
+                "$(open_logs)"
             ;;
         slow_requests)
             eval gawk "$tw_args" -f "$TOOLS_DIR/slow_requests.awk" \
                 -v threshold_ms="${THRESHOLD_MS:-1000}" \
-                "$(open_log "$access")"
+                "$(open_logs)"
             ;;
         traffic_volume)
             eval gawk "$tw_args" -f "$TOOLS_DIR/traffic_volume.awk" \
-                "$(open_log "$access")"
+                "$(open_logs)"
             ;;
         filter_errors)
             [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile per filter_errors"; return; }
             eval gawk "$tw_args" -f "$TOOLS_DIR/filter_errors.awk" \
-                "$(open_log "$server")"
+                "$(open_server_logs)"
             ;;
         service_times)
             eval gawk "$tw_args" -f "$TOOLS_DIR/service_times.awk" \
-                "$(open_log "$access")"
+                "$(open_logs)"
             ;;
         gc_stats)
             [[ -z "$gc" ]] && { echo "[SKIP] gc.log non disponibile per gc_stats"; return; }
             eval gawk "$tw_args" -f "$TOOLS_DIR/gc_stats.awk" \
-                "$(open_log "$gc")"
+                "$(open_gc_logs)"
             ;;
         correlate_gc_slow)
             [[ -z "$gc" ]] && { echo "[SKIP] gc.log non disponibile per correlate_gc_slow"; return; }
             eval gawk "$tw_args" -f "$TOOLS_DIR/correlate_gc_slow.awk" \
                 -v threshold_ms="${THRESHOLD_MS:-500}" \
-                "$(open_log "$gc")" "$(open_log "$access")"
+                "$(open_gc_logs)" "$(open_logs)"
             ;;
         tail_log)
             eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
                 -f "$TOOLS_DIR/tail_log.awk" \
                 -v tail_n="${TAIL_N:-50}" \
-                "$(open_log "$access")"
+                "$(open_logs)"
             ;;
         filter_ip)
             eval gawk "$tw_args" -f "$TOOLS_DIR/filter_ip.awk" \
                 -v ip_filter="$IP_FILTER" \
                 -v top_n="${TAIL_N:-10}" \
-                "$(open_log "$access")"
+                "$(open_logs)"
             ;;
         filter_app_errors)
             [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile per filter_app_errors"; return; }
             eval gawk "$tw_args" -f "$TOOLS_DIR/filter_app_errors.awk" \
-                "$(open_log "$server")"
+                "$(open_server_logs)"
             ;;
         tail_named_log)
             local gw_dir="${GUIDEWIRE_LOG_DIR:-}"
@@ -205,11 +233,27 @@ dispatch_tool() {
             local _R="\033[31m" _Y="\033[33m" _G="\033[32m"
             local _B="\033[1m"  _D="\033[2m"  _X="\033[0m"
 
-            # ── Raccoglie lista log ───────────────────────────────────────
+            # ── Raccoglie lista log (con selezione temporale via select_log_files) ──
             local -a all_labels=() all_paths=()
-            [[ -n "$access" && -f "$access" ]] && { all_labels+=("access.log"); all_paths+=("$access"); }
-            [[ -n "$server" && -f "$server" ]] && { all_labels+=("server.log"); all_paths+=("$server"); }
-            [[ -n "$gc"     && -f "$gc"     ]] && { all_labels+=("gc.log");     all_paths+=("$gc");     }
+
+            # Aggiunge tutti i file selezionati per un tipo di log
+            _sal_add() {
+                local dir="$1" base="$2"
+                [[ -z "$dir" ]] && return
+                local list
+                list=$(select_log_files "$dir" "$base" "${TIME_FROM:-}" "${TIME_TO:-}")
+                [[ -z "$list" ]] && return
+                IFS='|' read -ra _flist <<< "$list"
+                for _f in "${_flist[@]}"; do
+                    [[ -z "$_f" || ! -f "$_f" ]] && continue
+                    all_labels+=("$(basename "$_f")")
+                    all_paths+=("$_f")
+                done
+            }
+
+            [[ -n "$access" ]] && _sal_add "${ACCESS_LOG_DIR:-$(dirname "$access")}" "${ACCESS_LOG_BASE:-undertow_access_log}"
+            [[ -n "$server" ]] && _sal_add "${SERVER_LOG_DIR:-$(dirname "$server")}" "${SERVER_LOG_BASE:-server}"
+            [[ -n "$gc"     ]] && _sal_add "${GC_LOG_DIR:-$(dirname "$gc")}"         "${GC_LOG_BASE:-gc}"
             local gw_dir="${GUIDEWIRE_LOG_DIR:-}"
             if [[ -n "$gw_dir" && -d "$gw_dir" ]]; then
                 while IFS= read -r gw_file; do
@@ -227,8 +271,11 @@ dispatch_tool() {
                 return
             fi
 
-            printf "\n${_B}Ricerca:${_X} ${_Y}%s${_X}  ${_D}(%d log, %d worker paralleli)${_X}\n\n" \
-                "$sp" "$total_files" "$jobs"
+            local tw_label=""
+            [[ -n "${TIME_FROM:-}" || -n "${TIME_TO:-}" ]] && \
+                tw_label="${TIME_FROM:-*}→${TIME_TO:-*}  "
+            printf "\n${_B}Ricerca:${_X} ${_Y}%s${_X}  ${_D}%s(%d file, %d worker)${_X}\n\n" \
+                "$sp" "$tw_label" "$total_files" "$jobs"
 
             # ── Ricerca parallela con pool di $jobs worker ────────────────
             # Ogni subshell scrive "label|hits|first_ts|size_kb" in $tmp_dir/NNNNN

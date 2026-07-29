@@ -7,7 +7,7 @@
 # Richiede: PROFILE_DIR esportata dal chiamante.
 #
 # Il vocabolario (UNIGRAMS, BIGRAMS, NUM_FEATURES) è letto da
-# PROFILE_DIR/vocab.sh — ogni profilo ha il suo.
+# PROFILE_DIR/domain.conf — ogni profilo ha il suo.
 #
 
 if [[ -z "${PROFILE_DIR:-}" ]]; then
@@ -15,7 +15,7 @@ if [[ -z "${PROFILE_DIR:-}" ]]; then
     exit 1
 fi
 
-source "$PROFILE_DIR/vocab.sh"
+source "$PROFILE_DIR/domain.conf"
 
 query="${1,,}"  # lowercase
 

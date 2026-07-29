@@ -57,16 +57,16 @@ resolve_time_range() {
         fi
 
     # ── Colloquiali intraday ─────────────────────────────────────────────────
-    elif echo "$query" | grep -qE "stamatt|questa.matt"; then
+    elif echo "$query" | grep -qE "stamatt|questa.matt|\bmattinata\b|\bdi mattina\b|\bin mattina\b"; then
         time_from="${now_date}T06:00"
         time_to="${now_date}T12:00"
-    elif echo "$query" | grep -qE "questo.pomeriggio|nel.pomeriggio"; then
+    elif echo "$query" | grep -qE "questo.pomeriggio|nel.pomeriggio|\bdi pomeriggio\b|\bnel pomeriggio\b|\bpomeriggio\b"; then
         time_from="${now_date}T12:00"
         time_to="${now_date}T18:00"
-    elif echo "$query" | grep -qE "stanotte|questa.notte"; then
+    elif echo "$query" | grep -qE "stanotte|questa.notte|\bdi notte\b|\bnotturno\b"; then
         time_from="${now_date}T00:00"
         time_to="${now_date}T06:00"
-    elif echo "$query" | grep -qE "questa.sera|stasera"; then
+    elif echo "$query" | grep -qE "questa.sera|stasera|\bdi sera\b|\bserata\b"; then
         time_from="${now_date}T18:00"
         time_to="${now_date}T23:59"
     elif echo "$query" | grep -qE "poco.fa|adesso\b|or[ae] fa"; then
