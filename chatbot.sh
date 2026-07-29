@@ -32,6 +32,7 @@ SERVER_LOG=""
 GC_LOG=""
 INTERACTIVE=1
 QUERY=""
+DRY_RUN=0
 RESOLVED_DATE_FILTER=""
 ACTIVE_NAMED_LOG=""
 
@@ -46,6 +47,7 @@ while [[ $# -gt 0 ]]; do
         --server-log) SERVER_LOG="$2";          shift 2 ;;
         --gc-log)     GC_LOG="$2";              shift 2 ;;
         --query)      QUERY="$2"; INTERACTIVE=0; shift 2 ;;
+        --dry-run)    DRY_RUN=1; shift ;;
         -h|--help)
             grep "^#" "$0" | grep -v "^#!" | head -16 | sed 's/^# \?//'
             exit 0
@@ -122,11 +124,14 @@ resolve_session_logs() {
 }
 
 # Risoluzione iniziale solo se --env è stato passato o se --access-log è esplicito
-if [[ -n "$ACTIVE_ENV" && -z "$ACCESS_LOG" ]]; then
-    resolve_session_logs || exit 1
-elif [[ -n "$ACCESS_LOG" && ! -f "$ACCESS_LOG" ]]; then
-    echo "[ERROR] File non trovato: $ACCESS_LOG" >&2
-    exit 1
+# (in dry-run non servono i log — skip)
+if [[ "$DRY_RUN" -eq 0 ]]; then
+    if [[ -n "$ACTIVE_ENV" && -z "$ACCESS_LOG" ]]; then
+        resolve_session_logs || exit 1
+    elif [[ -n "$ACCESS_LOG" && ! -f "$ACCESS_LOG" ]]; then
+        echo "[ERROR] File non trovato: $ACCESS_LOG" >&2
+        exit 1
+    fi
 fi
 
 # ─── Query logging ───────────────────────────────────────────────────────────
@@ -188,14 +193,17 @@ run_query() {
     [[ "${DATE_FILTER:-}" != "$RESOLVED_DATE_FILTER" ]] && { RESOLVED_DATE_FILTER="${DATE_FILTER:-}"; ctx_changed=1; }
 
     # Lazy resolution: se ancora senza log, tenta ora che potremmo avere il contesto
-    if [[ -z "$ACCESS_LOG" ]]; then
-        if [[ -z "$ACTIVE_ENV" ]]; then
-            echo "  [INFO] Ambiente non impostato. Specifica env nella query (es: \"errori in coll\") oppure avvia con --env."
-            return
+    # (in dry-run non servono i log — skip)
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+        if [[ -z "$ACCESS_LOG" ]]; then
+            if [[ -z "$ACTIVE_ENV" ]]; then
+                echo "  [INFO] Ambiente non impostato. Specifica env nella query (es: \"errori in coll\") oppure avvia con --env."
+                return
+            fi
+            resolve_session_logs || return 1
+        elif [[ "$ctx_changed" -eq 1 && -n "$ACTIVE_ENV" ]]; then
+            resolve_session_logs || return 1
         fi
-        resolve_session_logs || return 1
-    elif [[ "$ctx_changed" -eq 1 && -n "$ACTIVE_ENV" ]]; then
-        resolve_session_logs || return 1
     fi
 
     if [[ "$ctx_changed" -eq 1 ]]; then
@@ -207,6 +215,12 @@ run_query() {
     fi
 
     printf "\n\033[1m┌─\033[0m Query: %s\n" "$query"
+
+    # Modalità dry-run: mostra ranking classificatore senza eseguire tool
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        "$LIB_DIR/infer-dry.sh" "$query"
+        return
+    fi
 
     local tools
     tools=$("$LIB_DIR/infer.sh" "$query" 2>/dev/null)

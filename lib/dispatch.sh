@@ -197,53 +197,163 @@ dispatch_tool() {
                 echo "[SKIP] Nessun pattern di ricerca specificato nella query"
                 return
             fi
-            local total=0
-            local searched=0
 
-            # Funzione interna: esegue il tool su un singolo log e aggiorna totale
-            _search_one() {
-                local label="$1" path="$2"
-                [[ -z "$path" ]] && return
-                local out
-                out=$(eval gawk \
-                    -f "'$TOOLS_DIR/search_all_logs.awk'" \
-                    -v pattern="'$sp'" \
-                    -v log_label="'$label'" \
-                    -v context_n=1 \
-                    -v max_matches=20 \
-                    "$(open_log "$path")" 2>/dev/null)
-                searched=$(( searched + 1 ))
-                local hits
-                hits=$(printf '%s\n' "$out" | awk '/^__MATCHES__/ {print $3}')
-                total=$(( total + ${hits:-0} ))
-                # Stampa tutto tranne la riga __MATCHES__
-                printf '%s\n' "$out" | grep -v "^__MATCHES__"
-            }
+            local jobs="${SEARCH_PARALLEL_JOBS:-4}"
+            local tmp_dir
+            tmp_dir=$(mktemp -d)
 
-            # Log HTTP
-            [[ -n "$access" ]] && _search_one "access.log" "$access"
-            # Log JBoss
-            [[ -n "$server" ]] && _search_one "server.log" "$server"
-            # Log GC
-            [[ -n "$gc"     ]] && _search_one "gc.log"     "$gc"
-            # Log Guidewire — tutti i .log nella directory
+            local _R="\033[31m" _Y="\033[33m" _G="\033[32m"
+            local _B="\033[1m"  _D="\033[2m"  _X="\033[0m"
+
+            # ── Raccoglie lista log ───────────────────────────────────────
+            local -a all_labels=() all_paths=()
+            [[ -n "$access" && -f "$access" ]] && { all_labels+=("access.log"); all_paths+=("$access"); }
+            [[ -n "$server" && -f "$server" ]] && { all_labels+=("server.log"); all_paths+=("$server"); }
+            [[ -n "$gc"     && -f "$gc"     ]] && { all_labels+=("gc.log");     all_paths+=("$gc");     }
             local gw_dir="${GUIDEWIRE_LOG_DIR:-}"
             if [[ -n "$gw_dir" && -d "$gw_dir" ]]; then
                 while IFS= read -r gw_file; do
-                    local gw_label
-                    gw_label=$(basename "$gw_file")
-                    _search_one "$gw_label" "$gw_file"
+                    all_labels+=("$(basename "$gw_file")")
+                    all_paths+=("$gw_file")
                 done < <(find "$gw_dir" -maxdepth 1 \
                     \( -name "*.log" -o -name "*.log.gz" \) \
                     2>/dev/null | grep -v "[0-9]\{10\}" | sort)
             fi
 
-            echo ""
-            if [[ "$total" -eq 0 ]]; then
-                printf "Nessuna occorrenza di \033[1m%s\033[0m trovata in %d log.\n" "$sp" "$searched"
-            else
-                printf "\033[1mTotale:\033[0m %d occorrenze in %d log analizzati.\n" "$total" "$searched"
+            local total_files="${#all_paths[@]}"
+            if [[ "$total_files" -eq 0 ]]; then
+                echo "Nessun log disponibile da cercare."
+                rm -rf "$tmp_dir"
+                return
             fi
+
+            printf "\n${_B}Ricerca:${_X} ${_Y}%s${_X}  ${_D}(%d log, %d worker paralleli)${_X}\n\n" \
+                "$sp" "$total_files" "$jobs"
+
+            # ── Ricerca parallela con pool di $jobs worker ────────────────
+            # Ogni subshell scrive "label|hits|first_ts|size_kb" in $tmp_dir/NNNNN
+            local -a pids=()
+            for (( i=0; i<total_files; i++ )); do
+                (
+                    local lbl="${all_labels[$i]}"
+                    local pth="${all_paths[$i]}"
+                    local hits=0 first_ts="" kb=0
+
+                    local sb
+                    sb=$(stat -c%s "$pth" 2>/dev/null || echo 0)
+                    kb=$(( ${sb:-0} / 1024 ))
+
+                    if [[ "$pth" == *.gz ]]; then
+                        hits=$(gunzip -c "$pth" 2>/dev/null | grep -cE "$sp" 2>/dev/null || true)
+                        hits="${hits:-0}"
+                        if [[ "$hits" -gt 0 ]]; then
+                            first_ts=$(gunzip -c "$pth" 2>/dev/null | grep -m 1 -E "$sp" 2>/dev/null \
+                                | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}' \
+                                | head -1)
+                        fi
+                    else
+                        hits=$(grep -cE "$sp" "$pth" 2>/dev/null || true)
+                        hits="${hits:-0}"
+                        if [[ "$hits" -gt 0 ]]; then
+                            first_ts=$(grep -m 1 -E "$sp" "$pth" 2>/dev/null \
+                                | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}' \
+                                | head -1)
+                        fi
+                    fi
+
+                    printf "%s|%s|%s|%s\n" "$lbl" "${hits:-0}" "${first_ts:-}" "${kb:-0}" \
+                        > "$tmp_dir/$(printf '%05d' "$i")"
+                ) &
+                pids+=($!)
+                if [[ "${#pids[@]}" -ge "$jobs" ]]; then
+                    wait "${pids[0]}" 2>/dev/null
+                    pids=("${pids[@]:1}")
+                fi
+            done
+            for _p in "${pids[@]}"; do wait "$_p" 2>/dev/null; done
+
+            # ── Raccoglie e analizza risultati ────────────────────────────
+            local -a res_labels=() res_hits=() res_ts=() res_kb=()
+            local max_hits=0 max_lbl=8 total_hits=0 matched_files=0
+
+            for (( i=0; i<total_files; i++ )); do
+                local _f="$tmp_dir/$(printf '%05d' "$i")"
+                local rl rh rt rk
+                if [[ -f "$_f" ]]; then
+                    IFS='|' read -r rl rh rt rk < "$_f"
+                else
+                    rl="${all_labels[$i]}" rh=0 rt="" rk=0
+                fi
+                res_labels+=("${rl:-?}")
+                res_hits+=("${rh:-0}")
+                res_ts+=("${rt:-}")
+                res_kb+=("${rk:-0}")
+                [[ "${rh:-0}" -gt "$max_hits" ]] && max_hits="${rh:-0}"
+                [[ "${#rl}"   -gt "$max_lbl"  ]] && max_lbl="${#rl}"
+                total_hits=$(( total_hits + ${rh:-0} ))
+                [[ "${rh:-0}" -gt 0 ]] && matched_files=$(( matched_files + 1 ))
+            done
+
+            if [[ "$matched_files" -eq 0 ]]; then
+                printf "${_D}Nessuna occorrenza di ${_X}${_B}%s${_X}${_D} trovata in %d log.${_X}\n\n" \
+                    "$sp" "$total_files"
+                rm -rf "$tmp_dir"
+                return
+            fi
+
+            # ── Tabella: barre proporzionali, timestamp, dimensione ───────
+            local bar_max=12 best_label="" best_hits=0
+
+            for (( i=0; i<total_files; i++ )); do
+                local _h="${res_hits[$i]:-0}"
+                [[ "$_h" -gt 0 ]] || continue
+
+                local _l="${res_labels[$i]}"
+                local _t="${res_ts[$i]}"
+                local _k="${res_kb[$i]:-0}"
+
+                local size_str
+                [[ "$_k" -ge 1024 ]] \
+                    && size_str=$(awk "BEGIN{printf \"%d MB\",int($_k/1024)}") \
+                    || size_str="${_k} KB"
+
+                local bar_len=$(( _h * bar_max / max_hits ))
+                [[ "$bar_len" -lt 1 ]] && bar_len=1
+                local bar="" b
+                for (( b=0; b<bar_len; b++ )); do bar+="█"; done
+
+                local bc="$_G"
+                [[ "$_h" -gt $(( max_hits / 3 ))     ]] && bc="$_Y"
+                [[ "$_h" -gt $(( max_hits * 2 / 3 )) ]] && bc="$_R"
+
+                printf "  %-${max_lbl}s  ${bc}%-${bar_max}s${_X}  %6d" "$_l" "$bar" "$_h"
+                [[ -n "$_t" ]] && printf "  ${_D}│  %-19s${_X}" "$_t"
+                printf "  ${_D}│  %s${_X}\n" "$size_str"
+
+                if [[ "$_h" -gt "$best_hits" ]]; then
+                    best_hits="$_h"; best_label="$_l"
+                fi
+            done
+
+            printf "  ──────────────────────────────────────────────────────────────\n"
+
+            local skipped=$(( total_files - matched_files ))
+            printf "  ${_B}Totale:${_X} %d occorrenze in %d log" "$total_hits" "$matched_files"
+            [[ "$skipped" -gt 0 ]] && printf "${_D}  (%d senza match)${_X}" "$skipped"
+            printf "\n"
+
+            # Suggerimento dettaglio solo per log Guidewire
+            if [[ -n "$best_label" ]]; then
+                local suggest="${best_label%.log.gz}"
+                suggest="${suggest%.log}"
+                suggest="${suggest##*-}"
+                if [[ "$suggest" != "access" && "$suggest" != "server" && "$suggest" != "gc" ]]; then
+                    printf "  ${_D}→ Per dettaglio: \"cerca %s nel %s.log\"${_X}\n" "$sp" "$suggest"
+                fi
+            fi
+            echo ""
+
+            rm -rf "$tmp_dir"
             ;;
 
         show_help)

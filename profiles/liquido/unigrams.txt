@@ -36,6 +36,8 @@ quant[eo]|quanti          :: 1
 conta|contami             :: 1
 total[ei]                 :: 1
 raggrupp                  :: 1
+statistich|statistic      :: 1
+ripartizion|suddivision|breakdown :: 1
 frequen                   :: 1
 per                       :: 1
 list[ae]                  :: 1
@@ -62,6 +64,8 @@ log.applicat|server.log   :: 1
 gc|garbage                :: 1
 heap                      :: 1
 memori[ae]|jvm            :: 1
+pause|pausa\b             :: 2
+collector                 :: 1
 
 # ── Endpoint / URL ────────────────────────────────────────────────────────────
 endpoint                  :: 1
@@ -88,6 +92,9 @@ servizi|servizio|backend|web.?service :: 1
 soa\b                     :: 1
 rig[ah]|tail\b            :: 1
 volum|picch|picco|andament :: 1
+traffico|traffich         :: 1
+chiamata|chiamate        :: 1
+correlazion|correla\b    :: 1
 
 # ── Colloquiale / informale ───────────────────────────────────────────────────
 rott[oa]|non.va\b|non.funz :: 1

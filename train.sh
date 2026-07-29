@@ -56,6 +56,21 @@ if [[ ! -f "$DATASET_FILE" ]]; then
     exit 1
 fi
 
+# ── Verifica coerenza topologia vocabolario ↔ modello ─────────────────────────
+layer1="$MODEL_DIR/layer1.txt"
+if [[ -f "$layer1" ]]; then
+    model_inputs=$(awk '/^[^A]/{print NF; exit}' "$layer1")
+    model_inputs=$(( model_inputs - 1 ))  # rimuove colonna bias
+    if [[ "$model_inputs" -ne "$NUM_FEATURES" ]]; then
+        echo "[ERROR] Mismatch topologia: il modello ha $model_inputs input, il vocabolario ne ha $NUM_FEATURES." >&2
+        echo "        Il vocabolario è cambiato dall'ultimo setup del modello." >&2
+        echo "        Rigenera il modello con:" >&2
+        echo "          ./setup.sh --profile $PROFILE_DIR" >&2
+        echo "        (questo cancella i pesi esistenti e ricrea layer1.txt / layer2.txt)" >&2
+        exit 1
+    fi
+fi
+
 echo "[INFO] Training intent classifier — profilo: $(basename "$PROFILE_DIR")"
 echo "[INFO] Dataset: $DATASET_FILE"
 echo "[INFO] Epochs: $EPOCHS | LR: $LR | Optimizer: $OPTIMIZER | min-delta: $MIN_DELTA | patience: $PATIENCE"

@@ -131,6 +131,11 @@ gc_stats	quanto dura la pausa gc
 gc_stats	old regions nel gc
 gc_stats	memoria heap utilizzata
 gc_stats	gc events nell'ultima ora
+gc_stats	statistiche gc
+gc_stats	statistiche garbage collector
+gc_stats	statistiche sul gc del nodo
+gc_stats	collector statistics
+gc_stats	statistiche di raccolta gc
 
 # ─── correlate_gc_slow ───────────────────────────────────────────────────────
 correlate_gc_slow	le richieste lente coincidono con il gc
@@ -938,6 +943,10 @@ slow_requests	richieste sopra i 3 secondi
 slow_requests	chiamate con tempi elevati
 slow_requests	richieste con risposta lenta
 slow_requests	tempi alti sul nodo 7
+slow_requests	chiamate lente
+slow_requests	chiamate lente sul nodo
+slow_requests	chiamate più lente di ieri
+slow_requests	traffico lento
 
 # filter_ip — chi ha fatto richieste
 filter_ip	chi ha fatto più richieste sul nodo 2

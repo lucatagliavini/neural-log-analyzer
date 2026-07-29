@@ -9,6 +9,8 @@
 #
 # Formato Guidewire: [thread] USER YYYY-MM-DDTHH:MM:SS,mmm LEVEL messaggio
 # Il timestamp è in posizione variabile — estratto con regex.
+#
+# Dipende da: utils-colors.awk, utils-dedup.awk, utils-time.awk
 
 BEGIN {
     FS = " "
@@ -41,7 +43,6 @@ BEGIN {
         if (!in_range(epoch)) next
     }
 
-    # Ring buffer: tieni le ultime n righe corrispondenti
     thread = $0
     if (match(thread, /\[([^\]]+)\]/, th)) thread = th[1]
     else thread = ""
@@ -51,10 +52,6 @@ BEGIN {
     buf_msg[count % n]    = row_msg
     buf_thread[count % n] = thread
     count++
-}
-
-function dedup_key(rl, msg) {
-    return rl SUBSEP substr(msg, 1, 120)
 }
 
 END {
@@ -70,46 +67,32 @@ END {
     shown = (count < n) ? count : n
     start = (count < n) ? 0 : (count % n)
 
-    # Conta occorrenze per dedup
     for (i = 0; i < shown; i++) {
         idx = (start + i) % n
-        dk = dedup_key(buf_level[idx], buf_msg[idx])
-        if (!(dk in dedup_cnt)) {
-            dedup_order[++dedup_n] = dk
-            dedup_rl[dk]  = buf_level[idx]
-            dedup_ts[dk]  = buf_ts[idx]
-            dedup_th[dk]  = buf_thread[idx]
-            dedup_msg[dk] = buf_msg[idx]
-        }
-        dedup_cnt[dk]++
+        dk  = buf_level[idx] SUBSEP substr(buf_msg[idx], 1, 120)
+        dedup_add(dk, buf_level[idx], buf_msg[idx], buf_ts[idx], buf_thread[idx])
     }
 
-    # Ordina: prima rari (cnt=1), poi frequenti (cnt>1) per conteggio desc
-    # insertion sort su dedup_order
-    for (i = 2; i <= dedup_n; i++) {
-        tk = dedup_order[i]; tv = dedup_cnt[tk]; j = i-1
-        while (j >= 1 && dedup_cnt[dedup_order[j]] > tv) {
-            dedup_order[j+1] = dedup_order[j]; j--
-        }
-        dedup_order[j+1] = tk
-    }
+    dedup_sort()
 
-    for (i = 1; i <= dedup_n; i++) {
-        dk  = dedup_order[i]
-        rl  = dedup_rl[dk]
-        cnt = dedup_cnt[dk]
+    for (i = 1; i <= _dup_n; i++) {
+        dk    = _dup_order[i]
+        rl    = _dup_level[dk]
+        cnt   = _dup_cnt[dk]
         color = (rl == "ERROR") ? RED : (rl == "WARN") ? YELLOW : ""
         rst   = (color != "") ? RESET : ""
         cnt_str = (cnt > 1) ? sprintf(" (×%d)", cnt) : ""
         printf "%s%-5s%s  %s%s%s  %s%s\n", \
             color, rl, rst, \
-            DIM, substr(dedup_ts[dk], 1, 19), RESET, \
-            substr(dedup_msg[dk], 1, 100), cnt_str
-        if (dedup_th[dk] != "")
-            printf "       %s[%s]%s\n", DIM, substr(dedup_th[dk], 1, 60), RESET
+            DIM, substr(_dup_ts[dk], 1, 19), RESET, \
+            substr(_dup_msg[dk], 1, 100), cnt_str
+        if (_dup_extra[dk] != "")
+            printf "       %s[%s]%s\n", DIM, substr(_dup_extra[dk], 1, 60), RESET
     }
 
-    distinct = dedup_n
-    if (count > shown) printf "\n... (mostrate ultime %d di %d totali, %d messaggi distinti)\n", shown, count, distinct
-    else printf "\nTotale: %d righe, %d messaggi distinti\n", count, distinct
+    distinct = _dup_n
+    if (count > shown)
+        printf "\n... (mostrate ultime %d di %d totali, %d messaggi distinti)\n", shown, count, distinct
+    else
+        printf "\nTotale: %d righe, %d messaggi distinti\n", count, distinct
 }
