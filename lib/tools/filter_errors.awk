@@ -13,6 +13,14 @@ BEGIN {
     in_exc = 0; exc_omitted = 0
 }
 
+function norm_key(msg,    k) {
+    # Rimuove "Exception in thread \"...\": " per fare collassare istanze dello stesso errore
+    # lanciate da thread diversi (pattern JBoss/stderr).
+    k = msg
+    sub(/^Exception in thread "[^"]*" /, "", k)
+    return substr(k, 1, 80)
+}
+
 function flush_exception(    dk, full_msg, f) {
     if (!in_exc) return
     if (exc_level == "ERROR") nerror++
@@ -25,7 +33,7 @@ function flush_exception(    dk, full_msg, f) {
     if (exc_omitted > 0)
         full_msg = full_msg "\n    " DIM "... (" exc_omitted " frame omessi)" RESET
 
-    dk = exc_level SUBSEP substr(exc_msg, 1, 80)
+    dk = exc_level SUBSEP norm_key(exc_msg)
     dedup_add(dk, exc_level, full_msg, exc_ts, exc_log)
 
     in_exc = 0; exc_frame_n = 0; exc_omitted = 0
