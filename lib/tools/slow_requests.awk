@@ -8,7 +8,6 @@ BEGIN {
     FS = " "
     if (threshold_ms == "") threshold_ms = 1000
     count = 0; buf_n = 0; max_rows = 30
-    RED = "\033[31m"; YELLOW = "\033[33m"; RESET = "\033[0m"
 }
 
 {

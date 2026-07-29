@@ -11,8 +11,6 @@ BEGIN {
     if (pattern == "") { print "[SKIP] pattern vuoto"; exit 1 }
     ctx  = (context_n+0 >= 0) ? context_n+0 : 1
     maxm = (max_matches+0 > 0) ? max_matches+0 : 20
-    CYAN  = "\033[36m"; YELLOW = "\033[33m"
-    BOLD  = "\033[1m";  DIM    = "\033[2m"; RESET = "\033[0m"
     count = 0; post = 0; prev_n = 0; header = 0
 }
 

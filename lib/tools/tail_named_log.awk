@@ -6,7 +6,6 @@
 BEGIN {
     if (tail_n == "" || tail_n+0 <= 0) tail_n = 50
     n = tail_n+0; count = 0
-    RED = "\033[31m"; YELLOW = "\033[33m"; DIM = "\033[2m"; RESET = "\033[0m"
     GW_RE = "([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]+) (ERROR|WARN|INFO|DEBUG|TRACE)"
 }
 

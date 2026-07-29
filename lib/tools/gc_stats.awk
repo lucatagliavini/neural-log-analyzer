@@ -7,7 +7,6 @@
 
 BEGIN {
     gc_count = 0
-    RED = "\033[31m"; YELLOW = "\033[33m"; DIM = "\033[2m"; RESET = "\033[0m"
     SLOW_MS = 200; VERYSLOW_MS = 500
 }
 

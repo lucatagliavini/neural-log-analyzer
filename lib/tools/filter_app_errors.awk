@@ -6,7 +6,6 @@
 
 BEGIN {
     FS = " "; waiting_cause = 0
-    RED = "\033[31m"; YELLOW = "\033[33m"; DIM = "\033[2m"; RESET = "\033[0m"
 }
 
 waiting_cause && /message:/ {

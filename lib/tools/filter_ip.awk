@@ -9,8 +9,6 @@ BEGIN {
     FS = " "
     if (top_n == "") top_n = 10
     max_rows = 50
-    RED = "\033[31m"; YELLOW = "\033[33m"; BOLD = "\033[1m"; RESET = "\033[0m"
-    DIM = "\033[2m"
 }
 
 {

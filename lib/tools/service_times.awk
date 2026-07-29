@@ -9,7 +9,6 @@ BEGIN {
     FS = " "
     max_rows = 30
     if (threshold_ms == "") threshold_ms = 0
-    YELLOW = "\033[33m"; RED = "\033[31m"; RESET = "\033[0m"
     SLOW_MS = 2000; VERYSLOW_MS = 5000
 }
 

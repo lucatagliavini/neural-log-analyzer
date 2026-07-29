@@ -10,8 +10,6 @@ BEGIN {
     if (threshold_ms == "") threshold_ms = 500
     gc_margin_s = 2
     gc_n = 0
-    RED = "\033[31m"; YELLOW = "\033[33m"; BOLD = "\033[1m"; RESET = "\033[0m"
-    DIM = "\033[2m"
 }
 
 # Fase 1: file gc.log — raccoglie timestamp e durata pause

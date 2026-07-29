@@ -59,7 +59,18 @@ dispatch_tool() {
     local access="$ACCESS_LOG"
     local server="${SERVER_LOG:-}"
     local gc="${GC_LOG:-}"
-    local tw_args="-f '$LIB_DIR/utils-time.awk' -v time_from='${TIME_FROM:-}' -v time_to='${TIME_TO:-}'"
+
+    # Utility AWK caricati come -f fissi in ogni invocazione gawk.
+    # SERVER_LOG_FORMAT seleziona il parser del log applicativo (default: jboss).
+    # Per aggiungere WebSphere creare utils-websphere.awk con le stesse funzioni
+    # parse_server_log() e is_stack_frame(), e impostare SERVER_LOG_FORMAT=websphere.
+    local fmt="${SERVER_LOG_FORMAT:-jboss}"
+    local common_f="-f '$LIB_DIR/utils-time.awk' -f '$LIB_DIR/utils-colors.awk' -f '$LIB_DIR/utils-jboss.awk' -f '$LIB_DIR/utils-dedup.awk'"
+    # Sostituisce il parser del server log se il formato è diverso da jboss
+    if [[ "$fmt" != "jboss" ]]; then
+        common_f="-f '$LIB_DIR/utils-time.awk' -f '$LIB_DIR/utils-colors.awk' -f '$LIB_DIR/utils-${fmt}.awk' -f '$LIB_DIR/utils-dedup.awk'"
+    fi
+    local tw_args="$common_f -v time_from='${TIME_FROM:-}' -v time_to='${TIME_TO:-}'"
 
     case "$tool" in
         count_status)
@@ -102,7 +113,8 @@ dispatch_tool() {
                 "$(open_log "$gc")" "$(open_log "$access")"
             ;;
         tail_log)
-            eval gawk -f "$TOOLS_DIR/tail_log.awk" \
+            eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
+                -f "$TOOLS_DIR/tail_log.awk" \
                 -v tail_n="${TAIL_N:-50}" \
                 "$(open_log "$access")"
             ;;
@@ -143,7 +155,8 @@ dispatch_tool() {
                 return
             fi
             printf "\033[36mLog: %s\033[0m\n" "$log_path"
-            eval gawk -f "$TOOLS_DIR/tail_named_log.awk" \
+            eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
+                -f "$TOOLS_DIR/tail_named_log.awk" \
                 -v tail_n="${TAIL_N:-50}" \
                 "$(open_log "$log_path")"
             ;;
