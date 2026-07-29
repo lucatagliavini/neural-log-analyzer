@@ -1,32 +1,40 @@
-# Estrae e aggrega i tempi di esecuzione dei servizi SOA dal server.log.
-# Formato riga target: ... RETURN(service.name) in X msec. ...
+# Aggrega i tempi di risposta per nome servizio (primo segmento del path URL).
+# Sorgente: access log Undertow (stessa struttura di slow_requests).
 # Parametri: -v time_from="YYYY-MM-DDTHH:MM"  -v time_to="YYYY-MM-DDTHH:MM"
+#            -v threshold_ms="0"   (filtra solo richieste sopra soglia, 0 = tutte)
+#
+# Formato campi access log: IP [datetime] "METHOD /path HTTP/..." STATUS BYTES TIME_MS ...
 
 BEGIN {
-    max_rows = 20
+    FS = " "
+    max_rows = 30
+    if (threshold_ms == "") threshold_ms = 0
     YELLOW = "\033[33m"; RED = "\033[31m"; RESET = "\033[0m"
     SLOW_MS = 2000; VERYSLOW_MS = 5000
 }
 
-/RETURN\(/ && /in [0-9]+ msec/ {
-    if ((time_from != "" || time_to != "") && !in_range(parse_server($1, $2))) next
-    if (match($0, /RETURN\(([^)]+)\) in ([0-9]+) msec/, a)) {
-        svc  = a[1]
-        ms   = a[2] + 0
-        svc_count[svc]++
-        svc_total[svc] += ms
-        if (ms > svc_max[svc]) svc_max[svc] = ms
-        if (svc_min[svc] == "" || ms < svc_min[svc]) svc_min[svc] = ms
-    }
+{
+    if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
+
+    if (!match($0, /" [0-9]+ [0-9]+ ([0-9]+) /, a)) next
+    ms = a[1] + 0
+    if (ms < threshold_ms + 0) next
+
+    if (!match($0, /"[A-Z]+ \/([^/ "]+)/, b)) next
+    svc = b[1]
+
+    svc_count[svc]++
+    svc_total[svc] += ms
+    if (ms > svc_max[svc]) svc_max[svc] = ms
+    if (svc_min[svc] == "" || ms < svc_min[svc]) svc_min[svc] = ms
 }
 
 END {
     if (length(svc_count) == 0) {
-        print "Nessun dato SOA trovato nel server log."
+        print "Nessun dato trovato nell'access log."
         exit
     }
 
-    # Larghezza dinamica sul nome servizio
     col_svc = length("SERVIZIO")
     for (s in svc_count) if (length(s) > col_svc) col_svc = length(s)
 

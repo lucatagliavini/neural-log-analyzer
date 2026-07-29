@@ -52,6 +52,7 @@ END {
     col_max = (max_pause_ms >= VERYSLOW_MS) ? RED : (max_pause_ms >= SLOW_MS) ? YELLOW : ""
     col_avg = (avg_ms       >= VERYSLOW_MS) ? RED : (avg_ms       >= SLOW_MS) ? YELLOW : ""
 
+    print ""
     print "── Riepilogo ─────────────────────────────────"
     printf "Totale GC events:    %d\n",                          gc_count
     printf "Totale pausa:        %.1f ms\n",                     total_pause_ms

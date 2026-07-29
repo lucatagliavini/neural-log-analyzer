@@ -23,53 +23,33 @@ open_log() {
 print_help() {
     local BOLD="\033[1m"
     local CYAN="\033[36m"
-    local YELLOW="\033[33m"
     local DIM="\033[2m"
     local RESET="\033[0m"
 
     printf "\n${BOLD}Cosa so analizzare${RESET}\n\n"
 
-    printf "  ${CYAN}${BOLD}Log HTTP (access log)${RESET}\n"
-    printf "  ${BOLD}%-20s${RESET}  %s\n"  "chiamate lente"       "Le N richieste HTTP più lente, ordinate per tempo di risposta"
-    printf "  ${DIM}%-20s${RESET}  ${DIM}%s${RESET}\n" "" "es: \"chiamate lente di stamattina sul nodo 4 di prod\""
-    printf "  ${BOLD}%-20s${RESET}  %s\n"  "distribuzione errori"  "Quali endpoint generano più errori 4xx/5xx"
-    printf "  ${DIM}%-20s${RESET}  ${DIM}%s${RESET}\n" "" "es: \"distribuzione errori sul nodo 10\""
-    printf "  ${BOLD}%-20s${RESET}  %s\n"  "conteggio status"      "Quante richieste per codice HTTP (200, 404, 500…)"
-    printf "  ${DIM}%-20s${RESET}  ${DIM}%s${RESET}\n" "" "es: \"quanti errori 500 ci sono stati stamattina\""
-    printf "  ${BOLD}%-20s${RESET}  %s\n"  "volume traffico"       "Andamento delle richieste per fasce di 10 minuti"
-    printf "  ${DIM}%-20s${RESET}  ${DIM}%s${RESET}\n" "" "es: \"volume traffico del nodo 7 in mattinata\""
-    printf "  ${BOLD}%-20s${RESET}  %s\n"  "traffico per IP"       "Chi ha fatto più richieste, o dettaglio per un IP specifico"
-    printf "  ${DIM}%-20s${RESET}  ${DIM}%s${RESET}\n" "" "es: \"chi ha fatto più richieste sul nodo 2\""
-    printf "\n"
+    local first_cat=true
+    for cat in "${HELP_CATEGORIES[@]}"; do
+        local printed_header=false
+        for tool in "${TOOL_NAMES[@]}"; do
+            [[ "${TOOL_CATEGORY[$tool]:-}" != "$cat" ]] && continue
+            local desc="${TOOL_DESC[$tool]:-}"
+            local ex="${TOOL_EXAMPLE[$tool]:-}"
+            [[ -z "$desc" ]] && continue
 
-    printf "  ${CYAN}${BOLD}Server log JBoss${RESET}\n"
-    printf "  ${BOLD}%-20s${RESET}  %s\n"  "errori e warning"      "Righe ERROR e WARN con classe, thread e messaggio"
-    printf "  ${DIM}%-20s${RESET}  ${DIM}%s${RESET}\n" "" "es: \"errori nel server log del nodo 3\""
-    printf "  ${BOLD}%-20s${RESET}  %s\n"  "errori applicativi"    "Errori 5xx e exception raggruppati per root cause"
-    printf "  ${DIM}%-20s${RESET}  ${DIM}%s${RESET}\n" "" "es: \"errori applicativi nascosti sul nodo 8\""
-    printf "  ${BOLD}%-20s${RESET}  %s\n"  "tempi servizi SOA"     "Statistiche di latenza per ogni servizio SOA (avg/min/max)"
-    printf "  ${DIM}%-20s${RESET}  ${DIM}%s${RESET}\n" "" "es: \"tempi dei servizi backend di stamattina\""
-    printf "\n"
+            if [[ "$printed_header" == false ]]; then
+                [[ "$first_cat" == false ]] && printf "\n"
+                printf "  ${CYAN}${BOLD}%s${RESET}\n" "$cat"
+                printed_header=true
+                first_cat=false
+            fi
 
-    printf "  ${CYAN}${BOLD}GC / JVM${RESET}\n"
-    printf "  ${BOLD}%-20s${RESET}  %s\n"  "statistiche GC"        "Pause GC: frequenza, durata, memoria liberata"
-    printf "  ${DIM}%-20s${RESET}  ${DIM}%s${RESET}\n" "" "es: \"statistiche GC del nodo 5\""
-    printf "  ${BOLD}%-20s${RESET}  %s\n"  "GC e lentezza"         "Correlazione tra pause GC e richieste HTTP lente"
-    printf "  ${DIM}%-20s${RESET}  ${DIM}%s${RESET}\n" "" "es: \"il GC sta causando lentezza sul nodo 6?\""
-    printf "\n"
+            printf "  ${BOLD}%s${RESET}\n" "$desc"
+            [[ -n "$ex" ]] && printf "  ${DIM}es: \"%s\"${RESET}\n" "$ex"
+        done
+    done
 
-    printf "  ${CYAN}${BOLD}Log Guidewire (cc.log, api.log, database.log…)${RESET}\n"
-    printf "  ${BOLD}%-20s${RESET}  %s\n"  "errori nel log"        "Filtra ERROR o WARN in un log Guidewire specifico"
-    printf "  ${DIM}%-20s${RESET}  ${DIM}%s${RESET}\n" "" "es: \"errori nel cc.log del nodo 12\""
-    printf "  ${BOLD}%-20s${RESET}  %s\n"  "ultime righe"          "Le ultime N righe di un log Guidewire"
-    printf "  ${DIM}%-20s${RESET}  ${DIM}%s${RESET}\n" "" "es: \"ultime 100 righe del api.log sul nodo 9\""
     printf "\n"
-
-    printf "  ${CYAN}${BOLD}Ricerca cross-log${RESET}\n"
-    printf "  ${BOLD}%-20s${RESET}  %s\n"  "cerca ovunque"        "Cerca un pattern in tutti i log del nodo (access, server, GC, Guidewire)"
-    printf "  ${DIM}%-20s${RESET}  ${DIM}%s${RESET}\n" "" "es: \"cerca NullPointerException nei log del nodo 5\""
-    printf "\n"
-
     printf "  ${DIM}Specifica sempre env e nodo nella query (es: \"in prod nodo 4\") o all'avvio con --env / --node.${RESET}\n"
     printf "  ${DIM}Digita ${RESET}${BOLD}aiuto${RESET}${DIM} in qualsiasi momento per rivedere questa lista.${RESET}\n\n"
 }
@@ -107,9 +87,8 @@ dispatch_tool() {
                 "$(open_log "$server")"
             ;;
         service_times)
-            [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile per service_times"; return; }
             eval gawk "$tw_args" -f "$TOOLS_DIR/service_times.awk" \
-                "$(open_log "$server")"
+                "$(open_log "$access")"
             ;;
         gc_stats)
             [[ -z "$gc" ]] && { echo "[SKIP] gc.log non disponibile per gc_stats"; return; }
@@ -163,8 +142,8 @@ dispatch_tool() {
                 echo "[SKIP] Log '$named_log' non trovato in ${gw_dir:-<gw_dir non impostata>}"
                 return
             fi
-            echo "  Log: $log_path"
-            eval gawk -f "$TOOLS_DIR/tail_log.awk" \
+            printf "\033[36mLog: %s\033[0m\n" "$log_path"
+            eval gawk -f "$TOOLS_DIR/tail_named_log.awk" \
                 -v tail_n="${TAIL_N:-50}" \
                 "$(open_log "$log_path")"
             ;;
@@ -193,7 +172,7 @@ dispatch_tool() {
                 echo "[SKIP] Log '$named_log' non trovato in ${gw_dir:-<gw_dir non impostata>}"
                 return
             fi
-            echo "  Log: $log_path  (level=${LOG_LEVEL:-ERROR})"
+            printf "\033[36mLog: %s\033[0m  (level=%s)\n" "$log_path" "${LOG_LEVEL:-ERROR}"
             eval gawk "$tw_args" -f "$TOOLS_DIR/grep_named_log.awk" \
                 -v level="${LOG_LEVEL:-ERROR}" \
                 -v tail_n="${TAIL_N:-50}" \

@@ -75,7 +75,7 @@ END {
         }
 
         printf "%-18s  %9s  %8s\n", "IP", "RICHIESTE", "AVG MS"
-        printf "%-18s  %9s  %8s\n", "──────────────────", "─────────", "──────"
+        printf "%-18s  %9s  %8s\n", "──────────────────", "─────────", "────────"
         limit = (n < top_n ? n : top_n)
         for (i = 1; i <= limit; i++) {
             ip  = sorted_ip[i]

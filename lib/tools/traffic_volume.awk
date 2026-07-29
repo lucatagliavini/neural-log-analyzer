@@ -30,7 +30,7 @@ END {
     for (bk in volume) if (volume[bk] > max_vol) max_vol = volume[bk]
 
     printf "%-10s  %7s  %6s  %6s  %s\n", "FASCIA", "TOTALE", "4xx", "5xx", "ANDAMENTO"
-    printf "%-10s  %7s  %6s  %6s\n",     "──────────", "───────", "──────", "──────"
+    printf "%-10s  %7s  %6s  %6s  %s\n", "──────────", "───────", "──────", "──────", "──────────────────────────────"
 
     n = 0
     for (bk in volume) keys[++n] = bk

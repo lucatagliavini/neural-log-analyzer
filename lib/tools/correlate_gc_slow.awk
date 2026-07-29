@@ -55,9 +55,18 @@ FILENAME ~ /access|undertow/ {
 }
 
 END {
-    print ""
     pct_corr = total_slow > 0 ? correlated_count*100/total_slow : 0
-    col_pct  = (pct_corr >= 50) ? RED : (pct_corr >= 20) ? YELLOW : ""
+    col_pct  = (pct_corr >= 30) ? RED : (pct_corr >= 10) ? YELLOW : ""
+
+    if (pct_corr >= 30)
+        verdetto = "GC E' PROBABILE CAUSA della lentezza"
+    else if (pct_corr >= 10)
+        verdetto = "GC CONTRIBUISCE alla lentezza"
+    else
+        verdetto = "GC NON e' la causa principale"
+
+    printf "\n%s%s%s  (%.0f%% correlato su %d richieste lente)\n\n", \
+        (col_pct != "") ? col_pct : BOLD, verdetto, RESET, pct_corr, total_slow+0
 
     printf "Richieste lente (>%d ms): %d\n", threshold_ms, total_slow+0
     printf "Di cui correlate a pausa GC (±%ds): %s%d (%.0f%%)%s\n", \

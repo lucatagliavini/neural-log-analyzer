@@ -82,9 +82,12 @@ fi
 
 # ─── Intestazione ─────────────────────────────────────────────────────────────
 total=${#TOOL_ORDER[@]}
-printf "\n${BOLD}╔══════════════════════════════════════════════════════════╗${RESET}\n"
-printf "${BOLD}║  Smoke test — %d tool — profilo: %-25s║${RESET}\n" "$total" "$(basename "$PROFILE")"
-printf "${BOLD}╚══════════════════════════════════════════════════════════╝${RESET}\n\n"
+inner="  Smoke test — ${total} tool — profilo: $(basename "$PROFILE")  "
+width=${#inner}
+border=$(printf '═%.0s' $(seq 1 "$width"))
+printf "\n${BOLD}╔%s╗${RESET}\n" "$border"
+printf "${BOLD}║%s║${RESET}\n"   "$inner"
+printf "${BOLD}╚%s╝${RESET}\n\n" "$border"
 printf "  ${DIM}Ogni query viene inviata a chatbot.sh con --query.\n"
 printf "  Premi ${RESET}${BOLD}Invio${RESET}${DIM} per passare al tool successivo.${RESET}\n\n"
 

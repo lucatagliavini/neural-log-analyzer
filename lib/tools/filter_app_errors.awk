@@ -66,13 +66,14 @@ function extract_cause(line,    c, last, pos) {
     return substr(c, 1, 80)
 }
 
-function register_error(type, logger, cause, ts,    key) {
-    key = type SUBSEP cause
+function register_error(type, logger, cause, ts,    key, short) {
+    short = substr(cause, 1, 80)
+    key = type SUBSEP short
     if (!(key in cause_count)) {
         cause_type[key]   = type
         cause_logger[key] = logger
         cause_ts[key]     = ts
-        cause_text[key]   = cause
+        cause_text[key]   = short
     }
     cause_count[key]++
     total++
@@ -109,7 +110,8 @@ END {
     printf "%-10s  %-*s  %5s  %-*s\n", "TIPO", col_log, "CLASSE", "CNT", col_cau, "ROOT CAUSE"
     printf "%-10s  %-*s  %5s  %-*s\n", "──────────", col_log, sep_log, "─────", col_cau, sep_cau
 
-    for (i = 1; i <= n; i++) {
+    max_print = 30
+    for (i = 1; i <= n && i <= max_print; i++) {
         k = keys[i]
         color = (cause_type[k] ~ /^HTTP-5/) ? RED : YELLOW
         printf "%s%-10s%s  %-*s  %5d  %-*s\n", \
@@ -118,5 +120,6 @@ END {
             cause_count[k], \
             col_cau, substr(cause_text[k], 1, col_cau)
     }
+    if (n > max_print) printf "... (%d cause distinte in più)\n", n - max_print
     printf "\nTotale errori applicativi: %d (%d cause distinte)\n", total, n
 }
