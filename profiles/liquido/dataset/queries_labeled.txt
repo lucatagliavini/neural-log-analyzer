@@ -998,3 +998,20 @@ search_all_logs	dove è loggato l'ip 172.30.169.1
 search_all_logs	cerca AnnoSinistroPolicySuffix in tutti i log
 search_all_logs	trova il pattern ContactManager nei log
 search_all_logs	dove appare l'errore AFeiDispatcher
+distribute_status	quali endpoint generano più errori 5xx
+distribute_status	quali api hanno più errori 500
+distribute_status	quali path hanno più errori 5xx
+distribute_status	per quale endpoint ci sono più 5xx
+distribute_status	quali url generano errori 500
+distribute_status	per quale api si concentrano gli errori 5xx
+distribute_status	mostrami gli endpoint con più errori
+distribute_status	quali api generano più fallimenti 5xx
+filter_errors	errori nel server.log
+filter_errors	errori e warning nel server.log
+filter_errors	exception nel server.log
+filter_errors	warning nel server.log
+filter_errors	problemi nel log jboss
+filter_errors	anomalie nel log jboss
+filter_errors	cosa c'è nel server.log
+filter_errors	errori recenti nel server.log
+filter_errors	eccezioni nel server.log
