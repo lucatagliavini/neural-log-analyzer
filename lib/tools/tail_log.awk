@@ -24,7 +24,17 @@ END {
         }
     }
 
-    for (i = start; i < count; i++) print buf[i % n]
+    for (i = start; i < count; i++) {
+        line = buf[i % n]
+        if (match(line, /" ([0-9]{3}) /, sc)) {
+            pfx = substr(sc[1], 1, 1)
+            if      (pfx == "5") printf "%s%s%s\n", RED,    line, RESET
+            else if (pfx == "4") printf "%s%s%s\n", YELLOW, line, RESET
+            else                 print line
+        } else {
+            print line
+        }
+    }
 
     printf "\n%s── Ultimi %d di %d righe totali", DIM, shown, count
     if (nerror + nwarn + ninfo > 0) {
