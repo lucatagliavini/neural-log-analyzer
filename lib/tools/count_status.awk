@@ -50,6 +50,15 @@ END {
 
     BAR_WIDTH = 20
 
+    # Intestazione periodo temporale
+    if (time_from != "" || time_to != "") {
+        t_from = (time_from != "") ? time_from : "inizio log"
+        t_to   = (time_to   != "") ? time_to   : "fine log"
+        # Mostra solo HH:MM se la data è la stessa, altrimenti data+ora completa
+        sub(/T/, " ", t_from); sub(/T/, " ", t_to)
+        printf DIM "  Periodo: %s → %s\n\n" RESET, t_from, t_to
+    }
+
     printf "%-10s  %9s  %7s  %s\n", "STATUS", "COUNT", "%", "BAR (scala log)"
     printf "%-10s  %9s  %7s  %s\n", "──────────", "─────────", "───────", "────────────────────"
 
@@ -95,6 +104,6 @@ END {
         printf CYAN   "  Redirect  3xx:  %*d  (%5.1f%%)\n" RESET, w, s3xx, s3xx/total*100
     printf YELLOW "  Errori    4xx:  %*d  (%5.1f%%)\n" RESET, w, s4xx, s4xx/total*100
     printf RED    "  Errori    5xx:  %*d  (%5.1f%%)\n" RESET, w, s5xx, s5xx/total*100
-    printf "  ─────────────────────────────\n"
+    printf "  ─────────────────────────────────\n"
     printf "  Tasso errore:   %*s  %5.2f%%\n", w, "", err_rate
 }
