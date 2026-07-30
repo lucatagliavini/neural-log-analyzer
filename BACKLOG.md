@@ -1,6 +1,26 @@
 # Backlog — neural-log-analyzer
 
-Aggiornato: 2026-07-29
+Aggiornato: 2026-07-30
+
+---
+
+## NORM — Entity Normalization (Step 1)
+
+Obiettivo: disaccoppiare il classificatore dai nomi applicativi concreti.
+Le query vengono normalizzate prima della vectorizzazione: `"errori jboss"` → `"errori <APP>"`.
+Aggiungere una nuova applicazione richiede solo una riga in `entities.conf`, non un retrain.
+
+| ID | Descrizione | Stato |
+|----|-------------|-------|
+| NORM-1 | `profiles/liquido/entities.conf` — mappa alias APP/ENV/NODE, sinonimi, risoluzione inversa | **Fatto** |
+| NORM-2 | `lib/normalize-query.sh` — unica fonte di verità per `DETECTED_APP/ENV/NODE` + `NORM_QUERY` | **Fatto** |
+| NORM-3 | `tests/test-normalize-query.sh` — 35 test unitari (APP, ENV, NODE, hostname, combo, abbreviazioni) | **Fatto** |
+| NORM-4 | `lib/param-extract.sh` — emette `DETECTED_*` in pass-through dall'ambiente | **Fatto** |
+| NORM-5 | `lib/query-to-features.sh` — usa `NORM_QUERY` se disponibile, fallback su `$1` | **Fatto** |
+| NORM-6 | `build-dataset.sh` — normalizza ogni esempio prima della vectorizzazione | **Fatto** |
+| NORM-7 | `unigrams.txt` — rimosso `\bguidewire\b` (ora normalizzato a `<APP>`) | **Fatto** |
+| NORM-8 | `chatbot.sh` — sostituisce `context-extract.sh` con `normalize-query.sh`; sourca `entities.conf` | **Fatto** |
+| NORM-9 | **Retrain** — rebuild dataset → linter → train con placeholder | Da fare (post-demo) |
 
 ---
 

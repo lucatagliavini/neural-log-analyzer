@@ -124,4 +124,4 @@ plugin[s.]|ruleengine|studio :: 1
 coda|queue\b|batch\b        :: 1
 velocity\.log|velocity\b    :: 2
 \bdice\b|\bcosa.dice\b      :: 1
-\bguidewire\b               :: 2
+# \bguidewire\b — rimosso: normalizzato a <APP> da normalize-query.sh

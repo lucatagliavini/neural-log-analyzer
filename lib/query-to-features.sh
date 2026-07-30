@@ -17,7 +17,10 @@ fi
 
 source "$PROFILE_DIR/domain.conf"
 
-query="${1,,}"  # lowercase
+# Usa NORM_QUERY se disponibile (prodotta da normalize-query.sh nel pipeline normale).
+# Fallback su $1 per invocazioni dirette (test manuali, infer-dry.sh, ecc.).
+query="${NORM_QUERY:-${1,,}}"
+query="${query,,}"  # lowercase uniforme anche in caso di fallback
 
 # ─── UNIGRAM ─────────────────────────────────────────────────────────────────
 features=()

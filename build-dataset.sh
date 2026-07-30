@@ -28,6 +28,9 @@ fi
 export PROFILE_DIR
 source "$PROFILE_DIR/domain.conf"   # carica vocabolario e configurazione dominio
 
+# Pre-carica entities.conf se disponibile per la normalizzazione degli esempi
+_ENTITIES_CONF="$PROFILE_DIR/entities.conf"
+
 LABELED="$PROFILE_DIR/dataset/queries_labeled.txt"
 DATASET_FILE="$PROFILE_DIR/dataset/queries.txt"
 
@@ -46,6 +49,14 @@ declare -a zero_vec_examples=()
 
 while IFS=$'\t' read -r labels query; do
     [[ -z "$query" || "$query" == \#* || "$labels" == \#* ]] && continue
+
+    # Normalizza la query (sostituisce alias app/env/node con placeholder canonici)
+    # prima della vectorizzazione, così il modello impara i pattern generici.
+    if [[ -f "$_ENTITIES_CONF" ]]; then
+        unset NORM_QUERY DETECTED_APP DETECTED_ENV DETECTED_NODE
+        source <("$LIB_DIR/normalize-query.sh" "$query" 2>/dev/null)
+        export NORM_QUERY
+    fi
 
     features=$("$LIB_DIR/query-to-features.sh" "$query")
 

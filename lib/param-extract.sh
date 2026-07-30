@@ -68,10 +68,14 @@ elif echo "$query" | grep -qE "\bprobl[ei]|anomal|cosa.non.va|non.va\b|incident|
     LOG_LEVEL="WARN+"
 fi
 
-# Nome log Guidewire specifico: "cc.log", "api.log", "database log", "messaging", ...
+# Nome log applicativo specifico — la lista viene dal profilo (entities.conf: GW_LOG_NAMES).
+# Fallback su array vuoto se il profilo non definisce GW_LOG_NAMES.
 NAMED_LOG=""
-for _log_name in cc api database messaging performance_integr jgroups plugin ruleengine studio \
-                 ccJBatch ccCanaliz claimnumgen contactsearch velocity arbitrato; do
+if [[ -n "${PROFILE_DIR:-}" && -f "$PROFILE_DIR/entities.conf" ]]; then
+    source "$PROFILE_DIR/entities.conf"
+fi
+for _log_name in "${GW_LOG_NAMES[@]:-}"; do
+    [[ -z "$_log_name" ]] && continue
     if echo "$query" | grep -qiE "\b${_log_name}"; then
         NAMED_LOG="$_log_name"
         break
@@ -84,16 +88,25 @@ done
 SEARCH_PATTERN=""
 _sq="${1,,}"  # query originale in minuscolo
 if echo "$_sq" | grep -qiE "\bcerca\b|\btrova\b|\bdove.appare\b|\bdove.si.trova\b|in.quali.log|cerca.ovunque|cerca.in.tutti"; then
-    # Pattern di stop-word ambienti costruito dinamicamente dagli ambienti del profilo
-    # (fallback sulla lista statica se system.conf non è disponibile)
+    # Pattern di stop-word ambienti costruito dinamicamente dagli ambienti del profilo.
+    # Se ENV_NODE_CODE non è disponibile, nessun filtro ambiente (preferibile al filtrare
+    # con nomi di un profilo sbagliato).
     if declare -p ENV_NODE_CODE &>/dev/null && [[ "${#ENV_NODE_CODE[@]}" -gt 0 ]]; then
         _env_pat=$(IFS='|'; echo "${!ENV_NODE_CODE[*]}")
     else
-        _env_pat="prod|euro|inte|cert|coll|test"
+        _env_pat=""
     fi
-    # Sinonimi italiani degli ambienti (sempre presenti)
-    _env_synonyms="produzion[ei]|integrazion[ei]|collaudo|certificazion[ei]"
-    _ctx_pat="${_env_pat}|${_env_synonyms}"
+    # Sinonimi italiani: se ENV_SYNONYMS è disponibile (da entities.conf), usa le chiavi;
+    # altrimenti stringa vuota.
+    if declare -p ENV_SYNONYMS &>/dev/null && [[ "${#ENV_SYNONYMS[@]}" -gt 0 ]]; then
+        _env_synonyms=$(IFS='|'; echo "${!ENV_SYNONYMS[*]}")
+    else
+        _env_synonyms=""
+    fi
+    # Componi _ctx_pat solo con i componenti non vuoti
+    _ctx_pat=""
+    [[ -n "$_env_pat"      ]] && _ctx_pat="$_env_pat"
+    [[ -n "$_env_synonyms" ]] && _ctx_pat="${_ctx_pat:+${_ctx_pat}|}${_env_synonyms}"
 
     # Estrai il token dopo il verbo / la frase trigger, poi tronca ai qualificatori
     SEARCH_PATTERN=$(echo "$_sq" | \
@@ -115,3 +128,8 @@ echo "TAIL_N='${TAIL_N}'"
 echo "NAMED_LOG='${NAMED_LOG}'"
 echo "LOG_LEVEL='${LOG_LEVEL}'"
 echo "SEARCH_PATTERN='${SEARCH_PATTERN}'"
+# Entità normalizzate — arrivano da normalize-query.sh (unica fonte di verità).
+# param-extract le riemette invariate così il chiamante può fare un unico eval.
+echo "DETECTED_APP='${DETECTED_APP:-}'"
+echo "DETECTED_ENV='${DETECTED_ENV:-}'"
+echo "DETECTED_NODE='${DETECTED_NODE:-}'"

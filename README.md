@@ -81,7 +81,7 @@ neural-log-analyzer/
 │   ├── dispatch.sh         # Tool name → invocazione AWK
 │   ├── param-extract.sh    # Estrae TIME_FROM/TO, STATUS_CODE, THRESHOLD_MS, …
 │   ├── query-to-features.sh# Query testuale → vettore numerico
-│   ├── context-extract.sh  # Estrae env/nodo/app dalla query
+│   ├── normalize-query.sh  # Normalizza entità (APP/ENV/NODE) → NORM_QUERY + DETECTED_*
 │   ├── resolve-logs.sh     # (env, nodo, app) → path file di log
 │   ├── utils-time.sh       # NL temporale italiano → range ISO8601
 │   ├── gen-examples.sh     # Genera esempi labeled via espansione sinonimi

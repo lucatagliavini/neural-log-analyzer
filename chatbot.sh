@@ -66,7 +66,7 @@ if [[ ! -f "$PROFILE_DIR/system.conf" || ! -f "$PROFILE_DIR/domain.conf" ]]; the
     exit 1
 fi
 
-# Esporta PROFILE_DIR per tutti i lib (infer, context-extract, query-to-features, resolve-logs)
+# Esporta PROFILE_DIR per tutti i lib (infer, normalize-query, query-to-features, resolve-logs)
 export PROFILE_DIR
 
 # Carica configurazione di sistema e dominio
@@ -74,6 +74,8 @@ source "$PROFILE_DIR/system.conf"
 # Override locale (non deployato) — per variabili specifiche dell'ambiente di produzione
 [[ -f "$PROFILE_DIR/system.local.conf" ]] && source "$PROFILE_DIR/system.local.conf"
 source "$PROFILE_DIR/domain.conf"
+# Dizionario entità (APP alias, ENV synonyms, NODE patterns) per normalize-query.sh
+[[ -f "$PROFILE_DIR/entities.conf" ]] && source "$PROFILE_DIR/entities.conf"
 
 # Allinea TZ di sistema con quella dei log del server (tutti i sottoprocessi la ereditano)
 [[ -n "${LOG_TZ:-}" ]] && export TZ="$LOG_TZ"
@@ -94,11 +96,13 @@ source "$LIB_DIR/dispatch.sh"
 # ─── Modalità non interattiva: deduzione contesto dalla query ────────────────
 if [[ "$INTERACTIVE" -eq 0 && -z "$ACCESS_LOG" ]]; then
     if [[ -n "$QUERY" ]]; then
-        ctx=$("$LIB_DIR/context-extract.sh" "$QUERY")
-        eval "$ctx"
-        [[ -n "$CTX_ENV"  && "$CTX_ENV"  != "$ACTIVE_ENV"  ]] && ACTIVE_ENV="$CTX_ENV"
-        [[ -n "$CTX_NODE" && "$CTX_NODE" != "$ACTIVE_NODE" ]] && ACTIVE_NODE="$CTX_NODE"
-        [[ -n "$CTX_APP"  && "$CTX_APP"  != "$ACTIVE_APP"  ]] && ACTIVE_APP="$CTX_APP"
+        source <("$LIB_DIR/normalize-query.sh" "$QUERY")
+        export NORM_QUERY
+        [[ -n "$DETECTED_ENV"  && "$DETECTED_ENV"  != "$ACTIVE_ENV"  ]] && ACTIVE_ENV="$DETECTED_ENV"
+        [[ -n "$DETECTED_NODE" && "$DETECTED_NODE" != "$ACTIVE_NODE" ]] && ACTIVE_NODE="$DETECTED_NODE"
+        if [[ -n "$DETECTED_APP" && -z "$ACTIVE_APP" ]]; then
+            ACTIVE_APP="${APP_CANONICAL[$DETECTED_APP]:-$DETECTED_APP}"
+        fi
     fi
     if [[ -z "$ACTIVE_ENV" ]]; then
         echo "[ERROR] --query richiede --env (o --access-log), oppure menziona l'ambiente nella query (es: \"errori in coll\")" >&2
@@ -168,15 +172,17 @@ trap '_rotate_query_logs' EXIT
 run_query() {
     local query="$1"
 
-    # Estrai eventuale cambio di contesto dalla query
-    local ctx
-    ctx=$("$LIB_DIR/context-extract.sh" "$query")
-    eval "$ctx"
+    # Normalizza la query ed estrai entità (APP, ENV, NODE) — unica fonte di verità
+    source <("$LIB_DIR/normalize-query.sh" "$query")
+    export NORM_QUERY
 
     local ctx_changed=0
-    [[ -n "$CTX_ENV"  && "$CTX_ENV"  != "$ACTIVE_ENV"  ]] && { ACTIVE_ENV="$CTX_ENV";   ctx_changed=1; }
-    [[ -n "$CTX_NODE" && "$CTX_NODE" != "$ACTIVE_NODE" ]] && { ACTIVE_NODE="$CTX_NODE"; ctx_changed=1; }
-    [[ -n "$CTX_APP"  && "$CTX_APP"  != "$ACTIVE_APP"  ]] && { ACTIVE_APP="$CTX_APP";   ctx_changed=1; }
+    [[ -n "$DETECTED_ENV"  && "$DETECTED_ENV"  != "$ACTIVE_ENV"  ]] && { ACTIVE_ENV="$DETECTED_ENV";  ctx_changed=1; }
+    [[ -n "$DETECTED_NODE" && "$DETECTED_NODE" != "$ACTIVE_NODE" ]] && { ACTIVE_NODE="$DETECTED_NODE"; ctx_changed=1; }
+    if [[ -n "$DETECTED_APP" ]]; then
+        local _canonical="${APP_CANONICAL[$DETECTED_APP]:-$DETECTED_APP}"
+        [[ "$_canonical" != "$ACTIVE_APP" ]] && { ACTIVE_APP="$_canonical"; ctx_changed=1; }
+    fi
 
     # Estrai parametri strutturati (TIME_FROM, TIME_TO, DATE_FILTER, ...) prima di resolve
     eval "$("$LIB_DIR/param-extract.sh" "$query")"

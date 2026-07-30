@@ -11,10 +11,10 @@
 # Uso: eval "$(./lib/resolve-logs.sh <base_dir> <env> <nodo_num> [<app>])"
 #
 # Struttura attesa:
-#   <base_dir>/<env>/lx<envcode>jbliq<nn>/<APP_SUBPATH>/
+#   <base_dir>/<env>/<NODE_NAME_TEMPLATE>/<APP_SUBPATH>/
 #     server.log, gc.log, undertow_access_log.*.log
 #
-# APP_SUBPATH e GUIDEWIRE_SUBPATH sono template definiti in system.conf del profilo.
+# NODE_NAME_TEMPLATE, APP_SUBPATH e GUIDEWIRE_SUBPATH sono template in system.conf.
 #
 
 # Carica sistema e dominio dal profilo attivo
@@ -43,11 +43,14 @@ fi
 
 # ─── Risoluzione nodo ─────────────────────────────────────────────────────────
 NODE_NUM=$(printf "%02d" "$NODE_NUM" 2>/dev/null || echo "$NODE_NUM")
-NODE_NAME="lx${ENV_CODE}jbliq${NODE_NUM}"
+# NODE_NAME_TEMPLATE è definito in system.conf (es: 'lx${ENV_CODE}jbliq${NODE_NUM}')
+NODE_NAME=$(eval echo "${NODE_NAME_TEMPLATE}")
 NODE_DIR="$BASE_DIR/$ENV_NAME/$NODE_NAME"
 
 if [[ ! -d "$NODE_DIR" ]]; then
-    NODE_DIR=$(find "$BASE_DIR/$ENV_NAME" -maxdepth 1 -type d -name "lx${ENV_CODE}jbliq*" | sort | head -1)
+    # Fallback: cerca qualsiasi nodo che corrisponda al prefisso del template
+    _node_prefix=$(eval echo "${NODE_NAME_TEMPLATE}" | sed 's/[0-9]*$//')
+    NODE_DIR=$(find "$BASE_DIR/$ENV_NAME" -maxdepth 1 -type d -name "${_node_prefix}*" | sort | head -1)
     if [[ -z "$NODE_DIR" ]]; then
         echo "echo '[ERROR] resolve-logs: nodo non trovato in $BASE_DIR/$ENV_NAME' >&2" >&2
         exit 1
