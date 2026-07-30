@@ -67,6 +67,7 @@ END {
 
         if      (substr(s,1,1) == "5") color = RED
         else if (substr(s,1,1) == "4") color = YELLOW
+        else if (substr(s,1,1) == "3") color = CYAN
         else                           color = ""
         reset = (color != "") ? RESET : ""
 
@@ -89,9 +90,9 @@ END {
     err_rate  = err_total / total * 100
 
     w = 9  # larghezza colonna numeri nel summary
-    printf "  Successi  2xx:  %*d  (%5.1f%%)\n", w, s2xx, s2xx/total*100
+    printf         "  Successi  2xx:  %*d  (%5.1f%%)\n",        w, s2xx, s2xx/total*100
     if (s3xx > 0)
-        printf "  Redirect  3xx:  %*d  (%5.1f%%)\n", w, s3xx, s3xx/total*100
+        printf CYAN   "  Redirect  3xx:  %*d  (%5.1f%%)\n" RESET, w, s3xx, s3xx/total*100
     printf YELLOW "  Errori    4xx:  %*d  (%5.1f%%)\n" RESET, w, s4xx, s4xx/total*100
     printf RED    "  Errori    5xx:  %*d  (%5.1f%%)\n" RESET, w, s5xx, s5xx/total*100
     printf "  ─────────────────────────────\n"
