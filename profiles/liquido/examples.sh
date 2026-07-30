@@ -8,7 +8,7 @@
 #
 
 # Log Guidewire presenti su questo sistema (vedi system.conf GUIDEWIRE_SUBPATH)
-GW_LOGS=(
+APP_LOGS=(
     "cc.log"
     "api.log"
     "database.log"
@@ -18,7 +18,7 @@ GW_LOGS=(
 )
 
 gen_grep_named_log() {
-    for log in "${GW_LOGS[@]}"; do
+    for log in "${APP_LOGS[@]}"; do
         # Tutti i template usano ${log} (con .log) per attivare gli unigram GW [60-67]
         emit "grep_named_log" "errori nel ${log}"
         emit "grep_named_log" "mostrami gli errori del ${log}"
@@ -38,7 +38,7 @@ gen_grep_named_log() {
 }
 
 gen_tail_named_log() {
-    for log in "${GW_LOGS[@]}"; do
+    for log in "${APP_LOGS[@]}"; do
         # Tutti i template usano ${log} (con .log) per attivare gli unigram GW [60-67]
         emit "tail_named_log" "ultime righe del ${log}"
         emit "tail_named_log" "mostrami il ${log}"
