@@ -1,0 +1,3 @@
+.venv/
+profiles/*/models/*.backup/
+profiles/*/models/*.backup2/

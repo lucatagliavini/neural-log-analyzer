@@ -10,6 +10,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NNET_RUN="$SCRIPT_DIR/../nnet-run.sh"
+VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python3"
+TRAIN_PY="$SCRIPT_DIR/lib/train.py"
 
 PROFILE_DIR=""
 EPOCHS=5000
@@ -17,6 +19,7 @@ LR=0.01
 OPTIMIZER=adam
 MIN_DELTA="0.00005"
 PATIENCE=100
+NO_SAVE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -26,6 +29,7 @@ while [[ $# -gt 0 ]]; do
         --optimizer) OPTIMIZER="$2"; shift 2 ;;
         --min-delta) MIN_DELTA="$2"; shift 2 ;;
         --patience)  PATIENCE="$2";  shift 2 ;;
+        --no-save)   NO_SAVE="--no-save"; shift ;;
         *) echo "[ERROR] opzione sconosciuta: $1" >&2; exit 1 ;;
     esac
 done
@@ -76,13 +80,28 @@ echo "[INFO] Dataset: $DATASET_FILE"
 echo "[INFO] Epochs: $EPOCHS | LR: $LR | Optimizer: $OPTIMIZER | min-delta: $MIN_DELTA | patience: $PATIENCE"
 echo ""
 
-"$NNET_RUN" train "$DATASET_FILE" "$MODEL_DIR" \
-    --epochs "$EPOCHS" \
-    --lr "$LR" \
-    --optimizer "$OPTIMIZER" \
-    --loss mse \
-    --min-delta "$MIN_DELTA" \
-    --patience "$PATIENCE"
+if [[ -x "$VENV_PYTHON" && -f "$TRAIN_PY" ]]; then
+    echo "[INFO] Backend: PyTorch ($("$VENV_PYTHON" -c 'import torch; print(torch.__version__)'))"
+    echo ""
+    "$VENV_PYTHON" "$TRAIN_PY" "$DATASET_FILE" "$MODEL_DIR" \
+        --epochs    "$EPOCHS" \
+        --lr        "$LR" \
+        --optimizer "$OPTIMIZER" \
+        --min-delta "$MIN_DELTA" \
+        --patience  "$PATIENCE" \
+        ${NO_SAVE}
+else
+    echo "[INFO] Backend: gawk (venv non trovato in $SCRIPT_DIR/.venv)"
+    echo ""
+    "$NNET_RUN" train "$DATASET_FILE" "$MODEL_DIR" \
+        --epochs "$EPOCHS" \
+        --lr "$LR" \
+        --optimizer "$OPTIMIZER" \
+        --loss mse \
+        --min-delta "$MIN_DELTA" \
+        --patience "$PATIENCE" \
+        ${NO_SAVE}
+fi
 
 echo ""
 echo "[OK] Training completato. Usa: ./chatbot.sh --profile $PROFILE_DIR"

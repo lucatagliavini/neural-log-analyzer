@@ -54,6 +54,7 @@ response.time|sopra.soglia|impiegano.troppo|risposta.ritardat|ritardat :: 1
 timeout                   :: 1
 
 # ── Server log ────────────────────────────────────────────────────────────────
+probl[ei]|anomal          :: 1
 warn                      :: 1
 exception|eccezion        :: 1
 stack.trace|stacktrace    :: 1
