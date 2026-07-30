@@ -89,6 +89,8 @@ Aggiungere una nuova applicazione richiede solo una riga in `entities.conf`, non
 | UI-4 | `tail_log`: colorize 4xx/5xx access log | **Fatto** |
 | UI-5 | `tail_named_log`: tool dedicato con colori Guidewire | **Fatto** |
 | UI-6 | `dispatch.sh`: path log in CYAN per `tail_named_log` e `grep_named_log` | **Fatto** |
+| UI-7 | `count_status`: percentuale, barra log, summary 2xx/3xx/4xx/5xx, tasso errore, periodo | **Fatto** |
+| UI-8 | **Periodo temporale in tutti i tool** — `count_status` mostra già `Periodo: HH:MM → HH:MM` quando `time_from`/`time_to` sono impostati. Propagare lo stesso pattern a tutti i tool che usano il filtro temporale: `distribute_status`, `slow_requests`, `filter_errors`, `filter_app_errors`, `grep_named_log`, `gc_stats`, `traffic_volume`, `service_times`. Valutare se estrarre in un helper AWK (`utils-header.awk` o funzione in `utils-time.awk`) per non duplicare la logica. | Da fare |
 
 ---
 
