@@ -50,7 +50,7 @@ END {
 
     BAR_WIDTH = 20
 
-    printf "%-10s  %9s  %7s  %s\n", "STATUS", "COUNT", "%", "BAR"
+    printf "%-10s  %9s  %7s  %s\n", "STATUS", "COUNT", "%", "BAR (scala log)"
     printf "%-10s  %9s  %7s  %s\n", "──────────", "─────────", "───────", "────────────────────"
 
     for (i = 1; i <= n; i++) {
