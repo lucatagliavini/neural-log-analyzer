@@ -68,13 +68,13 @@ elif echo "$query" | grep -qE "\bprobl[ei]|anomal|cosa.non.va|non.va\b|incident|
     LOG_LEVEL="WARN+"
 fi
 
-# Nome log applicativo specifico — la lista viene dal profilo (entities.conf: GW_LOG_NAMES).
-# Fallback su array vuoto se il profilo non definisce GW_LOG_NAMES.
+# Nome log applicativo specifico — la lista viene dal profilo (entities.conf: APP_LOG_NAMES).
+# Fallback su array vuoto se il profilo non definisce APP_LOG_NAMES.
 NAMED_LOG=""
 if [[ -n "${PROFILE_DIR:-}" && -f "$PROFILE_DIR/entities.conf" ]]; then
     source "$PROFILE_DIR/entities.conf"
 fi
-for _log_name in "${GW_LOG_NAMES[@]:-}"; do
+for _log_name in "${APP_LOG_NAMES[@]:-}"; do
     [[ -z "$_log_name" ]] && continue
     if echo "$query" | grep -qiE "\b${_log_name}"; then
         NAMED_LOG="$_log_name"
