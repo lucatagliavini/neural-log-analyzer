@@ -97,6 +97,18 @@ filter_errors	stack trace recenti
 filter_errors	errori critici nelle ultime ore
 filter_errors	warning recenti nel server.log
 filter_errors	cosa ha lanciato exception di recente
+filter_errors	ci sono errori in produzione
+filter_errors	quali sono gli errori in produzione
+filter_errors	errori sul nodo 5
+filter_errors	errori sul nodo 3 di produzione
+filter_errors	cosa non va in produzione
+filter_errors	ci sono problemi in produzione
+filter_errors	anomalie rilevate in produzione
+filter_errors	errori sull'applicazione in produzione
+filter_errors	dammi gli errori dell'applicazione
+filter_errors	eccezioni sull'ambiente di produzione
+filter_errors	ultimi errori dell'applicazione
+filter_errors	ci sono exception in produzione
 
 # ─── service_times ───────────────────────────────────────────────────────────
 service_times	tempi dei servizi soa
