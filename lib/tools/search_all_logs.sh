@@ -183,13 +183,20 @@ fi
 bar_max=12 best_hits=0 best_node=""
 _prev_node="" _row_dim=0
 
-# Header — colonne allineate a max_lbl
-_node_hdr=""
-[[ -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]] && _node_hdr="${_D}nodo  ${_X}"
-_lbl_hdr=$(printf "%-${max_lbl}s" "log")
-printf "  ${_node_hdr}${_D}%-${max_lbl}s  %-12s  %6s  %-19s  %-19s${_X}\n" \
-    "log" "" "match" "primo match" "ultimo match"
-printf "  ${_D}%s${_X}\n" "$(printf '─%.0s' $(seq 1 $(( max_lbl + 12 + 6 + 19 + 19 + 16 ))))"
+# Header — colonne allineate alle righe dati.
+# Nelle righe dati il prefisso nodo è "nodo NN  " = 9 chars visibili;
+# l'header usa %-9s per occupare la stessa larghezza.
+# I separatori │ precedono le colonne timestamp sia nell'header che nei dati.
+_node_hdr_str=""
+[[ -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]] && \
+    _node_hdr_str=$(printf "${_D}%-9s${_X}" "NODO")
+printf "  %s${_D}%-${max_lbl}s  %-12s  %6s  │  %-19s  │  %-19s${_X}\n" \
+    "$_node_hdr_str" "LOG" "" "MATCH" "PRIMO MATCH" "ULTIMO MATCH"
+# Larghezza separatore = prefisso nodo (9 se multi-nodo, 0 se singolo)
+#   + max_lbl + 2 + 12 + 2 + 6 + (2+│+2) + 19 + (2+│+2) + 19 = max_lbl + 70
+_sep_w=$(( max_lbl + 70 ))
+[[ -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]] && _sep_w=$(( _sep_w + 9 ))
+printf "  ${_D}%s${_X}\n" "$(printf '─%.0s' $(seq 1 "$_sep_w"))"
 
 for (( i=0; i<total_files; i++ )); do
     _h="${res_hits[$i]:-0}"
@@ -235,7 +242,7 @@ for (( i=0; i<total_files; i++ )); do
     fi
 done
 
-printf "  ${_D}%s${_X}\n" "$(printf '─%.0s' $(seq 1 $(( max_lbl + 12 + 6 + 19 + 19 + 16 ))))"
+printf "  ${_D}%s${_X}\n" "$(printf '─%.0s' $(seq 1 "$_sep_w"))"
 
 skipped=$(( total_files - matched_files ))
 printf "  ${_B}Totale:${_X} %d occorrenze in %d log" "$total_hits" "$matched_files"
