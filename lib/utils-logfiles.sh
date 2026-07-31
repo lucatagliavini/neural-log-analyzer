@@ -27,6 +27,28 @@
 #   - BASENAME.log-DATE-EPOCH.gz  (rotazione giornaliera compressa)
 #
 
+# Estrae e normalizza il timestamp da una singola riga di log in formato leggibile
+# YYYY-MM-DD HH:MM:SS. Supporta:
+#   server.log  → YYYY-MM-DD HH:MM:SS,mmm (o con T)
+#   gc.log      → [YYYY-MM-DDTHH:MM:SS
+#   access log  → [DD/Mon/YYYY:HH:MM:SS
+# Restituisce stringa vuota se nessun formato riconosciuto.
+log_ts_from_line() {
+    local _line="$1" _ts
+    _ts=$(echo "$_line" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}' | head -1)
+    if [[ -n "$_ts" ]]; then echo "${_ts/T/ }"; return; fi
+    _ts=$(echo "$_line" | grep -oE '\[[0-9]{2}/[A-Za-z]{3}/[0-9]{4}:[0-9]{2}:[0-9]{2}:[0-9]{2}' | head -1)
+    if [[ -n "$_ts" ]]; then
+        local _d="${_ts:1:2}" _m="${_ts:4:3}" _y="${_ts:8:4}" _t="${_ts:13:8}" _mn
+        case "${_m,,}" in
+            jan) _mn=01;; feb) _mn=02;; mar) _mn=03;; apr) _mn=04;;
+            may) _mn=05;; jun) _mn=06;; jul) _mn=07;; aug) _mn=08;;
+            sep) _mn=09;; oct) _mn=10;; nov) _mn=11;; dec) _mn=12;; *) _mn="??";;
+        esac
+        echo "${_y}-${_mn}-${_d} ${_t}"
+    fi
+}
+
 _logfiles_read_first_ts() {
     local f="$1"
     local line=""

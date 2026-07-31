@@ -123,17 +123,15 @@ for (( i=0; i<total_files; i++ )); do
             hits=$(gunzip -c "$pth" 2>/dev/null | grep -ciE "$sp" 2>/dev/null || true)
             hits="${hits:-0}"
             if [[ "$hits" -gt 0 ]]; then
-                first_ts=$(gunzip -c "$pth" 2>/dev/null | grep -m 1 -iE "$sp" 2>/dev/null \
-                    | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}' \
-                    | head -1) || true
+                _fline=$(gunzip -c "$pth" 2>/dev/null | grep -m 1 -iE "$sp" 2>/dev/null || true)
+                first_ts=$(log_ts_from_line "$_fline")
             fi
         else
             hits=$(grep -ciE "$sp" "$pth" 2>/dev/null || true)
             hits="${hits:-0}"
             if [[ "$hits" -gt 0 ]]; then
-                first_ts=$(grep -m 1 -iE "$sp" "$pth" 2>/dev/null \
-                    | grep -oE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}' \
-                    | head -1) || true
+                _fline=$(grep -m 1 -iE "$sp" "$pth" 2>/dev/null || true)
+                first_ts=$(log_ts_from_line "$_fline")
             fi
         fi
 
