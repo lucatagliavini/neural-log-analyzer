@@ -1036,3 +1036,60 @@ filter_errors	anomalie nel log jboss
 filter_errors	cosa c'è nel server.log
 filter_errors	errori recenti nel server.log
 filter_errors	eccezioni nel server.log
+
+# ─── NORM-9: tail_log + LOG_TYPE=server — "ultime righe log applicativo" ──────
+# Mancavano esempi espliciti "log applicativo/server" per tail_log.
+# Senza questi, il classificatore attivava tail_named_log (vede "applicativo" → Guidewire).
+tail_log	dammi le ultime 20 righe del log applicativo
+tail_log	ultime 50 righe del log applicativo
+tail_log	le ultime 100 righe del log applicativo
+tail_log	mostrami le ultime righe del log applicativo
+tail_log	ultime righe del server log
+tail_log	dammi le ultime righe del server log
+tail_log	mostrami le ultime 50 righe del server log
+tail_log	visualizza le ultime righe del log jboss
+tail_log	ultime 30 righe del log jboss
+tail_log	log applicativo delle ultime richieste
+tail_log	cosa c'è di recente nel log applicativo
+tail_log	eventi recenti nel log del server applicativo
+tail_log	cosa è successo di recente nel server log
+tail_log	mostra gli ultimi eventi nel log applicativo
+tail_log	dammi gli ultimi log applicativi
+
+# ─── NORM-9: correlate_gc_slow — rinforzo "correlazione gc pause" ─────────────
+# Il classificatore attivava gc_stats (79%) insieme a correlate_gc_slow
+# su query tipo "correlazione gc pause" perché "pausa" è forte feature di gc_stats.
+# Questi esempi rinforzano che "correlazione gc" da sola → solo correlate_gc_slow.
+correlate_gc_slow	correlazione gc pause
+correlate_gc_slow	correlazione tra gc e pause
+correlate_gc_slow	le pause gc sono correlate alle richieste lente
+correlate_gc_slow	gc pause e performance
+correlate_gc_slow	analisi correlazione gc
+correlate_gc_slow	impatto delle pause gc sul sistema
+correlate_gc_slow	le pause gc impattano le performance
+correlate_gc_slow	pausa gc e degrado applicazione
+correlate_gc_slow	quanto impattano le pause gc sulle richieste
+correlate_gc_slow	correlazione gc con i tempi di risposta
+
+# ─── NORM-9: gc_stats — controesempi puri (NO correlazione) ───────────────────
+# Rinforza gc_stats per query che chiedono SOLO statistiche senza "correlazione"
+gc_stats	quante pause gc ci sono state oggi
+gc_stats	durata media delle pause gc oggi
+gc_stats	statistiche gc di oggi
+gc_stats	quante volte ha fatto gc stamattina
+gc_stats	pause gc nelle ultime 2 ore
+gc_stats	frequenza gc nelle ultime ore
+gc_stats	statistiche garbage collector nelle ultime 3 ore
+gc_stats	memoria heap nelle ultime 6 ore
+gc_stats	utilizzo jvm nell'ultima ora
+gc_stats	quanti gc events ci sono stati
+
+# ─── NORM-9: search_all_logs — NON deve attivarsi su "cerca correlazione" ─────
+# "cerca correlazione gc" → la parola "cerca" attivava search_all_logs (26%).
+# Questi esempi con "cerca" esplicito ma intento = correlate_gc_slow
+# insegnano al modello che il contesto GC/lentezza prevale sul trigger "cerca".
+correlate_gc_slow	cerca correlazione tra gc e lentezza
+correlate_gc_slow	cerca la correlazione tra gc pause e richieste lente
+correlate_gc_slow	cerca se il gc causa lentezza
+correlate_gc_slow	cerca se le pause gc impattano le richieste
+correlate_gc_slow	analizza la correlazione gc slow request
