@@ -128,6 +128,14 @@ Aggiungere una nuova applicazione richiede solo una riga in `entities.conf`, non
 
 ---
 
+## DEDUP — Normalizzazione chiave di deduplicazione
+
+| ID | Descrizione | Stato |
+|----|-------------|-------|
+| DEDUP-1 | **Normalizzazione ID numerici in chiave dedup** — `WorkItemPeriodicWork_Ext:1778994` e `:1778995` sono deduplicati separatamente perché l'ID è parte del messaggio. Normalizzare la chiave rimuovendo numeri/UUID ridurrebbe il rumore ma nasconderebbe quanti WorkItem distinti sono bloccati (informazione utile per valutare la gravità). **Da discutere prima di implementare**: opzione configurabile? Soglia minima? Solo in modalità "summary"? | Da discutere |
+
+---
+
 ## Note architetturali — cosa NON fare
 
 - **No wrapper sh per ogni tool.** Aggiungere `filter_errors.sh` → `gawk -f ...` non porta valore: la composizione è già in `dispatch.sh` e si perderebbe la testabilità diretta del singolo `.awk`.
