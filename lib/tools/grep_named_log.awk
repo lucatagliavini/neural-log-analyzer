@@ -79,7 +79,7 @@ END {
         dk    = _dup_order[i]
         rl    = _dup_level[dk]
         cnt   = _dup_cnt[dk]
-        color = (rl == "ERROR") ? RED : (rl == "WARN") ? YELLOW : ""
+        color = (rl == "ERROR") ? RED : (rl == "WARN") ? YELLOW : (rl == "INFO") ? WHT : ""
         rst   = (color != "") ? RESET : ""
         cnt_str = (cnt > 1) ? sprintf(" (×%d)", cnt) : ""
         printf "%s%-5s%s  %s%s%s  %s%s\n", \

@@ -187,7 +187,11 @@ run_query() {
     fi
     if [[ -n "$DETECTED_APP" ]]; then
         local _canonical="${APP_CANONICAL[$DETECTED_APP]:-$DETECTED_APP}"
-        [[ "$_canonical" != "$ACTIVE_APP" ]] && { ACTIVE_APP="$_canonical"; ctx_changed=1; }
+        if [[ "$_canonical" != "$ACTIVE_APP" ]]; then
+            ACTIVE_APP="$_canonical"
+            ACTIVE_NAMED_LOG=""
+            ctx_changed=1
+        fi
     fi
 
     # Estrai parametri strutturati (TIME_FROM, TIME_TO, DATE_FILTER, ...) prima di resolve
@@ -304,7 +308,7 @@ run_query() {
             context_line
         fi
         echo ""
-        dispatch_tool "$tool"
+        dispatch_tool "$tool" || true
         echo ""
     done <<< "$tools"
 
