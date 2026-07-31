@@ -1,6 +1,6 @@
 # Backlog — neural-log-analyzer
 
-Aggiornato: 2026-07-31 (sessione 03)
+Aggiornato: 2026-07-31 (sessione 04)
 
 ---
 
@@ -101,7 +101,7 @@ Aggiungere una nuova applicazione richiede solo una riga in `entities.conf`, non
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
 | ARCH-5 | **`SERVER_LOG_FORMAT` in `system.conf`** — aggiunto; `param-extract.sh` usa `$SERVER_LOG_FORMAT` invece di `jboss` hardcoded per riconoscere keyword "log jboss/websphere/..." → `LOG_TYPE=server`. Ogni profilo dichiara la propria tecnologia. | **Fatto** (2026-07-31) |
-| ARCH-6 | **Audit hardcoding in `param-extract.sh`** — verificare se esistono altri nomi di tecnologie o applicazioni hardcoded nei grep/regex che dovrebbero provenire da `system.conf` o `entities.conf`. | Da fare |
+| ARCH-6 | **Audit hardcoding in `param-extract.sh`** — verificare se esistono altri nomi di tecnologie o applicazioni hardcoded nei grep/regex che dovrebbero provenire da `system.conf` o `entities.conf`. | **Fatto** (2026-07-31) |
 
 ---
 
