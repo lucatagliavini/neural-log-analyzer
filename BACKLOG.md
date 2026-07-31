@@ -20,7 +20,7 @@ Aggiungere una nuova applicazione richiede solo una riga in `entities.conf`, non
 | NORM-6 | `build-dataset.sh` — normalizza ogni esempio prima della vectorizzazione | **Fatto** |
 | NORM-7 | `unigrams.txt` — rimosso `\bguidewire\b` (ora normalizzato a `<APP>`) | **Fatto** |
 | NORM-8 | `chatbot.sh` — sostituisce `context-extract.sh` con `normalize-query.sh`; sourca `entities.conf` | **Fatto** |
-| NORM-9 | **Retrain** — rebuild dataset → linter → train con placeholder | Da fare (post-demo) |
+| NORM-9 | **Retrain** — rebuild dataset → linter → train con placeholder | **Fatto** (2026-07-31) |
 
 ---
 

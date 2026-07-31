@@ -35,8 +35,9 @@ QUERY=""
 DRY_RUN=0
 RESOLVED_DATE_FILTER=""
 ACTIVE_NAMED_LOG=""
-ACTIVE_TIME_FROM=""
-ACTIVE_TIME_TO=""
+# Default temporale: oggi (00:00→23:59). L'utente può sovrascrivere con query esplicita.
+ACTIVE_TIME_FROM="$(date +%Y-%m-%dT00:00)"
+ACTIVE_TIME_TO="$(date +%Y-%m-%dT23:59)"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
