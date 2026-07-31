@@ -10,4 +10,5 @@ BEGIN {
     BOLD   = "\033[1m"
     DIM    = "\033[2m"
     RESET  = "\033[0m"
+    WHT    = "\033[97m"   # bianco puro ISO 6429 (non il colore di default del terminale)
 }

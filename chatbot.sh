@@ -35,6 +35,8 @@ QUERY=""
 DRY_RUN=0
 RESOLVED_DATE_FILTER=""
 ACTIVE_NAMED_LOG=""
+ACTIVE_TIME_FROM=""
+ACTIVE_TIME_TO=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -178,7 +180,10 @@ run_query() {
 
     local ctx_changed=0
     [[ -n "$DETECTED_ENV"  && "$DETECTED_ENV"  != "$ACTIVE_ENV"  ]] && { ACTIVE_ENV="$DETECTED_ENV";  ctx_changed=1; }
-    [[ -n "$DETECTED_NODE" && "$DETECTED_NODE" != "$ACTIVE_NODE" ]] && { ACTIVE_NODE="$DETECTED_NODE"; ctx_changed=1; }
+    if [[ -n "$DETECTED_NODE" ]]; then
+        local _norm_node; _norm_node=$(printf "%02d" "$((10#$DETECTED_NODE))" 2>/dev/null || echo "$DETECTED_NODE")
+        [[ "$_norm_node" != "$ACTIVE_NODE" ]] && { ACTIVE_NODE="$_norm_node"; ctx_changed=1; }
+    fi
     if [[ -n "$DETECTED_APP" ]]; then
         local _canonical="${APP_CANONICAL[$DETECTED_APP]:-$DETECTED_APP}"
         [[ "$_canonical" != "$ACTIVE_APP" ]] && { ACTIVE_APP="$_canonical"; ctx_changed=1; }
@@ -195,8 +200,55 @@ run_query() {
         NAMED_LOG="$ACTIVE_NAMED_LOG"
     fi
 
+    # CTX-1 — filtro temporale persistente.
+    # Se la query specifica un tempo → aggiorna il contesto attivo.
+    # Se non lo specifica → eredita da ACTIVE_TIME_FROM/TO (come già avviene per ACTIVE_NODE).
+    if [[ -n "$TIME_FROM" || -n "$TIME_TO" ]]; then
+        [[ "$TIME_FROM" != "$ACTIVE_TIME_FROM" || "$TIME_TO" != "$ACTIVE_TIME_TO" ]] && ctx_changed=1
+        ACTIVE_TIME_FROM="$TIME_FROM"
+        ACTIVE_TIME_TO="$TIME_TO"
+    else
+        TIME_FROM="$ACTIVE_TIME_FROM"
+        TIME_TO="$ACTIVE_TIME_TO"
+    fi
+
     # DATE_FILTER è una dimensione del contesto: se cambia → re-resolve
     [[ "${DATE_FILTER:-}" != "$RESOLVED_DATE_FILTER" ]] && { RESOLVED_DATE_FILTER="${DATE_FILTER:-}"; ctx_changed=1; }
+
+    # CTX-3 — intercetta frasi di solo-contesto prima della lazy resolution e del classificatore.
+    # Deve stare qui: "stamattina" senza env è un aggiornamento temporale valido anche senza log.
+    # Usa NORM_QUERY (già normalizzata con placeholder <ENV>/<NODE>/<APP>) invece della query
+    # originale: "sul nodo 4 di produzione" → "sul <NODE> di <ENV>" → residuo vuoto dopo strip.
+    # Due casi:
+    # A) ctx_changed=1 e il residuo di NORM_QUERY (senza placeholder e connettivi) è ≤4 char
+    # B) TIME_ONLY_QUERY=1 — rilevato direttamente in utils-time.sh usando i suoi stessi pattern
+    local _ctx_only=0
+    local _ctx_query_stripped
+    _ctx_query_stripped=$(echo "${NORM_QUERY:-$query}" | \
+        sed -E 's/<(ENV|NODE|APP)>//gI' | \
+        sed -E 's/\b(considera|lavoriamo|lavora|siamo|stiamo|parliamo|analizziamo|guardiam[oi]|fissa|imposta|usa|usiam[oi]|sul|sulla|sullo|sulle|sugli|nel|nella|nello|nelle|negli|del|della|dello|delle|degli|al|alla|allo|alle|agli|dal|dalla|dallo|dalle|dagli|col|nodo|in|su|di|da|per|il|la|lo|le|gli|un|una|e|a|o|con)\b//gI' | \
+        sed -E 's/[[:space:]]+/ /g' | sed 's/^ *//; s/ *$//')
+    [[ "$ctx_changed" -eq 1 && ${#_ctx_query_stripped} -le 4 ]] && _ctx_only=1
+    [[ "${TIME_ONLY_QUERY:-0}" == "1" ]] && _ctx_only=1
+    if [[ "$_ctx_only" -eq 1 ]]; then
+        # Se env/nodo è cambiato, re-resolve i log prima di tornare — altrimenti
+        # la query successiva usa ancora i log del nodo precedente.
+        if [[ "$DRY_RUN" -eq 0 && "$ctx_changed" -eq 1 && -n "$ACTIVE_ENV" ]]; then
+            resolve_session_logs || true
+        fi
+        printf "\n"
+        context_line
+        printf "  \033[2mContesto aggiornato.\033[0m\n\n"
+        return
+    fi
+
+    # show_help non richiede contesto — intercetta prima della lazy resolution
+    if echo "${query,,}" | grep -qiE "^(aiuto|help|\?|cosa (sai|puoi)[[:space:]]+(fare|fai)|cosa (fai|fare)|che (cosa )?(sai|puoi)[[:space:]]+(fare|fai)|strumenti|comandi)[[:space:]]*\?*$"; then
+        printf "\n\033[1m┌─\033[0m Query: %s\n" "$query"
+        print_help
+        printf "\033[1m└──────────────────────────────────────────\033[0m\n"
+        return
+    fi
 
     # Lazy resolution: se ancora senza log, tenta ora che potremmo avere il contesto
     # (in dry-run non servono i log — skip)
@@ -210,14 +262,6 @@ run_query() {
         elif [[ "$ctx_changed" -eq 1 && -n "$ACTIVE_ENV" ]]; then
             resolve_session_logs || return 1
         fi
-    fi
-
-    if [[ "$ctx_changed" -eq 1 ]]; then
-        local ctx_msg
-        printf "  \033[2m[Contesto: \033[0m\033[1m%s\033[0m\033[2m  nodo \033[0m\033[1m%s\033[0m\033[2m  %s" \
-            "$ACTIVE_ENV" "$ACTIVE_NODE" "$ACTIVE_APP"
-        [[ -n "$ACTIVE_NAMED_LOG" ]] && printf "\033[2m  log=\033[0m\033[1m%s\033[0m" "$ACTIVE_NAMED_LOG"
-        printf "\033[2m]\033[0m\n"
     fi
 
     printf "\n\033[1m┌─\033[0m Query: %s\n" "$query"
@@ -253,6 +297,12 @@ run_query() {
 
     while IFS=' ' read -r tool _prob; do
         printf "\033[1m├─── %s\033[0m ─────────────────────────────\n" "$tool"
+        if [[ "$tool" == "search_all_logs" && -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]]; then
+            context_line "no_node"
+        else
+            context_line
+        fi
+        echo ""
         dispatch_tool "$tool"
         echo ""
     done <<< "$tools"
@@ -261,15 +311,47 @@ run_query() {
 }
 
 # ─── Main ────────────────────────────────────────────────────────────────────
+
+# Stampa il contesto attivo su stderr in formato leggibile.
+# Colori: DIM per le etichette, WHT (bianco puro) per i valori — coerente con UI-8.
+# Viene chiamata in cima ad ogni risposta (CTX-2).
+# context_line [no_node]
+# Con argomento "no_node": omette il nodo dal contesto (es. ricerca multi-nodo).
 context_line() {
-    if [[ -n "$ACTIVE_ENV" ]]; then
-        local ctx="Contesto: $ACTIVE_ENV  nodo $ACTIVE_NODE  ($ACTIVE_APP)"
-        [[ -n "$ACTIVE_NAMED_LOG" ]] && ctx+="  log=$ACTIVE_NAMED_LOG"
-        echo "$ctx"
-    elif [[ -n "$ACCESS_LOG" ]]; then
-        echo "Log: $ACCESS_LOG"
+    local _hide_node="${1:-}"
+    local _D="\033[2m" _W="\033[97m" _B="\033[1m" _X="\033[0m"
+    local parts=()
+
+    local _has_any=0
+    [[ -n "$ACTIVE_ENV" || -n "$ACTIVE_TIME_FROM" || -n "$ACTIVE_TIME_TO" || -n "$ACCESS_LOG" ]] && _has_any=1
+
+    if [[ "$_has_any" -eq 1 ]]; then
+        if [[ -n "$ACCESS_LOG" && -z "$ACTIVE_ENV" ]]; then
+            printf "  ${_D}[log: ${_X}${_W}%s${_X}${_D}]${_X}\n" "$ACCESS_LOG"
+            return
+        fi
+        local _NA="${_D}N/A${_X}"
+        parts+=("${_W}${ACTIVE_ENV:-${_NA}}${_X}")
+        if [[ "$_hide_node" == "no_node" ]]; then
+            parts+=("${_D}tutti i nodi${_X}")
+        else
+            parts+=("${_D}nodo${_X} ${_W}${ACTIVE_NODE:-${_NA}}${_X}")
+        fi
+        [[ -n "$ACTIVE_APP"       ]] && parts+=("${_W}${ACTIVE_APP}${_X}")
+        [[ -n "$ACTIVE_NAMED_LOG" ]] && parts+=("${_D}log${_X} ${_W}${ACTIVE_NAMED_LOG}${_X}")
+        if [[ -n "$ACTIVE_TIME_FROM" || -n "$ACTIVE_TIME_TO" ]]; then
+            local tf="${ACTIVE_TIME_FROM:-inizio}" tt="${ACTIVE_TIME_TO:-fine}"
+            tf="${tf/T/ }"; tt="${tt/T/ }"
+            parts+=("${_W}${tf}${_X}${_D}→${_X}${_W}${tt}${_X}")
+        fi
+        local joined="" sep=""
+        for _p in "${parts[@]}"; do
+            joined="${joined}${sep}${_p}"
+            sep="${_D} · ${_X}"
+        done
+        printf "  ${_D}[${_X}${joined}${_D}]${_X}\n"
     else
-        echo "Contesto: non impostato — specificalo nella prima query (es: \"errori in coll\")"
+        printf "  ${_D}[contesto non impostato — es: \"errori in coll\"]${_X}\n"
     fi
 }
 
@@ -280,7 +362,7 @@ if [[ "$INTERACTIVE" -eq 0 ]]; then
     run_query "${QUERY:-}"
 else
     printf "\033[1mNeural Log Analyzer\033[0m — profilo: \033[36m${profile_name}\033[0m\n"
-    printf "$(context_line)\n"
+    context_line
     [[ -n "${SERVER_LOG:-}" ]] && printf "     server.log: \033[2m$SERVER_LOG\033[0m\n"
     [[ -n "${GC_LOG:-}"     ]] && printf "     gc.log:     \033[2m$GC_LOG\033[0m\n"
     printf "\033[2mDigita la tua domanda (Ctrl+C per uscire) — \033[0m\033[1maiuto\033[0m\033[2m per la lista degli strumenti\033[0m\n\n"
@@ -291,7 +373,7 @@ else
         [[ -z "$query" ]] && continue
         [[ "$query" == "exit" || "$query" == "quit" ]] && break
         # Keyword detection help — intercetta prima del classificatore
-        if echo "$query" | grep -qiE "^(aiuto|help|\?|cosa (sai|puoi|fai)|che (cosa )?(sai|puoi|fai)|strumenti|comandi)$"; then
+        if echo "$query" | grep -qiE "^(aiuto|help|\?|cosa (sai|puoi)[[:space:]]+(fare|fai)|cosa (fai|fare)|che (cosa )?(sai|puoi)[[:space:]]+(fare|fai)|strumenti|comandi)[[:space:]]*\?*$"; then
             print_help
             continue
         fi

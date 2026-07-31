@@ -14,6 +14,10 @@ errore|errori             :: 2
 4xx                       :: 1
 status|stato              :: 1
 http                      :: 1
+# "risposte HTTP ricevute", "ricevuti N codici" — solo count_status (1 classe)
+rispost[ae]|ricevut       :: 1
+# "access log", "accesso da" — max 2 classi (count_status + filter_ip/tail_log)
+access\b|accessi\b        :: 1
 
 # ── Tempo / finestre temporali ────────────────────────────────────────────────
 ora |ore |ora$            :: 2
@@ -52,6 +56,13 @@ prestazion|performanc     :: 1
 alto|sopra.i\b|tempi.alt|risposta.alt|tempi.elev :: 1
 response.time|sopra.soglia|impiegano.troppo|risposta.ritardat|ritardat :: 1
 timeout                   :: 1
+# "sopra i 2 secondi", "sopra la soglia" — solo slow_requests (1 classe)
+sopra\b                   :: 1
+# "tempi di risposta", "response time" — max 4 classi ma peso basso; rinforza service_times e slow_requests
+# (NON aggiungere "risposta" da solo: 4 classi, troppo generico — il pattern composito è ok)
+tempi\b                   :: 1
+# "service times", "SOA service" — solo service_times (1 classe)
+service\b                 :: 2
 
 # ── Server log ────────────────────────────────────────────────────────────────
 probl[ei]|anomal          :: 1
@@ -67,6 +78,14 @@ heap                      :: 1
 memori[ae]|jvm            :: 1
 pause|pausa\b             :: 2
 collector                 :: 1
+# "utilizzo heap/memoria", "usage" — solo gc_stats (1 classe)
+utilizzo\b|usage\b        :: 1
+# "durante il GC", "durante le pause" — max 2 classi (correlate_gc_slow + gc_stats)
+durante\b                 :: 1
+# "causato dal GC", "causa lentezza" — max 2 classi (correlate_gc_slow + filter_ip)
+causa\b                   :: 1
+# "slow request" inglese (correlate_gc_slow) — già coperto da slow ma questo rinforza
+request\b                 :: 1
 
 # ── Endpoint / URL ────────────────────────────────────────────────────────────
 endpoint                  :: 1
@@ -87,6 +106,10 @@ applicat                  :: 1
 nascost|intern            :: 1
 root.cause|business       :: 1
 loggat|loggati            :: 1
+# "applicazione lenta/in errore" — max 2 classi (filter_app_errors + filter_errors)
+applicazione\b            :: 1
+# "livello INFO nel server log" — max 2 classi (filter_app_errors + search_all_logs)
+\binfo\b                  :: 1
 
 # ── Discriminatori di classe ──────────────────────────────────────────────────
 servizi|servizio|backend|web.?service :: 1
@@ -96,6 +119,19 @@ volum|picch|picco|andament :: 1
 traffico|traffich         :: 1
 chiamata|chiamate        :: 1
 correlazion|correla\b    :: 1
+# "eventi nel log", "eventi access" — max 2 classi (tail_log + tail_named_log)
+event[io]\b               :: 1
+# "genera errori", "concentrano su" — solo distribute_status (1 classe)
+genera\b|generano\b|concentr :: 1
+# "database.log", "messaging.log" — max 2 classi (grep_named_log + tail_named_log)
+# (database e messaging da soli coprono anche le query senza ".log")
+\bdatabase\b              :: 1
+\bmessaging\b             :: 1
+integrazion|integrazioni  :: 1
+# "appare nel log", "ovunque nei log" — solo search_all_logs (1 classe)
+appare\b|ovunque\b        :: 1
+# "accessi da IP", "accessi filtrati" — max 2 classi (filter_ip + tail_log)
+accessi\b                 :: 1
 
 # ── Colloquiale / informale ───────────────────────────────────────────────────
 rott[oa]|non.va\b|non.funz :: 1
@@ -113,6 +149,10 @@ come.funzion|come.si.usa|come.posso.usar|come.ti.uso :: 2
 istruzion|guida\b|menu\b|capabilit|funzionalit :: 2
 quali.log.sai|che.tipo.di.log|quali.analisi|che.*analisi|che.query :: 2
 opzioni.disponibil|strumenti.disponibil|strumenti.*hai :: 2
+# "cosa posso fare", "cosa fai" — solo show_help (1 classe); "cosa" da solo è stop word (9 classi)
+posso.fare|puoi.fare|cosa.fare|cosa.posso :: 2
+# "analisi disponibili" — max 2 classi (show_help + gc_stats/correlate) ma con peso basso
+analisi\b                        :: 1
 
 # ── Log Guidewire specifici ───────────────────────────────────────────────────
 cc\.log|claimcenter.log     :: 2

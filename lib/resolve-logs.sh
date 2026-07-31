@@ -23,6 +23,7 @@ if [[ -z "${PROFILE_DIR:-}" ]]; then
     exit 1
 fi
 source "$PROFILE_DIR/system.conf"
+source "$(dirname "${BASH_SOURCE[0]}")/utils-nodes.sh"
 
 BASE_DIR="${1:-$LOG_BASE_DIR}"
 ENV_NAME="${2:-}"
@@ -48,14 +49,13 @@ NODE_NAME=$(eval echo "${NODE_NAME_TEMPLATE}")
 NODE_DIR="$BASE_DIR/$ENV_NAME/$NODE_NAME"
 
 if [[ ! -d "$NODE_DIR" ]]; then
-    # Fallback: cerca qualsiasi nodo che corrisponda al prefisso del template
-    _node_prefix=$(eval echo "${NODE_NAME_TEMPLATE}" | sed 's/[0-9]*$//')
-    NODE_DIR=$(find "$BASE_DIR/$ENV_NAME" -maxdepth 1 -type d -name "${_node_prefix}*" | sort | head -1)
+    # Fallback: scoperta dinamica tramite utils-nodes.sh (unica fonte di verità)
+    NODE_DIR=$(list_env_node_dirs "$ENV_NAME" | head -1)
     if [[ -z "$NODE_DIR" ]]; then
         echo "echo '[ERROR] resolve-logs: nodo non trovato in $BASE_DIR/$ENV_NAME' >&2" >&2
         exit 1
     fi
-    NODE_NUM=$(basename "$NODE_DIR" | grep -oE "[0-9]+$")
+    NODE_NUM=$(node_num_from_dir "$NODE_DIR")
 fi
 
 # ─── Risoluzione app dir (espande il template APP_SUBPATH) ───────────────────

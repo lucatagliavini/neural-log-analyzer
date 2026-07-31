@@ -12,30 +12,35 @@ BEGIN {
     gc_n = 0
 }
 
-# Fase 1: file gc.log — raccoglie timestamp e durata pause
+# Fase 1: file gc.log — raccoglie timestamp e durata pause.
+# parse_gc() restituisce epoch Unix completo (data+ora) — corretto su log multi-giorno.
+# in_range() applica il filtro time_from/time_to se impostato dalla query.
 FILENAME ~ /gc/ && /Pause (Young|Full|Mixed)/ && /[0-9]+\.[0-9]+ms$/ {
-    if (match($0, /\[[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T([0-9][0-9]):([0-9][0-9]):([0-9][0-9])/, tm)) {
-        h = tm[1]+0; m = tm[2]+0; s = tm[3]+0
-        gc_ts[++gc_n] = h*3600 + m*60 + s
-    }
+    ts = parse_gc($1)
+    if (ts == 0) next
+    if ((time_from != "" || time_to != "") && !in_range(ts)) next
+
+    gc_ts[++gc_n] = ts
     if (match($0, /([0-9]+\.[0-9]+)ms$/, pm))
         gc_dur[gc_n] = pm[1]+0
     else
         gc_dur[gc_n] = 0
 }
 
-# Fase 2: file access.log — verifica richieste lente
+# Fase 2: file access.log — verifica richieste lente.
+# parse_access() restituisce epoch Unix — coerente con gc_ts[] per il diff ±gc_margin_s.
 FILENAME ~ /access|undertow/ {
     if (!match($0, /" [0-9]+ [0-9]+ ([0-9]+) /, a)) next
     resp_ms = a[1] + 0
     if (resp_ms < threshold_ms + 0) next
 
-    if (!match($0, /:([0-9][0-9]):([0-9][0-9]):([0-9][0-9]) /, b)) next
-    req_s = b[1]*3600 + b[2]*60 + b[3]+0
+    req_epoch = parse_access($2)
+    if (req_epoch == 0) next
+    if ((time_from != "" || time_to != "") && !in_range(req_epoch)) next
 
     correlated = 0
     for (i = 1; i <= gc_n; i++) {
-        diff = req_s - gc_ts[i]
+        diff = req_epoch - gc_ts[i]
         if (diff < 0) diff = -diff
         if (diff <= gc_margin_s) { correlated = 1; gc_hit[i]++; break }
     }

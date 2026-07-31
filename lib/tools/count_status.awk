@@ -17,6 +17,11 @@ BEGIN {
         next
     }
 
+    # Contatore totale (non filtrato) — usato nel summary per mostrare
+    # la gravità relativa del filtro rispetto al traffico reale.
+    all_count[status]++
+    all_total++
+
     if (status_filter != "") {
         if (status_filter ~ /xx$/) {
             prefix = substr(status_filter, 1, 1)
@@ -50,15 +55,6 @@ END {
 
     BAR_WIDTH = 20
 
-    # Intestazione periodo temporale
-    if (time_from != "" || time_to != "") {
-        t_from = (time_from != "") ? time_from : "inizio log"
-        t_to   = (time_to   != "") ? time_to   : "fine log"
-        # Mostra solo HH:MM se la data è la stessa, altrimenti data+ora completa
-        sub(/T/, " ", t_from); sub(/T/, " ", t_to)
-        printf DIM "  Periodo: %s → %s\n\n" RESET, t_from, t_to
-    }
-
     printf "%-10s  %9s  %7s  %s\n", "STATUS", "COUNT", "%", "BAR (scala log)"
     printf "%-10s  %9s  %7s  %s\n", "──────────", "─────────", "───────", "────────────────────"
 
@@ -86,24 +82,30 @@ END {
     printf "%-10s  %9s  %7s\n", "──────────", "─────────", "───────"
     printf "%-10s  %9d\n\n", "TOTALE", total
 
-    # Calcola raggruppamenti
+    # Calcola raggruppamenti sul traffico reale (non filtrato).
+    # Quando status_filter è vuoto all_count == count, quindi il comportamento
+    # è identico al precedente. Quando il filtro è attivo il summary mostra
+    # la gravità relativa: "362 errori 500 su 5241 richieste totali = 6.9%".
+    base = (all_total > 0) ? all_total : 1
     s2xx = 0; s3xx = 0; s4xx = 0; s5xx = 0
-    for (s in count) {
+    for (s in all_count) {
         p = substr(s,1,1)
-        if (p == "2") s2xx += count[s]
-        else if (p == "3") s3xx += count[s]
-        else if (p == "4") s4xx += count[s]
-        else if (p == "5") s5xx += count[s]
+        if      (p == "2") s2xx += all_count[s]
+        else if (p == "3") s3xx += all_count[s]
+        else if (p == "4") s4xx += all_count[s]
+        else if (p == "5") s5xx += all_count[s]
     }
     err_total = s4xx + s5xx
-    err_rate  = err_total / total * 100
+    err_rate  = err_total / base * 100
 
     w = 9  # larghezza colonna numeri nel summary
-    printf         "  Successi  2xx:  %*d  (%5.1f%%)\n",        w, s2xx, s2xx/total*100
+    if (status_filter != "")
+        printf DIM "  Traffico totale: %*d richieste nel periodo\n" RESET, w, all_total
+    printf         "  Successi  2xx:  %*d  (%5.1f%%)\n",           w, s2xx, s2xx/base*100
     if (s3xx > 0)
-        printf CYAN   "  Redirect  3xx:  %*d  (%5.1f%%)\n" RESET, w, s3xx, s3xx/total*100
-    printf YELLOW "  Errori    4xx:  %*d  (%5.1f%%)\n" RESET, w, s4xx, s4xx/total*100
-    printf RED    "  Errori    5xx:  %*d  (%5.1f%%)\n" RESET, w, s5xx, s5xx/total*100
+        printf CYAN   "  Redirect  3xx:  %*d  (%5.1f%%)\n" RESET,  w, s3xx, s3xx/base*100
+    printf YELLOW "  Errori    4xx:  %*d  (%5.1f%%)\n" RESET,      w, s4xx, s4xx/base*100
+    printf RED    "  Errori    5xx:  %*d  (%5.1f%%)\n" RESET,      w, s5xx, s5xx/base*100
     printf "  ─────────────────────────────────\n"
     printf "  Tasso errore:   %*s  %5.2f%%\n", w, "", err_rate
 }

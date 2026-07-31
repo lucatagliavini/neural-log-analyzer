@@ -82,6 +82,14 @@ for _log_name in "${APP_LOG_NAMES[@]:-}"; do
     fi
 done
 
+# Tipo di log per tail_log: "server"/"applicativo" → server.log, default → access log
+# SERVER_LOG_FORMAT viene da system.conf — non hardcodiamo il nome della tecnologia.
+LOG_TYPE=""
+_srv_fmt="${SERVER_LOG_FORMAT:-server}"
+if echo "$query" | grep -qiE "\b(log[[:space:]]+(applicativ|dell.applicaz|di[[:space:]]+sistema|${_srv_fmt})|applicativ[oa][[:space:]]+log)\b"; then
+    LOG_TYPE="server"
+fi
+
 # Pattern di ricerca libero per search_all_logs.
 # Estratto da: "cerca X", "trova X", "dove appare X", "in quali log c'è X",
 # "cerca ovunque X", "cerca in tutti i log X"
@@ -108,25 +116,49 @@ if echo "$_sq" | grep -qiE "\bcerca\b|\btrova\b|\bdove.appare\b|\bdove.si.trova\
     [[ -n "$_env_pat"      ]] && _ctx_pat="$_env_pat"
     [[ -n "$_env_synonyms" ]] && _ctx_pat="${_ctx_pat:+${_ctx_pat}|}${_env_synonyms}"
 
-    # Estrai il token dopo il verbo / la frase trigger, poi tronca ai qualificatori
+    # Estrai il token dopo il verbo / la frase trigger, poi tronca ai qualificatori.
+    # Pipeline:
+    #   1. Strip trigger ("cerca in tutti i log", "trova", ...)
+    #   2. Strip qualificatori contestuali ovunque nella residua (env/nodo/qualificatori temporali)
+    #      — necessario perché il trigger può lasciare "di produzione la stringa X" dove
+    #        il contesto precede il prefisso descrittivo
+    #   3. Strip prefisso descrittivo ("la stringa", "il pattern", ...)
+    #   4. Strip suffissi ("nei log", "ovunque", ...)
+    #   5. Trim spazi
+    _ctx_strip=""
+    if [[ -n "$_ctx_pat" ]]; then
+        _ctx_strip="(di |in |su |nel |nella |nei |dal |dalla |dai |dalle )?[[:space:]]*\b(${_ctx_pat})\b[[:space:]]*"
+    fi
+    # Pattern temporali da stripare — usa le costanti da utils-time.sh.
+    # I pattern "prefisso" (stamatt, questa.matt, stanott, staser) vengono estesi
+    # con \S* per catturare i caratteri fusi (es. stamatt → stamattina).
+    _re_morning_strip="stamatt\S*|questa.matt\S*|\bmattinata\b|\bdi mattina\b|\bin mattina\b"
+    _re_night_strip="stanott\S*|questa.notte|\bdi notte\b|\bnotturno\b"
+    _re_evening_strip="staser\S*|questa.sera|\bdi sera\b|\bserata\b"
+    _time_strip="${_RE_N_DAYS_AGO}|${_RE_N_HOURS_AGO}|${_RE_N_MINS_AGO}|${_RE_HALF_HOUR_AGO}|${_RE_LAST_N_HOURS}|${_RE_LAST_N_MINS}|${_RE_LAST_ONE_HOUR}|${_RE_LAST_DAY}|${_re_morning_strip}|${_RE_AFTERNOON}|${_re_night_strip}|${_re_evening_strip}|${_RE_YESTERDAY}|${_RE_TODAY}|${_RE_JUST_NOW}|${_RE_EXPLICIT_RANGE}|${_RE_SINGLE_HOUR}"
     SEARCH_PATTERN=$(echo "$_sq" | \
-        sed -E 's/.*(cerca ovunque|cerca in tutti i log|in quali log c.è|in quali log|dove appare|dove si trova|cerca|trova)[[:space:]]*//' | \
+        sed -E "s/.*(cerca ovunque|cerca in tutti i log|in quali log c'è|in quali log|dove appare|dove si trova|cerca|trova)[[:space:]]*//" | \
+        { [[ -n "$_ctx_strip" ]] && sed -E "s/${_ctx_strip}//gI" || cat; } | \
+        sed -E 's/(nodo [0-9]+|su nodo|tutti i nodi)[[:space:]]*//gI' | \
+        sed -E "s/\b(nell[ae]?|del[la]*|di|in|a)[[:space:]]*(${_time_strip})//gI" | \
+        sed -E "s/(${_time_strip})//gI" | \
         sed -E 's/^(il pattern|il testo|la stringa|il sinistro|l.utente|l.errore|il codice|il messaggio)[[:space:]]*//' | \
         sed -E 's/[[:space:]]*(nei log|ovunque|in tutti i log|nei vari log)$//' | \
-        sed -E "s/[[:space:]]+(di |in |su )?(oggi|ieri|stamattina|mattinata|pomeriggio|stasera|stanotte|questa settimana|${_ctx_pat}|nodo [0-9]+|nel log|nei log|su nodo|ovunque)[[:space:]].*\$//" | \
-        sed -E "s/[[:space:]]+(di |in |su )?(oggi|ieri|stamattina|mattinata|pomeriggio|stasera|stanotte|questa settimana|${_ctx_pat}|nodo [0-9]+|nel log|nei log|su nodo|ovunque)\$//" | \
+        sed -E 's/\b(di|in|nel|nell|dalle|alle|verso|le|la|il|fa|a)[[:space:]]*$//' | \
         sed 's/^ *//' | sed 's/ *$//')
 fi
 
 echo "TIME_FROM='${TIME_FROM}'"
 echo "TIME_TO='${TIME_TO}'"
 echo "DATE_FILTER='${DATE_FILTER}'"
+echo "TIME_ONLY_QUERY='${TIME_ONLY_QUERY:-0}'"
 echo "STATUS_CODE='${STATUS_CODE}'"
 echo "THRESHOLD_MS='${THRESHOLD_MS}'"
 echo "IP_FILTER='${IP_FILTER}'"
 echo "TAIL_N='${TAIL_N}'"
 echo "NAMED_LOG='${NAMED_LOG}'"
 echo "LOG_LEVEL='${LOG_LEVEL}'"
+echo "LOG_TYPE='${LOG_TYPE}'"
 echo "SEARCH_PATTERN='${SEARCH_PATTERN}'"
 # Entità normalizzate — arrivano da normalize-query.sh (unica fonte di verità).
 # param-extract le riemette invariate così il chiamante può fare un unico eval.

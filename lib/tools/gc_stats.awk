@@ -5,7 +5,24 @@
 BEGIN {
     gc_count = 0
     SLOW_MS = 200; VERYSLOW_MS = 500
-    BUCKET_MIN = 30   # granularità timeline (minuti)
+
+    # Granularità timeline adattiva in base alla finestra temporale richiesta.
+    # Obiettivo: produrre sempre un numero di bucket utile alla lettura (10-50).
+    # Con finestra assente (log intero ~24h) usa 30 min come default.
+    # La formula usa la durata in minuti e mira a ~48 bucket come target.
+    if (time_from != "" && time_to != "") {
+        ts_f = parse_iso(time_from)
+        ts_t = parse_iso(time_to)
+        window_min = (ts_t - ts_f) / 60
+        if      (window_min <=  30) BUCKET_MIN = 1
+        else if (window_min <=  60) BUCKET_MIN = 2
+        else if (window_min <= 120) BUCKET_MIN = 5
+        else if (window_min <= 360) BUCKET_MIN = 10
+        else if (window_min <= 720) BUCKET_MIN = 15
+        else                        BUCKET_MIN = 30
+    } else {
+        BUCKET_MIN = 30
+    }
 }
 
 # ── Raccolta dati regioni per GC(N) corrente ─────────────────────────────────
@@ -117,6 +134,23 @@ END {
     # ── Riepilogo ─────────────────────────────────────────────────────────────
     print ""
     print BOLD "── Riepilogo GC ─────────────────────────────────────────────" RESET
+
+    # Mostra il periodo analizzato: se filtrato dalla query usa time_from/to,
+    # altrimenti mostra il range effettivo dei dati (primo e ultimo evento nel log).
+    if (time_from != "" || time_to != "") {
+        _pf = time_from; _pt = time_to
+        gsub(/T/, " ", _pf); gsub(/T/, " ", _pt)
+        if (_pf == "") _pf = "inizio log"
+        if (_pt == "") _pt = "fine log"
+        printf "  " DIM "Periodo:" RESET "  " WHT "%s" RESET "  " DIM "→" RESET "  " WHT "%s" RESET "\n\n", _pf, _pt
+    } else {
+        # Range effettivo: primo e ultimo timestamp nei dati raccolti
+        _first = buf_ts[1]; _last = buf_ts[gc_count]
+        gsub(/T/, " ", _first); gsub(/T/, " ", _last)
+        if (_first != "" && _last != "")
+            printf "  " DIM "Dati:    " RESET "  " WHT "%s" RESET "  " DIM "→" RESET "  " WHT "%s" RESET "  " DIM "(log completo)" RESET "\n\n", _first, _last
+    }
+
     printf "  Totale eventi:    %d\n", gc_count
     printf "  Pausa totale:     %.1f ms\n", total_pause_ms
     printf "  Pausa media:      %s%.1f ms%s\n",   col_avg, avg_ms,      col_avg != "" ? RESET : ""

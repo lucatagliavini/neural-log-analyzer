@@ -1,6 +1,6 @@
 # Backlog — neural-log-analyzer
 
-Aggiornato: 2026-07-30
+Aggiornato: 2026-07-31 (sessione 03)
 
 ---
 
@@ -40,7 +40,7 @@ Aggiungere una nuova applicazione richiede solo una riga in `entities.conf`, non
 
 | ID | Descrizione | Impatto | Complessità |
 |----|-------------|---------|-------------|
-| ARCH-1 | **`utils-colors.awk`** — definisce `RED`, `YELLOW`, `GREEN`, `CYAN`, `BOLD`, `DIM`, `RESET` in `BEGIN{}`. Rimuovere le definizioni duplicate da tutti i 14 tool. Aggiungere `-f utils-colors.awk` come secondo `-f` fisso in `dispatch.sh`. | 14 file, ~14 righe rimosse | Bassa — meccanica |
+| ARCH-1 | **`utils-colors.awk`** — definisce `RED`, `YELLOW`, `GREEN`, `CYAN`, `BOLD`, `DIM`, `RESET` in `BEGIN{}`. Rimuovere le definizioni duplicate da tutti i 14 tool. Aggiungere `-f utils-colors.awk` come secondo `-f` fisso in `dispatch.sh`. | 14 file, ~14 righe rimosse | **Fatto** (già implementato, nessun tool ridefinisce colori) |
 | ARCH-2 | **`utils-jboss.awk`** — sposta `parse_jboss()` e `is_frame()` da `filter_errors.awk`. Rende `filter_app_errors.awk` aggiornabile senza riscrivere il parsing. | 2 tool, funzionalità critica | **Fatto** |
 | ARCH-3 | **`utils-dedup.awk`** — `dedup_add(dk, level, msg, ts, log)` + `dedup_sort()` + `dedup_print(max_rows)`. Consolida tre implementazioni semi-diverse in `filter_errors`, `grep_named_log`, `filter_app_errors`. | 3 tool, ~60 righe fattorizzate | **Fatto** |
 
@@ -60,10 +60,10 @@ Aggiungere una nuova applicazione richiede solo una riga in `entities.conf`, non
 
 | ID | Descrizione | Stato |
 |----|-------------|-------|
-| T1 | **Vocab additions** — aggiungere a `unigrams.txt`: `traffico`, `chiamate`, `statistiche`, `pause`, `collector`, `ripartizione`, `suddivisione`, `breakdown`, `correlazione` | Da fare pre-retrain |
-| T2 | **`slow_requests` vocab** — aggiungere unigram `alto\|sopra.i\|tempi.alti\|risposta.lenta` + esempi training | Da fare pre-retrain |
-| T3 | **Retrain unico** — rebuild dataset → linter (0 zero-vector) → retrain dopo T1+T2 | Dipende da T1, T2 |
-| T4 | **C7↔C8 confusion** — `service_times` / `correlate_gc_slow` margine stimato 1-2 punti | Bassa priorità |
+| T1 | **Vocab additions** — 20 nuovi pattern aggiunti a `unigrams.txt` (service, tempi, database, messaging, causa, durante, …). Topologia 97→117. | **Fatto** (2026-07-31) |
+| T2 | **`slow_requests` vocab** — `sopra\b` e `tempi\b` aggiunti in T1. | **Fatto** (2026-07-31) |
+| T3 | **Retrain unico** — eseguito post T1+T2: 968 esempi, 0 zero-vector, 117→48→15. | **Fatto** (2026-07-31) |
+| T4 | **C7↔C8 confusion** — verificato: separazione già buona (service_times 96.9%, correlate_gc_slow 98.3%). Nessun intervento necessario. | Chiuso |
 
 ---
 
@@ -90,8 +90,18 @@ Aggiungere una nuova applicazione richiede solo una riga in `entities.conf`, non
 | UI-5 | `tail_named_log`: tool dedicato con colori Guidewire | **Fatto** |
 | UI-6 | `dispatch.sh`: path log in CYAN per `tail_named_log` e `grep_named_log` | **Fatto** |
 | UI-7 | `count_status`: percentuale, barra log, summary 2xx/3xx/4xx/5xx, tasso errore, periodo | **Fatto** |
-| UI-8 | **Periodo temporale in tutti i tool** — `count_status` mostra già `Periodo: HH:MM → HH:MM` quando `time_from`/`time_to` sono impostati. Propagare lo stesso pattern a tutti i tool che usano il filtro temporale: `distribute_status`, `slow_requests`, `filter_errors`, `filter_app_errors`, `grep_named_log`, `gc_stats`, `traffic_volume`, `service_times`. Valutare se estrarre in un helper AWK (`utils-header.awk` o funzione in `utils-time.awk`) per non duplicare la logica. | Da fare |
+| UI-8 | **Periodo temporale in tutti i tool** — funzione `_print_time_window()` in `dispatch.sh`; rimosso blocco duplicato da `count_status.awk`. Colori: DIM grigio etichetta, `\033[97m` bianco puro per i valori. | **Fatto** (2026-07-31) |
+| UI-10 | **`search_all_logs`: righe alternate bianco/grigio per nodo** — nella tabella risultati, alternare DIM/normale tra i nodi per migliorare la leggibilità quando ci sono molte righe. | Da fare |
 | UI-9 | **`search_all_logs`: ricerca su tutti i nodi** — se la query non specifica un nodo, il tool oggi cerca solo sul nodo attivo in sessione. Aggiungere un'iterazione su tutti i nodi dell'ambiente (da `NODE_NAME_TEMPLATE` + lista nodi in `system.conf`) e aggregare i risultati raggruppati per nodo. Rimuovere anche il suggerimento "→ Per dettaglio: …" che produce output errato (nome file invece di nome log leggibile). | Da fare |
+
+---
+
+## ARCH — Generalizzazione config (nuovi)
+
+| ID | Descrizione | Priorità |
+|----|-------------|----------|
+| ARCH-5 | **`SERVER_LOG_FORMAT` in `system.conf`** — aggiunto; `param-extract.sh` usa `$SERVER_LOG_FORMAT` invece di `jboss` hardcoded per riconoscere keyword "log jboss/websphere/..." → `LOG_TYPE=server`. Ogni profilo dichiara la propria tecnologia. | **Fatto** (2026-07-31) |
+| ARCH-6 | **Audit hardcoding in `param-extract.sh`** — verificare se esistono altri nomi di tecnologie o applicazioni hardcoded nei grep/regex che dovrebbero provenire da `system.conf` o `entities.conf`. | Da fare |
 
 ---
 
@@ -101,6 +111,20 @@ Aggiungere una nuova applicazione richiede solo una riga in `entities.conf`, non
 |----|-------------|-------|
 | C1 | 8 esempi `distribute_status` con "endpoint + errori 5xx" | **Fatto** (commit 7c8e994) |
 | C2 | 9 esempi `filter_errors` con "server.log/jboss" | **Fatto** (commit 7c8e994) |
+
+---
+
+## CTX — Contesto conversazionale
+
+> Obiettivo: rendere il chatbot "stateful" — ogni parametro estratto da una query
+> persiste nella sessione fino a esplicita sostituzione, esattamente come già avviene
+> per `ACTIVE_ENV`, `ACTIVE_NODE`, `ACTIVE_APP`, `ACTIVE_NAMED_LOG`.
+
+| ID | Descrizione | Priorità |
+|----|-------------|----------|
+| CTX-1 | **Persistenza filtro temporale** — `ACTIVE_TIME_FROM` / `ACTIVE_TIME_TO` in `chatbot.sh`. Se la query specifica un tempo → aggiorna; se non → eredita. | **Fatto** (2026-07-31) |
+| CTX-2 | **Header contesto ad ogni query** — `context_line()` in cima a ogni risposta. Formato: `[prod · nodo 03 · ClaimCenter · 10:00→13:00]` con DIM/bianco (UI-8). | **Fatto** (2026-07-31) |
+| CTX-3 | **Frasi di set-context** — intercetta "considera nodo X", "lavoriamo in prod", "dalle 10 alle 14" prima del classificatore. Risposta: "Contesto aggiornato". No nuova classe ML. | **Fatto** (2026-07-31) |
 
 ---
 
