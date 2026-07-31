@@ -85,9 +85,9 @@ if [[ -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]]; then
         _nnum=$(node_num_from_dir "$_node_dir")
         _app_dir="${_node_dir}/$(eval echo "$APP_SUBPATH")"
         [[ -d "$_app_dir" ]] || continue
-        _sal_add "$_app_dir" "${ACCESS_LOG_BASE:-undertow_access_log}" "$_nnum"
-        _sal_add "$_app_dir" "${SERVER_LOG_BASE:-server}"              "$_nnum"
-        _sal_add "$_app_dir" "${GC_LOG_BASE:-gc}"                      "$_nnum"
+        _sal_add "$_app_dir" "$ACCESS_LOG_BASE" "$_nnum"
+        _sal_add "$_app_dir" "$SERVER_LOG_BASE" "$_nnum"
+        _sal_add "$_app_dir" "$GC_LOG_BASE"     "$_nnum"
         if [[ -n "${GUIDEWIRE_SUBPATH:-}" ]]; then
             _sal_add "${_node_dir}/$(eval echo "$GUIDEWIRE_SUBPATH")" "" "$_nnum"
         fi
@@ -97,9 +97,9 @@ else
     access="${ACCESS_LOG:-}"
     server="${SERVER_LOG:-}"
     gc="${GC_LOG:-}"
-    [[ -n "$access" ]] && _sal_add "${ACCESS_LOG_DIR:-$(dirname "$access")}" "${ACCESS_LOG_BASE:-undertow_access_log}" "${ACTIVE_NODE:-}"
-    [[ -n "$server" ]] && _sal_add "${SERVER_LOG_DIR:-$(dirname "$server")}" "${SERVER_LOG_BASE:-server}"              "${ACTIVE_NODE:-}"
-    [[ -n "$gc"     ]] && _sal_add "${GC_LOG_DIR:-$(dirname "$gc")}"         "${GC_LOG_BASE:-gc}"                      "${ACTIVE_NODE:-}"
+    [[ -n "$access" ]] && _sal_add "${ACCESS_LOG_DIR:-$(dirname "$access")}" "$ACCESS_LOG_BASE" "${ACTIVE_NODE:-}"
+    [[ -n "$server" ]] && _sal_add "${SERVER_LOG_DIR:-$(dirname "$server")}" "$SERVER_LOG_BASE" "${ACTIVE_NODE:-}"
+    [[ -n "$gc"     ]] && _sal_add "${GC_LOG_DIR:-$(dirname "$gc")}"         "$GC_LOG_BASE"     "${ACTIVE_NODE:-}"
     _sal_add "${GUIDEWIRE_LOG_DIR:-}" "" "${ACTIVE_NODE:-}"
 fi
 

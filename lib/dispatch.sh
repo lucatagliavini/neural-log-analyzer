@@ -45,9 +45,9 @@ open_logs_for() {
 }
 
 # Shorthand per access log e gc log usando le variabili di contesto sessione
-open_logs()        { open_logs_for "${ACCESS_LOG_DIR:-$(dirname "$ACCESS_LOG")}" "${ACCESS_LOG_BASE:-undertow_access_log}"; }
-open_gc_logs()     { open_logs_for "${GC_LOG_DIR:-$(dirname "$GC_LOG")}"         "${GC_LOG_BASE:-gc}"; }
-open_server_logs() { open_logs_for "${SERVER_LOG_DIR:-$(dirname "$SERVER_LOG")}" "${SERVER_LOG_BASE:-server}"; }
+open_logs()        { open_logs_for "${ACCESS_LOG_DIR:-$(dirname "$ACCESS_LOG")}" "$ACCESS_LOG_BASE"; }
+open_gc_logs()     { open_logs_for "${GC_LOG_DIR:-$(dirname "$GC_LOG")}"         "$GC_LOG_BASE"; }
+open_server_logs() { open_logs_for "${SERVER_LOG_DIR:-$(dirname "$SERVER_LOG")}" "$SERVER_LOG_BASE"; }
 
 print_help() {
     local BOLD="\033[1m"
@@ -90,15 +90,15 @@ dispatch_tool() {
     local gc="${GC_LOG:-}"
 
     # Utility AWK caricati come -f fissi in ogni invocazione gawk.
-    # SERVER_LOG_FORMAT seleziona il parser del log applicativo (default: jboss).
+    # SERVER_LOG_FORMAT seleziona il parser del log applicativo (da system.conf).
     # Per aggiungere WebSphere creare utils-websphere.awk con le stesse funzioni
     # parse_server_log() e is_stack_frame(), e impostare SERVER_LOG_FORMAT=websphere.
-    local fmt="${SERVER_LOG_FORMAT:-jboss}"
-    local common_f="-f '$LIB_DIR/utils-time.awk' -f '$LIB_DIR/utils-colors.awk' -f '$LIB_DIR/utils-jboss.awk' -f '$LIB_DIR/utils-dedup.awk'"
-    # Sostituisce il parser del server log se il formato è diverso da jboss
-    if [[ "$fmt" != "jboss" ]]; then
-        common_f="-f '$LIB_DIR/utils-time.awk' -f '$LIB_DIR/utils-colors.awk' -f '$LIB_DIR/utils-${fmt}.awk' -f '$LIB_DIR/utils-dedup.awk'"
+    if [[ -z "${SERVER_LOG_FORMAT:-}" ]]; then
+        echo "[ERROR] SERVER_LOG_FORMAT non impostato in system.conf" >&2
+        return 1
     fi
+    local fmt="$SERVER_LOG_FORMAT"
+    local common_f="-f '$LIB_DIR/utils-time.awk' -f '$LIB_DIR/utils-colors.awk' -f '$LIB_DIR/utils-${fmt}.awk' -f '$LIB_DIR/utils-dedup.awk'"
     local tw_args="$common_f -v time_from='${TIME_FROM:-}' -v time_to='${TIME_TO:-}'"
 
     case "$tool" in

@@ -104,27 +104,33 @@ if [[ -z "$DETECTED_NODE" ]]; then
     done
 fi
 
-# ─── 4. Normalizzazione APP: abbreviazioni e alias residui ───────────────────
-# Dopo i placeholder ENV/NODE, gestisci abbreviazioni contestuali
-# cc → ClaimCenter (se non ancora rilevato e ClaimCenter è disponibile)
-if [[ -z "$DETECTED_APP" ]]; then
-    if echo "$norm_query" | grep -qE "\bcc\b"; then
-        for _app in "${AVAILABLE_APPS[@]}"; do
-            if [[ "$_app" == "ClaimCenter" ]]; then
-                DETECTED_APP="claimcenter"
-                norm_query=$(echo "$norm_query" | sed -E "s/\bcc\b/<APP>/g")
-                break
-            fi
+# ─── 4. Normalizzazione APP: abbreviazioni brevi da APP_SHORT_ALIASES ────────
+# Dopo ENV/NODE per evitare collisioni con codici ambiente (es. "ce" = cert).
+# APP_SHORT_ALIASES e APP_ALIAS_REGEX sono definiti in entities.conf.
+if [[ -z "$DETECTED_APP" ]] && declare -p APP_SHORT_ALIASES &>/dev/null; then
+    for _abbr in "${!APP_SHORT_ALIASES[@]}"; do
+        _target="${APP_SHORT_ALIASES[$_abbr]}"
+        # Verifica che l'app target sia disponibile nel profilo (AVAILABLE_APPS)
+        _canonical="${APP_CANONICAL[$_target]:-}"
+        _found=0
+        for _av in "${AVAILABLE_APPS[@]}"; do
+            [[ "${_av,,}" == "${_canonical,,}" || "${_av,,}" == "$_target" ]] && _found=1 && break
         done
-    elif echo "$norm_query" | grep -qE "\bcm\b|contact.?manager"; then
-        for _app in "${AVAILABLE_APPS[@]}"; do
-            if [[ "$_app" == "ContactManager" ]]; then
-                DETECTED_APP="contactmanager"
-                norm_query=$(echo "$norm_query" | sed -E "s/\bcm\b|contact.?manager/<APP>/g")
-                break
-            fi
-        done
-    fi
+        [[ "$_found" -eq 0 ]] && continue
+        # Controlla abbreviazione breve
+        if echo "$norm_query" | grep -qE "\b${_abbr}\b"; then
+            DETECTED_APP="$_target"
+            norm_query=$(echo "$norm_query" | sed -E "s/\b${_abbr}\b/<APP>/g")
+            break
+        fi
+        # Controlla regex multi-parola se definita
+        _rx="${APP_ALIAS_REGEX[$_target]:-}"
+        if [[ -n "$_rx" ]] && echo "$norm_query" | grep -qE "$_rx"; then
+            DETECTED_APP="$_target"
+            norm_query=$(echo "$norm_query" | sed -E "s/${_rx}/<APP>/g")
+            break
+        fi
+    done
 fi
 
 # ─── Output ───────────────────────────────────────────────────────────────────
