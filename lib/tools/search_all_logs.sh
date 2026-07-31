@@ -135,8 +135,12 @@ for (( i=0; i<total_files; i++ )); do
         # grep -c '' conta 1 anche su stringa vuota — correggiamo
         [[ -z "$_matches" ]] && hits=0
         if [[ "$hits" -gt 0 ]]; then
-            first_ts=$(log_ts_from_line "$(echo "$_matches" | head -1)")
-            last_ts=$(log_ts_from_line "$(echo "$_matches" | tail -1)")
+            # Filtra solo le righe con timestamp riconoscibile (evita righe di stack trace)
+            _ts_lines=$(echo "$_matches" | grep -E \
+                '[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}|\[[0-9]{2}/[A-Za-z]{3}/[0-9]{4}:' \
+                2>/dev/null || true)
+            first_ts=$(log_ts_from_line "$(echo "$_ts_lines" | head -1)")
+            last_ts=$(log_ts_from_line "$(echo "$_ts_lines" | tail -1)")
         fi
 
         printf "%s|%s|%s|%s|%s\n" "$lbl" "${hits:-0}" "${first_ts:-}" "${last_ts:-}" "${nod:-}" \
