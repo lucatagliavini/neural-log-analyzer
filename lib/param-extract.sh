@@ -90,62 +90,19 @@ if echo "$query" | grep -qiE "\b(log[[:space:]]+(applicativ|dell.applicaz|di[[:s
     LOG_TYPE="server"
 fi
 
-# Pattern di ricerca libero per search_all_logs.
-# Estratto da: "cerca X", "trova X", "dove appare X", "in quali log c'è X",
-# "cerca ovunque X", "cerca in tutti i log X"
+# Pattern di ricerca per search_all_logs.
+# La stringa da cercare deve essere tra virgolette doppie o singole:
+#   cerca "NullPointerException" in produzione
+#   trova 'claim 1-8101-2026-0473954' nel nodo 5
+# Se il trigger è presente ma mancano le virgolette → __MISSING__ (messaggio in search_all_logs.sh).
 SEARCH_PATTERN=""
 _sq="${1,,}"  # query originale in minuscolo
 if echo "$_sq" | grep -qiE "\bcerca\b|\btrova\b|\bdove.appare\b|\bdove.si.trova\b|in.quali.log|cerca.ovunque|cerca.in.tutti"; then
-    # Pattern di stop-word ambienti costruito dinamicamente dagli ambienti del profilo.
-    # Se ENV_NODE_CODE non è disponibile, nessun filtro ambiente (preferibile al filtrare
-    # con nomi di un profilo sbagliato).
-    if declare -p ENV_NODE_CODE &>/dev/null && [[ "${#ENV_NODE_CODE[@]}" -gt 0 ]]; then
-        _env_pat=$(IFS='|'; echo "${!ENV_NODE_CODE[*]}")
-    else
-        _env_pat=""
-    fi
-    # Sinonimi italiani: se ENV_SYNONYMS è disponibile (da entities.conf), usa le chiavi;
-    # altrimenti stringa vuota.
-    if declare -p ENV_SYNONYMS &>/dev/null && [[ "${#ENV_SYNONYMS[@]}" -gt 0 ]]; then
-        _env_synonyms=$(IFS='|'; echo "${!ENV_SYNONYMS[*]}")
-    else
-        _env_synonyms=""
-    fi
-    # Componi _ctx_pat solo con i componenti non vuoti
-    _ctx_pat=""
-    [[ -n "$_env_pat"      ]] && _ctx_pat="$_env_pat"
-    [[ -n "$_env_synonyms" ]] && _ctx_pat="${_ctx_pat:+${_ctx_pat}|}${_env_synonyms}"
-
-    # Estrai il token dopo il verbo / la frase trigger, poi tronca ai qualificatori.
-    # Pipeline:
-    #   1. Strip trigger ("cerca in tutti i log", "trova", ...)
-    #   2. Strip qualificatori contestuali ovunque nella residua (env/nodo/qualificatori temporali)
-    #      — necessario perché il trigger può lasciare "di produzione la stringa X" dove
-    #        il contesto precede il prefisso descrittivo
-    #   3. Strip prefisso descrittivo ("la stringa", "il pattern", ...)
-    #   4. Strip suffissi ("nei log", "ovunque", ...)
-    #   5. Trim spazi
-    _ctx_strip=""
-    if [[ -n "$_ctx_pat" ]]; then
-        _ctx_strip="(di |in |su |nel |nella |nei |dal |dalla |dai |dalle )?[[:space:]]*\b(${_ctx_pat})\b[[:space:]]*"
-    fi
-    # Pattern temporali da stripare — usa le costanti da utils-time.sh.
-    # I pattern "prefisso" (stamatt, questa.matt, stanott, staser) vengono estesi
-    # con \S* per catturare i caratteri fusi (es. stamatt → stamattina).
-    _re_morning_strip="stamatt\S*|questa.matt\S*|\bmattinata\b|\bdi mattina\b|\bin mattina\b"
-    _re_night_strip="stanott\S*|questa.notte|\bdi notte\b|\bnotturno\b"
-    _re_evening_strip="staser\S*|questa.sera|\bdi sera\b|\bserata\b"
-    _time_strip="${_RE_N_DAYS_AGO}|${_RE_N_HOURS_AGO}|${_RE_N_MINS_AGO}|${_RE_HALF_HOUR_AGO}|${_RE_LAST_N_HOURS}|${_RE_LAST_N_MINS}|${_RE_LAST_ONE_HOUR}|${_RE_LAST_DAY}|${_re_morning_strip}|${_RE_AFTERNOON}|${_re_night_strip}|${_re_evening_strip}|${_RE_YESTERDAY}|${_RE_TODAY}|${_RE_JUST_NOW}|${_RE_EXPLICIT_RANGE}|${_RE_SINGLE_HOUR}"
-    SEARCH_PATTERN=$(echo "$_sq" | \
-        sed -E "s/.*(cerca ovunque|cerca in tutti i log|in quali log c'è|in quali log|dove appare|dove si trova|cerca|trova)[[:space:]]*//" | \
-        { [[ -n "$_ctx_strip" ]] && sed -E "s/${_ctx_strip}//gI" || cat; } | \
-        sed -E 's/(nodo [0-9]+|su nodo|tutti i nodi)[[:space:]]*//gI' | \
-        sed -E "s/\b(nell[ae]?|del[la]*|di|in|a)[[:space:]]*(${_time_strip})//gI" | \
-        sed -E "s/(${_time_strip})//gI" | \
-        sed -E 's/^(il pattern|il testo|la stringa|il sinistro|l.utente|l.errore|il codice|il messaggio)[[:space:]]*//' | \
-        sed -E 's/[[:space:]]*(nei log|ovunque|in tutti i log|nei vari log)$//' | \
-        sed -E 's/\b(di|in|nel|nell|dalle|alle|verso|le|la|il|fa|a)[[:space:]]*$//' | \
-        sed 's/^ *//' | sed 's/ *$//')
+    # Usa $1 (case originale) per preservare maiuscole nel pattern
+    SEARCH_PATTERN=$(echo "$1" | sed -n 's/.*"\([^"]*\)".*/\1/p' | head -1)
+    [[ -z "$SEARCH_PATTERN" ]] && \
+        SEARCH_PATTERN=$(echo "$1" | sed -n "s/.*'\([^']*\)'.*/\1/p" | head -1)
+    [[ -z "$SEARCH_PATTERN" ]] && SEARCH_PATTERN="__MISSING__"
 fi
 
 echo "TIME_FROM='${TIME_FROM}'"

@@ -21,7 +21,17 @@ source "$(dirname "${BASH_SOURCE[0]}")/../utils-nodes.sh"
 
 sp="${SEARCH_PATTERN:-}"
 if [[ -z "$sp" ]]; then
-    echo "[SKIP] Nessun pattern di ricerca specificato nella query"
+    printf "\n  \033[33mNessuna stringa di ricerca specificata.\033[0m\n"
+    printf "  Racchiudi la stringa tra virgolette doppie o singole:\n"
+    printf "  \033[2mes: cerca \"NullPointerException\" in prod\033[0m\n"
+    printf "  \033[2mes: trova 'claim 1-8101-2026-0473954' nel nodo 5\033[0m\n\n"
+    exit 0
+fi
+if [[ "$sp" == "__MISSING__" ]]; then
+    printf "\n  \033[33mNon ho trovato la stringa da cercare.\033[0m\n"
+    printf "  Racchiudi la stringa tra virgolette doppie o singole:\n"
+    printf "  \033[2mes: cerca \"NullPointerException\" in prod\033[0m\n"
+    printf "  \033[2mes: trova 'claim 1-8101-2026-0473954' nel nodo 5\033[0m\n\n"
     exit 0
 fi
 
@@ -107,35 +117,29 @@ printf "\n${_B}Ricerca:${_X} ${_Y}%s${_X}  ${_D}%s%s  (%d file, %d worker)${_X}\
     "$sp" "$tw_label" "$_scope_label" "$total_files" "$jobs"
 
 # ── Ricerca parallela con pool di $jobs worker ────────────────────────────────
-# Ogni subshell scrive "label|hits|first_ts|size_kb|node" in $tmp_dir/NNNNN
+# Ogni subshell scrive "label|hits|first_ts|last_ts|node" in $tmp_dir/NNNNN
 pids=()
 for (( i=0; i<total_files; i++ )); do
     (
         lbl="${all_labels[$i]}"
         pth="${all_paths[$i]}"
         nod="${all_nodes[$i]}"
-        hits=0 first_ts="" kb=0
-
-        sb=$(stat -c%s "$pth" 2>/dev/null || echo 0)
-        kb=$(( ${sb:-0} / 1024 ))
+        hits=0 first_ts="" last_ts=""
 
         if [[ "$pth" == *.gz ]]; then
-            hits=$(gunzip -c "$pth" 2>/dev/null | grep -ciE "$sp" 2>/dev/null || true)
-            hits="${hits:-0}"
-            if [[ "$hits" -gt 0 ]]; then
-                _fline=$(gunzip -c "$pth" 2>/dev/null | grep -m 1 -iE "$sp" 2>/dev/null || true)
-                first_ts=$(log_ts_from_line "$_fline")
-            fi
+            _matches=$(gunzip -c "$pth" 2>/dev/null | grep -iE "$sp" 2>/dev/null || true)
         else
-            hits=$(grep -ciE "$sp" "$pth" 2>/dev/null || true)
-            hits="${hits:-0}"
-            if [[ "$hits" -gt 0 ]]; then
-                _fline=$(grep -m 1 -iE "$sp" "$pth" 2>/dev/null || true)
-                first_ts=$(log_ts_from_line "$_fline")
-            fi
+            _matches=$(grep -iE "$sp" "$pth" 2>/dev/null || true)
+        fi
+        hits=$(echo "$_matches" | grep -c '' 2>/dev/null || true)
+        # grep -c '' conta 1 anche su stringa vuota — correggiamo
+        [[ -z "$_matches" ]] && hits=0
+        if [[ "$hits" -gt 0 ]]; then
+            first_ts=$(log_ts_from_line "$(echo "$_matches" | head -1)")
+            last_ts=$(log_ts_from_line "$(echo "$_matches" | tail -1)")
         fi
 
-        printf "%s|%s|%s|%s|%s\n" "$lbl" "${hits:-0}" "${first_ts:-}" "${kb:-0}" "${nod:-}" \
+        printf "%s|%s|%s|%s|%s\n" "$lbl" "${hits:-0}" "${first_ts:-}" "${last_ts:-}" "${nod:-}" \
             > "$tmp_dir/$(printf '%05d' "$i")"
     ) &
     pids+=($!)
@@ -147,20 +151,20 @@ done
 for _p in "${pids[@]}"; do wait "$_p" 2>/dev/null || true; done
 
 # ── Raccoglie e analizza risultati ────────────────────────────────────────────
-res_labels=() res_hits=() res_ts=() res_kb=() res_nodes=()
+res_labels=() res_hits=() res_ts=() res_last=() res_nodes=()
 max_hits=0 max_lbl=8 total_hits=0 matched_files=0
 
 for (( i=0; i<total_files; i++ )); do
     _f="$tmp_dir/$(printf '%05d' "$i")"
     if [[ -f "$_f" ]]; then
-        IFS='|' read -r rl rh rt rk rn < "$_f"
+        IFS='|' read -r rl rh rt rlast rn < "$_f"
     else
-        rl="${all_labels[$i]}" rh=0 rt="" rk=0 rn="${all_nodes[$i]:-}"
+        rl="${all_labels[$i]}" rh=0 rt="" rlast="" rn="${all_nodes[$i]:-}"
     fi
     res_labels+=("${rl:-?}")
     res_hits+=("${rh:-0}")
     res_ts+=("${rt:-}")
-    res_kb+=("${rk:-0}")
+    res_last+=("${rlast:-}")
     res_nodes+=("${rn:-}")
     [[ "${rh:-0}" -gt "$max_hits" ]] && max_hits="${rh:-0}"
     [[ "${#rl}"   -gt "$max_lbl"  ]] && max_lbl="${#rl}"
@@ -175,9 +179,17 @@ if [[ "$matched_files" -eq 0 ]]; then
     exit 0
 fi
 
-# ── Tabella: nodo · barra proporzionale · conteggio · timestamp · dimensione ──
+# ── Tabella: nodo · filename · barra · conteggio · primo match · ultimo match ─
 bar_max=12 best_hits=0 best_node=""
 _prev_node="" _row_dim=0
+
+# Header — colonne allineate a max_lbl
+_node_hdr=""
+[[ -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]] && _node_hdr="${_D}nodo  ${_X}"
+_lbl_hdr=$(printf "%-${max_lbl}s" "log")
+printf "  ${_node_hdr}${_D}%-${max_lbl}s  %-12s  %6s  %-19s  %-19s${_X}\n" \
+    "log" "" "match" "primo match" "ultimo match"
+printf "  ${_D}%s${_X}\n" "$(printf '─%.0s' $(seq 1 $(( max_lbl + 12 + 6 + 19 + 19 + 16 ))))"
 
 for (( i=0; i<total_files; i++ )); do
     _h="${res_hits[$i]:-0}"
@@ -185,7 +197,7 @@ for (( i=0; i<total_files; i++ )); do
 
     _l="${res_labels[$i]}"
     _t="${res_ts[$i]}"
-    _k="${res_kb[$i]:-0}"
+    _tlast="${res_last[$i]:-}"
     _n="${res_nodes[$i]:-}"
 
     if [[ "$_n" != "$_prev_node" ]]; then
@@ -194,14 +206,9 @@ for (( i=0; i<total_files; i++ )); do
     fi
     # _RL: colore riga per "nodo XX  filename" — alterna normale/DIM per gruppo nodo.
     # Il numero nodo è sempre bold+white per garantire contrasto su entrambi gli sfondi.
-    # Barra, conteggio, timestamp e dimensione sono sempre a colori pieni (non DIMmati).
+    # Barra, conteggio, timestamp sono sempre a colori pieni (non DIMmati).
     _RL="\033[0m"
     [[ "$_row_dim" -eq 1 ]] && _RL="\033[2m"
-
-    size_str=""
-    [[ "$_k" -ge 1024 ]] \
-        && size_str=$(awk "BEGIN{printf \"%d MB\",int($_k/1024)}") \
-        || size_str="${_k} KB"
 
     bar_len=$(( _h * bar_max / max_hits ))
     [[ "$bar_len" -lt 1 ]] && bar_len=1
@@ -220,15 +227,15 @@ for (( i=0; i<total_files; i++ )); do
 
     printf "  ${node_col}${_RL}%-${max_lbl}s${_X}  ${bc}%s${_X}%s  %6d" \
         "$_l" "$bar" "$bar_pad" "$_h"
-    [[ -n "$_t" ]] && printf "  ${_D}│  %-19s${_X}" "$_t"
-    printf "  ${_D}│  %s${_X}\n" "$size_str"
+    printf "  ${_D}│${_X}  %-19s" "${_t:--}"
+    printf "  ${_D}│${_X}  %-19s\n" "${_tlast:--}"
 
     if [[ "$_h" -gt "$best_hits" ]]; then
         best_hits="$_h"; best_node="$_n"
     fi
 done
 
-printf "  ──────────────────────────────────────────────────────────────\n"
+printf "  ${_D}%s${_X}\n" "$(printf '─%.0s' $(seq 1 $(( max_lbl + 12 + 6 + 19 + 19 + 16 ))))"
 
 skipped=$(( total_files - matched_files ))
 printf "  ${_B}Totale:${_X} %d occorrenze in %d log" "$total_hits" "$matched_files"
