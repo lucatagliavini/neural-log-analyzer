@@ -249,8 +249,12 @@ def update_model_conf(conf_path, epochs, actual_epochs, lr, optimizer, best_mse,
         "best_epoch":         str(best_epoch),
         "interrupted":        "0",
     }
+    if not conf.endswith("\n"):
+        conf += "\n"
     for key, val in subs.items():
-        conf = re.sub(rf"^{key}=.*", f"{key}={val}", conf, flags=re.MULTILINE)
+        conf, n = re.subn(rf"^{key}=.*", f"{key}={val}", conf, flags=re.MULTILINE)
+        if n == 0:
+            conf += f"{key}={val}\n"
     with open(conf_path, "w") as f:
         f.write(conf)
 
