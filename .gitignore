@@ -2,3 +2,4 @@
 __pycache__/
 profiles/*/models/*.backup/
 profiles/*/models/*.backup2/
+tmp/

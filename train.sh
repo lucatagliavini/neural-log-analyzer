@@ -19,6 +19,10 @@ LR=0.01
 OPTIMIZER=adam
 MIN_DELTA="0.00005"
 PATIENCE=100
+LOSS=mse
+VAL_SPLIT=0
+SEED=42
+THRESHOLD=""
 NO_SAVE=""
 
 while [[ $# -gt 0 ]]; do
@@ -29,6 +33,10 @@ while [[ $# -gt 0 ]]; do
         --optimizer) OPTIMIZER="$2"; shift 2 ;;
         --min-delta) MIN_DELTA="$2"; shift 2 ;;
         --patience)  PATIENCE="$2";  shift 2 ;;
+        --loss)      LOSS="$2";      shift 2 ;;
+        --val-split) VAL_SPLIT="$2"; shift 2 ;;
+        --seed)      SEED="$2";      shift 2 ;;
+        --threshold) THRESHOLD="$2"; shift 2 ;;
         --no-save)   NO_SAVE="--no-save"; shift ;;
         *) echo "[ERROR] opzione sconosciuta: $1" >&2; exit 1 ;;
     esac
@@ -36,6 +44,11 @@ done
 
 if [[ -z "$PROFILE_DIR" ]]; then
     echo "[ERROR] --profile obbligatorio. Es: ./train.sh --profile profiles/liquido" >&2
+    exit 1
+fi
+
+if [[ "$LOSS" != "mse" && "$LOSS" != "bce" ]]; then
+    echo "[ERROR] --loss deve essere 'mse' o 'bce' (ricevuto: $LOSS)" >&2
     exit 1
 fi
 
@@ -77,7 +90,7 @@ fi
 
 echo "[INFO] Training intent classifier — profilo: $(basename "$PROFILE_DIR")"
 echo "[INFO] Dataset: $DATASET_FILE"
-echo "[INFO] Epochs: $EPOCHS | LR: $LR | Optimizer: $OPTIMIZER | min-delta: $MIN_DELTA | patience: $PATIENCE"
+echo "[INFO] Epochs: $EPOCHS | LR: $LR | Optimizer: $OPTIMIZER | loss: $LOSS | min-delta: $MIN_DELTA | patience: $PATIENCE | val-split: $VAL_SPLIT"
 echo ""
 
 if [[ -x "$VENV_PYTHON" && -f "$TRAIN_PY" ]]; then
@@ -89,15 +102,25 @@ if [[ -x "$VENV_PYTHON" && -f "$TRAIN_PY" ]]; then
         --optimizer "$OPTIMIZER" \
         --min-delta "$MIN_DELTA" \
         --patience  "$PATIENCE" \
+        --loss      "$LOSS" \
+        --val-split "$VAL_SPLIT" \
+        --seed      "$SEED" \
+        ${THRESHOLD:+--threshold "$THRESHOLD"} \
         ${NO_SAVE}
 else
     echo "[INFO] Backend: gawk (venv non trovato in $SCRIPT_DIR/.venv)"
+    if [[ "$VAL_SPLIT" != "0" && "$VAL_SPLIT" != "0.0" ]]; then
+        echo "[WARN] --val-split non supportato dal backend gawk — ignorato." >&2
+    fi
     echo ""
+    # Il framework AWK chiama la binary cross-entropy "ce", non "bce".
+    AWK_LOSS="$LOSS"
+    [[ "$LOSS" == "bce" ]] && AWK_LOSS="ce"
     "$NNET_RUN" train "$DATASET_FILE" "$MODEL_DIR" \
         --epochs "$EPOCHS" \
         --lr "$LR" \
         --optimizer "$OPTIMIZER" \
-        --loss mse \
+        --loss "$AWK_LOSS" \
         --min-delta "$MIN_DELTA" \
         --patience "$PATIENCE" \
         ${NO_SAVE}
