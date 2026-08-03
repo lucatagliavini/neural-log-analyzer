@@ -15,7 +15,7 @@ fi
 source "$PROFILE_DIR/domain.conf"
 
 ANALYZER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-NNET_RUN="$ANALYZER_DIR/../nnet-run.sh"
+NNET_RUN="$ANALYZER_DIR/../neural-bash/nnet-run.sh"
 MODEL_DIR="$PROFILE_DIR/models/intent_classifier"
 LIB_DIR="$ANALYZER_DIR/lib"
 

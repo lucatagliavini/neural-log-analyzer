@@ -9,7 +9,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NNET_RUN="$SCRIPT_DIR/../nnet-run.sh"
+NNET_RUN="$SCRIPT_DIR/../neural-bash/nnet-run.sh"
 VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python3"
 TRAIN_PY="$SCRIPT_DIR/lib/train.py"
 

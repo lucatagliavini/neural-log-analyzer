@@ -9,7 +9,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NNET_INIT="$SCRIPT_DIR/../nnet-init.sh"
+NNET_INIT="$SCRIPT_DIR/../neural-bash/nnet-init.sh"
 
 PROFILE_DIR=""
 while [[ $# -gt 0 ]]; do
