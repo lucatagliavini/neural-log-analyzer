@@ -30,11 +30,11 @@ BEGIN {
             }
         }
         if (match($0, /" ([0-9]{3}) /, a)) status_count[a[1]]++
-        if (match($0, /" [0-9]+ [0-9]+ ([0-9]+)/, b)) total_ms += b[1]+0
+        if (match($0, /" [0-9]+ [0-9-]+ ([0-9]+)/, b)) total_ms += b[1]+0
     } else {
         ip_count[ip]++
         if (match($0, /" ([0-9]{3}) /, a)) ip_status[ip, a[1]]++
-        if (match($0, /" [0-9]+ [0-9]+ ([0-9]+)/, b)) ip_ms[ip] += b[1]+0
+        if (match($0, /" [0-9]+ [0-9-]+ ([0-9]+)/, b)) ip_ms[ip] += b[1]+0
     }
 }
 
@@ -78,9 +78,8 @@ END {
         for (i = 1; i <= limit; i++) {
             ip  = sorted_ip[i]
             avg = (ip_count[ip] > 0 ? ip_ms[ip]/ip_count[ip] : 0)
-            col_avg = (avg >= 2000) ? RED : (avg >= 1000) ? YELLOW : ""
-            rst_avg = (col_avg != "") ? RESET : ""
-            printf "%-18s  %9d  %s%8.0f%s\n", ip, ip_count[ip], col_avg, avg, rst_avg
+            col_avg = (avg >= 2000) ? RED : (avg >= 1000) ? YELLOW : WHT
+            printf "%-18s  %s%9d%s  %s%8.2f%s\n", ip, WHT, ip_count[ip], RESET, col_avg, avg, RESET
         }
         printf "\nTop %d di %d IP distinti\n", limit, n
     }

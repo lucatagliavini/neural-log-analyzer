@@ -15,7 +15,11 @@ BEGIN {
 # Fase 1: file gc.log — raccoglie timestamp e durata pause.
 # parse_gc() restituisce epoch Unix completo (data+ora) — corretto su log multi-giorno.
 # in_range() applica il filtro time_from/time_to se impostato dalla query.
-FILENAME ~ /gc/ && /Pause (Young|Full|Mixed)/ && /[0-9]+\.[0-9]+ms$/ {
+# NB: distinzione per pattern di contenuto, non per FILENAME — i file .gz sono aperti
+# da dispatch.sh via process substitution (<(gunzip -c ...)), che assegna a FILENAME
+# un percorso tipo /dev/fd/63 privo di "gc"/"access", rendendo un filtro su FILENAME
+# silenziosamente inefficace sui log ruotati.
+/Pause (Young|Full|Mixed)/ && /[0-9]+\.[0-9]+ms$/ {
     ts = parse_gc($1)
     if (ts == 0) next
     if ((time_from != "" || time_to != "") && !in_range(ts)) next
@@ -29,14 +33,18 @@ FILENAME ~ /gc/ && /Pause (Young|Full|Mixed)/ && /[0-9]+\.[0-9]+ms$/ {
 
 # Fase 2: file access.log — verifica richieste lente.
 # parse_access() restituisce epoch Unix — coerente con gc_ts[] per il diff ±gc_margin_s.
-FILENAME ~ /access|undertow/ {
-    if (!match($0, /" [0-9]+ [0-9]+ ([0-9]+) /, a)) next
+# Pattern di contenuto (non FILENAME, vedi nota Fase 1): una riga GC non ha mai il
+# gruppo status/bytes/time tra virgolette dell'access log, quindi resta esclusa.
+!/Pause (Young|Full|Mixed)/ {
+    if (!match($0, /" [0-9]+ [0-9-]+ ([0-9]+) /, a)) next
     resp_ms = a[1] + 0
-    if (resp_ms < threshold_ms + 0) next
 
     req_epoch = parse_access($2)
     if (req_epoch == 0) next
     if ((time_from != "" || time_to != "") && !in_range(req_epoch)) next
+
+    total_requests++
+    if (resp_ms < threshold_ms + 0) next
 
     correlated = 0
     for (i = 1; i <= gc_n; i++) {
@@ -50,9 +58,11 @@ FILENAME ~ /access|undertow/ {
 
     if (correlated && correlated_count <= 20) {
         if (match($0, /"([A-Z]+) ([^ ]+) HTTP/, c)) {
+            method = c[1]
+            method_color = (method == "GET") ? GREEN : (method == "POST") ? CYAN : ""
             color = (resp_ms >= 5000) ? RED : YELLOW
-            printf "%sCORRELATA%s  %s%d ms%s  %s %s\n", \
-                color, RESET, color, resp_ms, RESET, c[1], c[2]
+            printf "%sCORRELATA%s  %s%d ms%s  %s%s%s %s\n", \
+                color, RESET, color, resp_ms, RESET, method_color, method, RESET, c[2]
         }
     }
 }
@@ -71,7 +81,8 @@ END {
     printf "\n%s%s%s  (%.0f%% correlato su %d richieste lente)\n\n", \
         (col_pct != "") ? col_pct : BOLD, verdetto, RESET, pct_corr, total_slow+0
 
-    printf "Richieste lente (>%d ms): %d\n", threshold_ms, total_slow+0
+    printf "Richieste lente (>%d ms): %s%d/%d%s\n", \
+        threshold_ms, WHT, total_slow+0, total_requests+0, RESET
     printf "Di cui correlate a pausa GC (±%ds): %s%d (%.0f%%)%s\n", \
         gc_margin_s, col_pct, correlated_count+0, pct_corr, (col_pct!="") ? RESET : ""
     printf "%sPause GC analizzate: %d%s\n", DIM, gc_n, RESET

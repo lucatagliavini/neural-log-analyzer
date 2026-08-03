@@ -53,11 +53,11 @@ END {
         bar = ""
         for (k = 1; k <= bar_len; k++) bar = bar "▪"
 
-        printf "%-10s  %7d  %s%6d%s  %s%6d%s  %s%s%s\n", \
-            bk, volume[bk], \
+        printf "%-10s  %s%7d%s  %s%6d%s  %s%6d%s  %s%s%s\n", \
+            bk, WHT, volume[bk], rst, \
             col4, e4, (col4!="") ? rst : "", \
             col5, e5, (col5!="") ? rst : "", \
             DIM, bar, rst
     }
-    printf "\nTotale richieste: %d in %d fasce da 10 minuti\n", total, n
+    printf "\nTotale richieste: %s%d%s in %s%d%s fasce da 10 minuti\n", WHT, total, rst, WHT, n, rst
 }

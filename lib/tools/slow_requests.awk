@@ -14,7 +14,7 @@ BEGIN {
     if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
     line = $0
 
-    if (!match(line, /" [0-9]+ [0-9]+ ([0-9]+) /, a)) next
+    if (!match(line, /" [0-9]+ [0-9-]+ ([0-9]+) /, a)) next
     resp_time = a[1] + 0
 
     if (resp_time < threshold_ms + 0) next
@@ -77,12 +77,13 @@ END {
 
     for (i = buf_n; i >= 1; i--) {
         color = (substr(buf_status[i],1,1) == "5") ? RED : YELLOW
-        printf "%s%-8s%s  %-6s  %-*s  %d ms\n", \
-            color, buf_status[i], RESET, buf_method[i], col_url, buf_url[i], buf_time[i]
+        method_color = (buf_method[i] == "GET") ? GREEN : (buf_method[i] == "POST") ? CYAN : ""
+        printf "%s%-8s%s  %s%-6s%s  %-*s  %s%d ms%s\n", \
+            color, buf_status[i], RESET, method_color, buf_method[i], RESET, col_url, buf_url[i], WHT, buf_time[i], RESET
     }
 
     if (count > max_rows) printf "... (mostrate le %d più lente di %d)\n", max_rows, count
-    printf "\nTotale richieste lente: %d (soglia: %d ms)\n", count, threshold_ms
-    printf "Risposta più lenta: %d ms → %s\n", max_time, max_url
-    printf "Latenza media (lente): %.0f ms\n", total_time / count
+    printf "\nTotale richieste lente: %s%d%s (soglia: %s%d ms%s)\n", WHT, count, RESET, WHT, threshold_ms, RESET
+    printf "Risposta più lenta: %s%d ms%s → %s\n", WHT, max_time, RESET, max_url
+    printf "Latenza media (lente): %s%.0f ms%s\n", WHT, total_time / count, RESET
 }

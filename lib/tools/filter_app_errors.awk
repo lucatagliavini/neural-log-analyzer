@@ -91,7 +91,7 @@ END {
     sep_log = ""; for (k = 1; k <= col_log; k++) sep_log = sep_log "─"
     sep_cau = ""; for (k = 1; k <= col_cau; k++) sep_cau = sep_cau "─"
 
-    printf "%-10s  %-*s  %5s  %-*s\n", "TIPO", col_log, "CLASSE", "CNT", col_cau, "ROOT CAUSE"
+    printf "%-10s  %-*s  %5s  %-*s\n", "TIPO", col_log, "CLASSE", "COUNT", col_cau, "ROOT CAUSE"
     printf "%-10s  %-*s  %5s  %-*s\n", "──────────", col_log, sep_log, "─────", col_cau, sep_cau
 
     max_print = 30
@@ -100,10 +100,10 @@ END {
         printed++
         k = _dup_order[i]
         color = (_dup_level[k] ~ /^HTTP-5/) ? RED : YELLOW
-        printf "%s%-10s%s  %-*s  %5d  %-*s\n", \
+        printf "%s%-10s%s  %-*s  %s%5d%s  %-*s\n", \
             color, _dup_level[k], RESET, \
             col_log, _dup_extra[k], \
-            _dup_cnt[k], \
+            WHT, _dup_cnt[k], RESET, \
             col_cau, substr(_dup_msg[k], 1, col_cau)
     }
     if (_dup_n > max_print) printf "... (%d cause distinte aggiuntive)\n", _dup_n - max_print

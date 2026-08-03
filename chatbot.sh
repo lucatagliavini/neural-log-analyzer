@@ -205,6 +205,12 @@ run_query() {
         NAMED_LOG="$ACTIVE_NAMED_LOG"
     fi
 
+    # TIME_EXPLICIT: 1 se QUESTA query (non la sessione) nomina un tempo — usato solo
+    # da tail_log per decidere se ignorare la finestra ereditata (vedi dispatch.sh).
+    # Non persistente: si ricalcola da zero ad ogni query, a differenza di ACTIVE_TIME_FROM/TO.
+    TIME_EXPLICIT=0
+    [[ -n "$TIME_FROM" || -n "$TIME_TO" ]] && TIME_EXPLICIT=1
+
     # CTX-1 — filtro temporale persistente.
     # Se la query specifica un tempo → aggiorna il contesto attivo.
     # Se non lo specifica → eredita da ACTIVE_TIME_FROM/TO (come già avviene per ACTIVE_NODE).

@@ -76,7 +76,7 @@ END {
         ep = keys[i]
         for (st in endpoint_count[ep]) {
             color = (substr(st,1,1) == "5") ? RED : YELLOW
-            printf "%-*s  %s%-8s%s  %d\n", col_ep, ep, color, st, RESET, endpoint_count[ep][st]
+            printf "%-*s  %s%-8s%s  %s%d%s\n", col_ep, ep, color, st, RESET, WHT, endpoint_count[ep][st], RESET
             shown++
         }
     }

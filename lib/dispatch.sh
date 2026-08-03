@@ -49,6 +49,17 @@ open_logs()        { open_logs_for "${ACCESS_LOG_DIR:-$(dirname "$ACCESS_LOG")}"
 open_gc_logs()     { open_logs_for "${GC_LOG_DIR:-$(dirname "$GC_LOG")}"         "$GC_LOG_BASE"; }
 open_server_logs() { open_logs_for "${SERVER_LOG_DIR:-$(dirname "$SERVER_LOG")}" "$SERVER_LOG_BASE"; }
 
+# Apre solo il file di log corrente (non ruotato), ignorando TIME_FROM/TO e
+# senza passare da select_log_files(). Usato da tail_log quando la query
+# non nomina un tempo esplicito — vedi TIME_EXPLICIT in chatbot.sh.
+open_current_log_for() {
+    local dir="$1" base="$2"
+    local f="${dir}/${base}.log"
+    [[ -f "$f" ]] && open_log "$f"
+}
+open_current_logs()        { open_current_log_for "${ACCESS_LOG_DIR:-$(dirname "$ACCESS_LOG")}" "$ACCESS_LOG_BASE"; }
+open_current_server_logs() { open_current_log_for "${SERVER_LOG_DIR:-$(dirname "$SERVER_LOG")}" "$SERVER_LOG_BASE"; }
+
 print_help() {
     local BOLD="\033[1m"
     local CYAN="\033[36m"
@@ -88,6 +99,7 @@ dispatch_tool() {
     local access="$ACCESS_LOG"
     local server="${SERVER_LOG:-}"
     local gc="${GC_LOG:-}"
+    local logs_expr
 
     # Utility AWK caricati come -f fissi in ogni invocazione gawk.
     # SERVER_LOG_FORMAT seleziona il parser del log applicativo (da system.conf).
@@ -142,17 +154,47 @@ dispatch_tool() {
                 "$(open_gc_logs)" "$(open_logs)"
             ;;
         tail_log)
+            # Se la query corrente non nomina un tempo esplicito, il tail ignora
+            # TIME_FROM/TO ereditati dalla sessione e legge sempre il file corrente
+            # (semantica intuitiva di "tail"). Se invece la query nomina un tempo
+            # ("ultime righe di stamattina"), rispetta la finestra: sia nella scelta
+            # dei file (select_log_files) sia riga per riga dentro tail_log.awk —
+            # senza il filtro riga per riga, un file corrente con ts_start dentro la
+            # finestra ma ts_end nel presente farebbe comunque tail delle righe più
+            # recenti, fuori dalla finestra richiesta.
             if [[ "${LOG_TYPE:-}" == "server" ]]; then
                 [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile"; return; }
-                eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
-                    -f "$TOOLS_DIR/tail_log.awk" \
-                    -v tail_n="${TAIL_N:-50}" \
-                    "$(open_server_logs)"
+                if [[ "${TIME_EXPLICIT:-0}" == "1" ]]; then
+                    logs_expr="$(open_server_logs)"
+                    eval gawk -f "'$LIB_DIR/utils-time.awk'" -f "'$LIB_DIR/utils-${fmt}.awk'" \
+                        -f "'$LIB_DIR/utils-colors.awk'" \
+                        -f "$TOOLS_DIR/tail_log.awk" \
+                        -v tail_n="${TAIL_N:-50}" -v log_kind="server" \
+                        -v time_from="${TIME_FROM:-}" -v time_to="${TIME_TO:-}" \
+                        "$logs_expr"
+                else
+                    logs_expr="$(open_current_server_logs)"
+                    eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
+                        -f "$TOOLS_DIR/tail_log.awk" \
+                        -v tail_n="${TAIL_N:-50}" \
+                        "$logs_expr"
+                fi
             else
-                eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
-                    -f "$TOOLS_DIR/tail_log.awk" \
-                    -v tail_n="${TAIL_N:-50}" \
-                    "$(open_logs)"
+                if [[ "${TIME_EXPLICIT:-0}" == "1" ]]; then
+                    logs_expr="$(open_logs)"
+                    eval gawk -f "'$LIB_DIR/utils-time.awk'" \
+                        -f "'$LIB_DIR/utils-colors.awk'" \
+                        -f "$TOOLS_DIR/tail_log.awk" \
+                        -v tail_n="${TAIL_N:-50}" -v log_kind="access" \
+                        -v time_from="${TIME_FROM:-}" -v time_to="${TIME_TO:-}" \
+                        "$logs_expr"
+                else
+                    logs_expr="$(open_current_logs)"
+                    eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
+                        -f "$TOOLS_DIR/tail_log.awk" \
+                        -v tail_n="${TAIL_N:-50}" \
+                        "$logs_expr"
+                fi
             fi
             ;;
         filter_ip)

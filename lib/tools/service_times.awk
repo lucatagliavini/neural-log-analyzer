@@ -15,7 +15,7 @@ BEGIN {
 {
     if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
 
-    if (!match($0, /" [0-9]+ [0-9]+ ([0-9]+) /, a)) next
+    if (!match($0, /" [0-9]+ [0-9-]+ ([0-9]+) /, a)) next
     ms = a[1] + 0
     if (ms < threshold_ms + 0) next
 
@@ -26,6 +26,20 @@ BEGIN {
     svc_total[svc] += ms
     if (ms > svc_max[svc]) svc_max[svc] = ms
     if (svc_min[svc] == "" || ms < svc_min[svc]) svc_min[svc] = ms
+    buf_ms[svc, svc_count[svc]] = ms
+}
+
+function sev_color(v) {
+    return (v >= VERYSLOW_MS) ? RED : (v >= SLOW_MS) ? YELLOW : WHT
+}
+
+# Calcola p50/p95/p99 per il servizio svc (n = svc_count[svc]) in _p50/_p95/_p99.
+function svc_percentiles(svc, n,    i, tmp) {
+    for (i = 1; i <= n; i++) tmp[i] = buf_ms[svc, i]
+    asort(tmp)
+    _p50 = tmp[int(n * 0.50) + 1]
+    _p95 = tmp[int(n * 0.95) + 1]
+    _p99 = tmp[int(n * 0.99) + 1]
 }
 
 END {
@@ -47,18 +61,25 @@ END {
     }
 
     sep = ""; for (k = 1; k <= col_svc; k++) sep = sep "─"
-    printf "%-*s  %6s  %8s  %8s  %8s\n", col_svc, "SERVIZIO", "CALLS", "AVG ms", "MIN ms", "MAX ms"
-    printf "%-*s  %6s  %8s  %8s  %8s\n", col_svc, sep, "──────", "────────", "────────", "────────"
+    printf "%-*s  %6s  %8s  %8s  %8s  %8s  %8s  %8s\n", \
+        col_svc, "SERVIZIO", "CALLS", "AVG ms", "MIN ms", "MAX ms", "p50 ms", "p95 ms", "p99 ms"
+    printf "%-*s  %6s  %8s  %8s  %8s  %8s  %8s  %8s\n", \
+        col_svc, sep, "──────", "────────", "────────", "────────", "────────", "────────", "────────"
 
     for (i = 1; i <= n && i <= max_rows; i++) {
         s   = keys[i]
         avg = svc_total[s] / svc_count[s]
-        if (avg >= VERYSLOW_MS)    color = RED
-        else if (avg >= SLOW_MS)   color = YELLOW
-        else                       color = ""
-        rst = (color != "") ? RESET : ""
-        printf "%-*s  %6d  %s%8.0f%s  %8d  %8d\n", \
-            col_svc, s, svc_count[s], color, avg, rst, svc_min[s], svc_max[s]
+        svc_percentiles(s, svc_count[s])
+        col_min = sev_color(svc_min[s])
+        col_avg = sev_color(avg)
+        col_max = sev_color(svc_max[s])
+        col_p50 = sev_color(_p50)
+        col_p95 = sev_color(_p95)
+        col_p99 = sev_color(_p99)
+        printf "%-*s  %s%6d%s  %s%8.0f%s  %s%8d%s  %s%8d%s  %s%8.0f%s  %s%8.0f%s  %s%8.0f%s\n", \
+            col_svc, s, WHT, svc_count[s], RESET, col_avg, avg, RESET, \
+            col_min, svc_min[s], RESET, col_max, svc_max[s], RESET, \
+            col_p50, _p50, RESET, col_p95, _p95, RESET, col_p99, _p99, RESET
     }
     if (n > max_rows) printf "... (mostrati %d di %d servizi)\n", max_rows, n
 }

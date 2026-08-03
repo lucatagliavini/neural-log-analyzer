@@ -151,15 +151,15 @@ END {
             printf "  " DIM "Dati:    " RESET "  " WHT "%s" RESET "  " DIM "→" RESET "  " WHT "%s" RESET "  " DIM "(log completo)" RESET "\n\n", _first, _last
     }
 
-    printf "  Totale eventi:    %d\n", gc_count
-    printf "  Pausa totale:     %.1f ms\n", total_pause_ms
+    printf "  Totale eventi:    %s%d%s\n", WHT, gc_count, RESET
+    printf "  Pausa totale:     %s%.1f ms%s\n", WHT, total_pause_ms, RESET
     printf "  Pausa media:      %s%.1f ms%s\n",   col_avg, avg_ms,      col_avg != "" ? RESET : ""
     printf "  Pausa massima:    %s%.1f ms%s  %s(%s)%s\n", \
         col_max, max_pause_ms, col_max != "" ? RESET : "", DIM, max_pause_ts, RESET
-    printf "  p50 / p95 / p99:  %.1f ms  /  %s%.1f ms%s  /  %s%.1f ms%s\n", \
-        p50, col_p95, p95, col_p95 != "" ? RESET : "", col_p99, p99, col_p99 != "" ? RESET : ""
-    printf "  Memoria liberata: %d M totale\n", total_freed
-    printf "  Heap medio after: %.0f M  (capacità %d M)\n\n", heap_avg, heap_cap_last
+    printf "  p50 / p95 / p99:  %s%.1f ms%s  /  %s%.1f ms%s  /  %s%.1f ms%s\n", \
+        WHT, p50, RESET, col_p95, p95, col_p95 != "" ? RESET : "", col_p99, p99, col_p99 != "" ? RESET : ""
+    printf "  Memoria liberata: %s%d M%s totale\n", WHT, total_freed, RESET
+    printf "  Heap medio after: %s%.0f M%s  (capacità %d M)\n\n", WHT, heap_avg, RESET, heap_cap_last
 
     # ── Per tipo pausa ────────────────────────────────────────────────────────
     print BOLD "── Per tipo di pausa ────────────────────────────────────────" RESET
@@ -172,21 +172,22 @@ END {
         for (i = 1; i <= gc_count; i++)
             if (buf_type[i] == t && buf_pause[i] > tmax) tmax = buf_pause[i]
         tc = (tavg >= VERYSLOW_MS) ? RED : (tavg >= SLOW_MS) ? YELLOW : ""
-        printf "  %-8s  %5d  %s%7.1f ms%s  %7.1f ms  %5d M\n", \
-            t, type_count[t], tc, tavg, tc != "" ? RESET : "", tmax, tfree
+        tmc = (tmax >= VERYSLOW_MS) ? RED : (tmax >= SLOW_MS) ? YELLOW : WHT
+        printf "  %-8s  %s%5d%s  %s%7.1f ms%s  %s%7.1f ms%s  %s%5d M%s\n", \
+            t, WHT, type_count[t], RESET, tc, tavg, tc != "" ? RESET : "", tmc, tmax, RESET, WHT, tfree, RESET
     }
 
     # ── Regioni G1 (medie) ────────────────────────────────────────────────────
     if (reg_n > 0) {
         print ""
         print BOLD "── Regioni G1 (media dopo GC) ───────────────────────────────" RESET
-        printf "  Eden:       %4.0f regions\n",         eden_sum / reg_n
-        printf "  Survivor:   %4.0f regions\n",         surv_sum / reg_n
-        printf "  Old:        %4.0f regions\n",         old_sum  / reg_n
-        printf "  Humongous:  %4.0f regions\n",         hum_sum  / reg_n
+        printf "  Eden:       %s%4.0f%s regions\n",         WHT, eden_sum / reg_n, RESET
+        printf "  Survivor:   %s%4.0f%s regions\n",         WHT, surv_sum / reg_n, RESET
+        printf "  Old:        %s%4.0f%s regions\n",         WHT, old_sum  / reg_n, RESET
+        printf "  Humongous:  %s%4.0f%s regions\n",         WHT, hum_sum  / reg_n, RESET
         if (meta_sum > 0)
-            printf "  Metaspace:  %4.0f M usati (ultimo: %d M / %d M)\n", \
-                meta_sum / reg_n, buf_meta[gc_count], buf_meta_cap[gc_count]
+            printf "  Metaspace:  %s%4.0f M%s usati (ultimo: %s%d M%s / %d M)\n", \
+                WHT, meta_sum / reg_n, RESET, WHT, buf_meta[gc_count], RESET, buf_meta_cap[gc_count]
     }
 
     # ── Timeline heap + frequenza GC ─────────────────────────────────────────
@@ -203,19 +204,23 @@ END {
         BAR_W = 24
         print ""
         printf BOLD "── Timeline heap (ogni %d min) ────────────────────────────────\n" RESET, BUCKET_MIN
-        printf "  %-5s  %6s  %5s  %6s  %s\n", "ORA", "HEAP", "GC/p", "AVG ms", "HEAP AFTER"
-        printf "  %-5s  %6s  %5s  %6s  %s\n", "─────", "──────", "─────", "──────", "──────────────────────────"
+        printf "  %-5s  %6s  %5s  %6s  %7s  %s\n", "ORA", "HEAP", "GC/p", "AVG ms", "PAUSA %", "HEAP AFTER"
+        printf "  %-5s  %6s  %5s  %6s  %7s  %s\n", "─────", "──────", "─────", "──────", "───────", "──────────────────────────"
+        window_ms = BUCKET_MIN * 60 * 1000
         for (i = 1; i <= n_bkt; i++) {
             bk   = bkt_keys[i]
             h    = bkt_heap[bk]+0
             cnt  = bkt_count[bk]
             bavg = bkt_pause[bk] / cnt
+            bpct = bkt_pause[bk] / window_ms * 100
             bar_len = (heap_cap_last > 0) ? int(h * BAR_W / heap_cap_last) : 0
             bar = ""; for (k = 1; k <= bar_len; k++) bar = bar "▪"
             heap_pct = (heap_cap_last > 0) ? int(h * 100 / heap_cap_last) : 0
             hc = (heap_pct >= 85) ? RED : (heap_pct >= 70) ? YELLOW : ""
-            printf "  %s  %s%5dM%s  %5d  %6.1f  %s%s%s\n", \
-                bk, hc, h, hc != "" ? RESET : "", cnt, bavg, DIM, bar, RESET
+            bc = (bavg >= VERYSLOW_MS) ? RED : (bavg >= SLOW_MS) ? YELLOW : WHT
+            pc = (bpct >= 5) ? RED : (bpct >= 2) ? YELLOW : WHT
+            printf "  %s  %s%5dM%s  %s%5d%s  %s%6.1f%s  %s%6.1f%%%s  %s%s%s\n", \
+                bk, hc, h, hc != "" ? RESET : "", WHT, cnt, RESET, bc, bavg, RESET, pc, bpct, RESET, DIM, bar, RESET
         }
     }
     print ""

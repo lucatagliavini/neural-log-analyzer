@@ -114,6 +114,22 @@ Aggiungere una nuova applicazione richiede solo una riga in `entities.conf`, non
 
 ---
 
+## NLOG — Train/serve skew sui named log (trovato in validazione produzione #17)
+
+Piano completo in `/home/uga04128/.claude/plans/hazy-enchanting-moler.md`. Da eseguire
+come prima cosa nella prossima sessione, prima di riprendere la validazione da #17.
+
+| ID | Descrizione | Stato |
+|----|-------------|-------|
+| NLOG-1 | `normalize-query.sh` sostituisce lo short-alias `cc`→`<APP>` anche dentro `cc.log` (`.` è word boundary valido); la feature `cc\.log` in `unigrams.txt` non si attiva mai in produzione → query tipo "ultime righe del cc.log" instradano su `tail_log` invece di `tail_named_log` | Da fare |
+| NLOG-2 | `build_dataset.py:parse_simple_array` non legge `AVAILABLE_APPS=(...)` su riga singola → la sezione di risoluzione alias in Python è codice morto; il dataset non normalizza `cc`/`cm` mentre il runtime bash sì (train/serve skew) | Da fare |
+| NLOG-3 | Nessun test di parità tra `normalize-query.sh` (bash) e `build_dataset.normalize_query()` (Python) — la divergenza NLOG-2 non è mai stata intercettata | Da fare |
+| NLOG-4 | `tests/run-tests.sh` chiama `infer.sh` senza esportare `NORM_QUERY` come fa `chatbot.sh` — 5/40 test level1 "PASS" instradano diversamente in produzione | Da fare |
+| NLOG-5 | Vocabolario named-log copre solo 9/15 nomi di `entities.conf` (`APP_LOG_NAMES`): `ccJBatch`, `ccCanaliz`, `claimnumgen`, `contactsearch`, `arbitrato` senza feature dedicata | Da fare |
+| NLOG-6 | Nessun modo di nominare un log fuori dalla whitelist di `entities.conf` — proposta: glob tra virgolette (`"*c1nssprod*.log"`), sul modello di `SEARCH_PATTERN` già esistente in `param-extract.sh` | Da fare |
+
+---
+
 ## CTX — Contesto conversazionale
 
 > Obiettivo: rendere il chatbot "stateful" — ogni parametro estratto da una query
