@@ -60,6 +60,28 @@ open_current_log_for() {
 open_current_logs()        { open_current_log_for "${ACCESS_LOG_DIR:-$(dirname "$ACCESS_LOG")}" "$ACCESS_LOG_BASE"; }
 open_current_server_logs() { open_current_log_for "${SERVER_LOG_DIR:-$(dirname "$SERVER_LOG")}" "$SERVER_LOG_BASE"; }
 
+# Stampa quale file (o quali) il tool sta effettivamente leggendo.
+# tail_named_log/grep_named_log lo facevano già; tail_log no, e questo rendeva
+# indistinguibile il caso "ho chiesto un log Guidewire e mi è stato dato
+# l'access log di Undertow" — l'utente vedeva righe plausibili e nessun indizio.
+# Prende l'espressione prodotta da open_*() (che contiene path quotati e
+# possibili <(gunzip -c '...')) e ne estrae i path per la sola visualizzazione.
+print_log_source() {
+    local logs_expr="$1"
+    local paths
+    paths=$(grep -oE "'[^']+'" <<< "$logs_expr" | tr -d "'" | paste -sd' ' -)
+    [[ -z "$paths" ]] && return
+    local count
+    count=$(wc -w <<< "$paths")
+    if [[ "$count" -eq 1 ]]; then
+        printf "\033[36mLog: %s\033[0m\n" "$paths"
+    else
+        # Più file (rotazione): elencarli tutti, l'utente deve poter capire
+        # su quale insieme è stato calcolato il risultato.
+        printf "\033[36mLog: %s file\033[0m \033[2m(%s)\033[0m\n" "$count" "$paths"
+    fi
+}
+
 print_help() {
     local BOLD="\033[1m"
     local CYAN="\033[36m"
@@ -166,6 +188,7 @@ dispatch_tool() {
                 [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile"; return; }
                 if [[ "${TIME_EXPLICIT:-0}" == "1" ]]; then
                     logs_expr="$(open_server_logs)"
+                    print_log_source "$logs_expr"
                     eval gawk -f "'$LIB_DIR/utils-time.awk'" -f "'$LIB_DIR/utils-${fmt}.awk'" \
                         -f "'$LIB_DIR/utils-colors.awk'" \
                         -f "$TOOLS_DIR/tail_log.awk" \
@@ -174,6 +197,7 @@ dispatch_tool() {
                         "$logs_expr"
                 else
                     logs_expr="$(open_current_server_logs)"
+                    print_log_source "$logs_expr"
                     eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
                         -f "$TOOLS_DIR/tail_log.awk" \
                         -v tail_n="${TAIL_N:-50}" \
@@ -182,6 +206,7 @@ dispatch_tool() {
             else
                 if [[ "${TIME_EXPLICIT:-0}" == "1" ]]; then
                     logs_expr="$(open_logs)"
+                    print_log_source "$logs_expr"
                     eval gawk -f "'$LIB_DIR/utils-time.awk'" \
                         -f "'$LIB_DIR/utils-colors.awk'" \
                         -f "$TOOLS_DIR/tail_log.awk" \
@@ -190,6 +215,7 @@ dispatch_tool() {
                         "$logs_expr"
                 else
                     logs_expr="$(open_current_logs)"
+                    print_log_source "$logs_expr"
                     eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
                         -f "$TOOLS_DIR/tail_log.awk" \
                         -v tail_n="${TAIL_N:-50}" \
@@ -211,6 +237,24 @@ dispatch_tool() {
         tail_named_log)
             local gw_dir="${GUIDEWIRE_LOG_DIR:-}"
             local named_log="${NAMED_LOG:-}"
+            local log_glob="${NAMED_LOG_GLOB:-}"
+            # Escape hatch: glob esplicito tra virgolette (validato in param-extract.sh)
+            # bypassa la whitelist APP_LOG_NAMES e la catena fuzzy. Percorso eccezionale,
+            # non quello normale — serve per i log imprevisti del profilo.
+            if [[ -n "$log_glob" ]]; then
+                local glob_path=""
+                [[ -n "$gw_dir" ]] && glob_path=$(find "$gw_dir" -maxdepth 1 -name "$log_glob" 2>/dev/null | sort | head -1)
+                if [[ -z "$glob_path" ]]; then
+                    echo "[SKIP] Nessun log corrispondente a '$log_glob' in ${gw_dir:-<gw_dir non impostata>}"
+                    return
+                fi
+                printf "\033[36mLog: %s\033[0m  \033[2m(glob: %s)\033[0m\n" "$glob_path" "$log_glob"
+                eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
+                    -f "$TOOLS_DIR/tail_named_log.awk" \
+                    -v tail_n="${TAIL_N:-50}" \
+                    "$(open_log "$glob_path")"
+                return
+            fi
             if [[ -z "$named_log" ]]; then
                 echo "[SKIP] Nessun log Guidewire specificato nella query"
                 return
@@ -242,6 +286,23 @@ dispatch_tool() {
         grep_named_log)
             local gw_dir="${GUIDEWIRE_LOG_DIR:-}"
             local named_log="${NAMED_LOG:-}"
+            local log_glob="${NAMED_LOG_GLOB:-}"
+            # Stesso escape hatch di tail_named_log — vedi commento sopra.
+            if [[ -n "$log_glob" ]]; then
+                local glob_path=""
+                [[ -n "$gw_dir" ]] && glob_path=$(find "$gw_dir" -maxdepth 1 -name "$log_glob" 2>/dev/null | sort | head -1)
+                if [[ -z "$glob_path" ]]; then
+                    echo "[SKIP] Nessun log corrispondente a '$log_glob' in ${gw_dir:-<gw_dir non impostata>}"
+                    return
+                fi
+                printf "\033[36mLog: %s\033[0m  \033[2m(glob: %s)\033[0m  (level=%s)\n" \
+                    "$glob_path" "$log_glob" "${LOG_LEVEL:-ERROR}"
+                eval gawk "$tw_args" -f "$TOOLS_DIR/grep_named_log.awk" \
+                    -v level="${LOG_LEVEL:-ERROR}" \
+                    -v tail_n="${TAIL_N:-50}" \
+                    "$(open_log "$glob_path")"
+                return
+            fi
             if [[ -z "$named_log" ]]; then
                 echo "[SKIP] Nessun log Guidewire specificato nella query"
                 return

@@ -74,7 +74,15 @@ NAMED_LOG=""
 if [[ -n "${PROFILE_DIR:-}" && -f "$PROFILE_DIR/entities.conf" ]]; then
     source "$PROFILE_DIR/entities.conf"
 fi
-for _log_name in "${APP_LOG_NAMES[@]:-}"; do
+# Longest-match: ordina per lunghezza decrescente prima di iterare, come fa
+# normalize-query.sh per gli alias APP. Senza questo "ccJBatch.log" veniva risolto
+# come "cc" (il pattern è `\bcc` senza ancora finale, e "cc" viene prima nel file):
+# il classificatore instradava correttamente su tail_named_log ma dispatch.sh
+# apriva cc.log invece di ccJBatch.log. Colpiva ccJBatch e ccCanaliz.
+_sorted_log_names=$(for _n in "${APP_LOG_NAMES[@]:-}"; do
+                        [[ -n "$_n" ]] && printf '%d %s\n' "${#_n}" "$_n"
+                    done | sort -k1,1rn -k2,2 | awk '{print $2}')
+for _log_name in $_sorted_log_names; do
     [[ -z "$_log_name" ]] && continue
     if echo "$query" | grep -qiE "\b${_log_name}"; then
         NAMED_LOG="$_log_name"
@@ -105,6 +113,59 @@ if echo "$_sq" | grep -qiE "\bcerca\b|\btrova\b|\bdove.appare\b|\bdove.si.trova\
     [[ -z "$SEARCH_PATTERN" ]] && SEARCH_PATTERN="__MISSING__"
 fi
 
+# Escape hatch per log fuori da APP_LOG_NAMES: glob tra virgolette.
+#   ultime 10 righe di "*c1nssprod*.log"
+# Stesso meccanismo di estrazione di SEARCH_PATTERN (stringa tra virgolette dalla
+# query originale, per preservare le maiuscole nei nomi file), ma discriminato dalla
+# *forma* del contenuto: deve contenere '*' e terminare in '.log'. Così una query
+# `cerca "NullPointerException"` non finisce qui, e questa non finisce in SEARCH_PATTERN.
+#
+# Su `cerca "*errore*.log"` entrambe si popolano: è voluto, non una collisione. Ogni
+# tool legge solo la propria variabile, quindi è il classificatore a decidere l'intento.
+# Un'esclusione mutua romperebbe query legittime come `cerca errori nel "*c1nss*.log"`.
+#
+# Il valore finisce in `find -name` (dispatch.sh): è input non fidato, quindi la
+# whitelist di caratteri è obbligatoria, non difensiva. '/' e '..' permetterebbero
+# di uscire dalla directory dei log nonostante -maxdepth 1.
+NAMED_LOG_GLOB=""
+_glob_raw=$(echo "$1" | sed -n 's/.*"\([^"]*\)".*/\1/p' | head -1)
+[[ -z "$_glob_raw" ]] && _glob_raw=$(echo "$1" | sed -n "s/.*'\([^']*\)'.*/\1/p" | head -1)
+if [[ -n "$_glob_raw" && "$_glob_raw" == *'*'* && "$_glob_raw" == *.log ]]; then
+    if [[ "$_glob_raw" == *".."* ]]; then
+        echo "[WARN] param-extract: glob rifiutato (contiene '..'): $_glob_raw" >&2
+    elif [[ ! "$_glob_raw" =~ ^[A-Za-z0-9_.*-]+$ ]]; then
+        echo "[WARN] param-extract: glob rifiutato (caratteri non ammessi, consentiti [A-Za-z0-9_.*-]): $_glob_raw" >&2
+    else
+        NAMED_LOG_GLOB="$_glob_raw"
+    fi
+fi
+
+# La query nomina un file .log che non siamo riusciti a risolvere?
+# Caso reale: "ultime 10 righe del pc1nssprod.log" → pc1nssprod non è in APP_LOG_NAMES
+# e non è un glob, quindi NAMED_LOG resta vuoto, il classificatore ripiega su tail_log
+# e l'utente riceve l'access log di Undertow senza alcun indizio del cambio di argomento.
+# Qui si registra solo il nome non risolto; chi lo consuma (chatbot.sh) avvisa l'utente.
+#
+# Va DOPO il blocco NAMED_LOG_GLOB: leggerlo prima darebbe un falso avviso su ogni
+# query con glob valido.
+#
+# Esclusi i log non-Guidewire legittimi (access/server/gc, nomi da system.conf): quelli
+# sono gestiti da tail_log via LOG_TYPE e non sono "non risolti".
+UNRESOLVED_LOG=""
+if [[ -z "$NAMED_LOG" && -z "$NAMED_LOG_GLOB" ]]; then
+    _cand=$(grep -oiE "[a-z0-9_.-]+\.log\b" <<< "$query" | head -1)
+    if [[ -n "$_cand" ]]; then
+        _cand_base="${_cand%.log}"
+        _is_known=0
+        for _known in "${ACCESS_LOG_BASE:-}" "${SERVER_LOG_BASE:-}" "${GC_LOG_BASE:-}" \
+                      access server gc; do
+            [[ -z "$_known" ]] && continue
+            [[ "${_cand_base,,}" == "${_known,,}" ]] && { _is_known=1; break; }
+        done
+        [[ "$_is_known" -eq 0 ]] && UNRESOLVED_LOG="$_cand"
+    fi
+fi
+
 echo "TIME_FROM='${TIME_FROM}'"
 echo "TIME_TO='${TIME_TO}'"
 echo "DATE_FILTER='${DATE_FILTER}'"
@@ -117,6 +178,8 @@ echo "NAMED_LOG='${NAMED_LOG}'"
 echo "LOG_LEVEL='${LOG_LEVEL}'"
 echo "LOG_TYPE='${LOG_TYPE}'"
 echo "SEARCH_PATTERN='${SEARCH_PATTERN}'"
+echo "NAMED_LOG_GLOB='${NAMED_LOG_GLOB}'"
+echo "UNRESOLVED_LOG='${UNRESOLVED_LOG}'"
 # Entità normalizzate — arrivano da normalize-query.sh (unica fonte di verità).
 # param-extract le riemette invariate così il chiamante può fare un unico eval.
 echo "DETECTED_APP='${DETECTED_APP:-}'"

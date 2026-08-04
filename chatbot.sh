@@ -304,6 +304,19 @@ run_query() {
         printf "\033[1m│\033[0m    \033[1m▸ %s\033[0m \033[2m(%s%%)\033[0m — %s\n" \
             "$tool" "$pct" "${TOOL_DESC[$tool]:-}"
     done <<< "$tools"
+
+    # La query nominava un .log che non siamo riusciti a risolvere (UNRESOLVED_LOG da
+    # param-extract.sh). Senza questo avviso il tool scelto legge un altro file — di
+    # solito l'access log via tail_log — e l'utente non ha modo di accorgersene.
+    if [[ -n "${UNRESOLVED_LOG:-}" ]]; then
+        local _Y="\033[33m" _D="\033[2m" _B="\033[1m" _X="\033[0m"
+        printf "\033[1m│\033[0m\n"
+        printf "\033[1m│\033[0m  ${_Y}⚠ \"%s\" non è tra i log noti di questo profilo.${_X}\n" "$UNRESOLVED_LOG"
+        printf "\033[1m│\033[0m    ${_D}Log noti:${_X} %s\n" "$(printf '%s, ' "${APP_LOG_NAMES[@]}" | sed 's/, $//')"
+        printf "\033[1m│\033[0m    ${_D}Per un log fuori da questa lista, usa un glob tra virgolette:${_X}\n"
+        printf "\033[1m│\033[0m    ${_D}es:${_X} ${_B}ultime 10 righe di \"*%s*.log\"${_X}\n" "${UNRESOLVED_LOG%.log}"
+    fi
+
     printf "\033[1m│\033[0m\n"
 
     while IFS=' ' read -r tool _prob; do
