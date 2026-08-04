@@ -60,6 +60,106 @@ open_current_log_for() {
 open_current_logs()        { open_current_log_for "${ACCESS_LOG_DIR:-$(dirname "$ACCESS_LOG")}" "$ACCESS_LOG_BASE"; }
 open_current_server_logs() { open_current_log_for "${SERVER_LOG_DIR:-$(dirname "$SERVER_LOG")}" "$SERVER_LOG_BASE"; }
 
+# Espande un glob nell'insieme di file da leggere, rispettando la finestra temporale.
+#
+# Il glob dell'utente ("*-cc.log") identifica il log corrente; da lì si deriva il
+# basename logico e si delega a select_log_files, che è l'unico posto dove vive il
+# filtro temporale: così "righe di ieri" seleziona la rotazione .gz giusta invece
+# di leggere sempre il file corrente. Prima questo ramo faceva `find | head -1`,
+# quindi ignorava sia il tempo sia i .gz.
+#
+# Uso: logs_expr=$(open_glob_logs DIR GLOB)  → espressione per `eval gawk ...`
+open_glob_logs() {
+    local dir="$1" glob="$2"
+    local chosen
+    chosen=$(resolve_log_glob "$dir" "$glob") || return 1
+    [[ -z "$chosen" ]] && return 1
+
+    local base
+    base=$(logfile_logical_name "$chosen")
+
+    # select_log_files cerca con `-name "BASE*"`, quindi il basename logico da solo
+    # non basta: "prod1nsse-cc" matcherebbe anche "prod1nsse-ccCanaliz.log".
+    # Si filtrano i candidati per nome logico ESATTO, tenendo solo le rotazioni
+    # dello stesso log.
+    local list expr="" f
+    list=$(select_log_files "$dir" "$base" "${TIME_FROM:-}" "${TIME_TO:-}")
+    IFS='|' read -ra _cand <<< "$list"
+    for f in "${_cand[@]}"; do
+        [[ -z "$f" ]] && continue
+        [[ "$(logfile_logical_name "$f")" == "$base" ]] || continue
+        expr+=" $(open_log "$f")"
+    done
+
+    # Nessun candidato nella finestra temporale: ricade sul file scelto, così una
+    # finestra troppo stretta non produce un output vuoto senza spiegazione.
+    [[ -z "$expr" ]] && expr=" $(open_log "$chosen")"
+    echo "$expr"
+}
+
+# Messaggio di skip: il tool non può produrre output (log assente, parametro mancante).
+# In giallo perché è un WARNING, non un risultato: prima era testo bianco identico
+# all'output normale e si perdeva fra le righe di log.
+skip_msg() {
+    printf "\033[33m[SKIP] %s\033[0m\n" "$1"
+}
+
+# Quando un log richiesto non esiste, elenca quelli realmente presenti sul nodo.
+# L'avviso di param-extract.sh mostra gli ALIAS noti da entities.conf, che possono
+# divergere dal disco (es. "plugin" in whitelist contro "plugins" reale): qui si
+# guarda cosa c'è davvero, che è l'informazione di cui l'utente ha bisogno.
+# Se un nome simile esiste lo si mette in evidenza — l'errore tipico è un refuso.
+suggest_available_logs() {
+    local dir="$1" wanted="${2:-}"
+    [[ -z "$dir" || ! -d "$dir" ]] && return
+    # Scarta i nomi con caratteri non digitabili: sul nodo esiste
+    # "${gw.cc.serverid}-messaging.log", un placeholder Guidewire non risolto nella
+    # loro config — non è un log che qualcuno possa nominare, sarebbe solo rumore.
+    local -a names=()
+    while IFS= read -r n; do [[ -n "$n" ]] && names+=("$n"); done < <(
+        find "$dir" -maxdepth 1 -name "*.log" 2>/dev/null \
+            | sed -E 's|.*/||; s/^[A-Za-z0-9]+-//; s/\.log$//' \
+            | grep -E '^[A-Za-z0-9_.-]+$' | sort -u)
+    [[ "${#names[@]}" -eq 0 ]] && return
+
+    local _D="\033[2m" _B="\033[1m" _X="\033[0m"
+    # Match parziale case-insensitive: cattura i refusi e le differenze di plurale
+    if [[ -n "$wanted" ]]; then
+        local -a near=()
+        local n
+        for n in "${names[@]}"; do
+            [[ "${n,,}" == *"${wanted,,}"* || "${wanted,,}" == *"${n,,}"* ]] && near+=("$n")
+        done
+        if [[ "${#near[@]}" -gt 0 ]]; then
+            printf "  ${_D}Forse cercavi:${_X} ${_B}%s${_X}\n" "$(printf '%s.log ' "${near[@]}")"
+            return
+        fi
+    fi
+
+    # In colonne allineate: su questo nodo i log sono 27 e su una riga sola sono ~470
+    # caratteri, che il terminale spezza dove capita — tagliando i nomi a metà
+    # (Card_ / denunce_...) e rendendo faticoso cercarne uno a vista.
+    printf "  ${_D}Log presenti su questo nodo (%d):${_X}\n" "${#names[@]}"
+    local _w="${COLUMNS:-100}"
+    [[ "$_w" -lt 40 ]] && _w=100
+    local _line
+    if command -v column >/dev/null 2>&1; then
+        # `column -c N` impagina la lista in colonne, ma separa con TAB: l'allineamento
+        # dipenderebbe dai tab-stop del terminale, e con nomi >8 caratteri le colonne
+        # si disallineano. `expand` li converte in spazi. NON usare `-t`, che formatta
+        # una tabella da input già colonnato e qui produrrebbe una sola colonna.
+        while IFS= read -r _line; do
+            printf "    ${_D}%s${_X}\n" "$_line"
+        done < <(printf '%s\n' "${names[@]}" | column -c "$((_w - 6))" | expand -t 8)
+    else
+        # Fallback senza column: 3 per riga a larghezza fissa
+        while IFS= read -r _line; do
+            printf "    ${_D}%s${_X}\n" "$_line"
+        done < <(printf '%s\n' "${names[@]}" | paste -d'\t' - - - \
+                 | awk -F'\t' '{printf "%-34s %-34s %s\n", $1, $2, $3}')
+    fi
+}
+
 # Stampa quale file (o quali) il tool sta effettivamente leggendo.
 # tail_named_log/grep_named_log lo facevano già; tail_log no, e questo rendeva
 # indistinguibile il caso "ho chiesto un log Guidewire e mi è stato dato
@@ -75,10 +175,25 @@ print_log_source() {
     count=$(wc -w <<< "$paths")
     if [[ "$count" -eq 1 ]]; then
         printf "\033[36mLog: %s\033[0m\n" "$paths"
+        return
+    fi
+
+    # Più file (rotazione): l'utente deve capire su quale insieme è calcolato il
+    # risultato, ma con 11 rotazioni la riga diventa illeggibile (misurato in
+    # produzione). Si mostrano la directory una volta sola e i soli nomi, troncati.
+    local dir first
+    first=$(awk '{print $1}' <<< "$paths")
+    dir=$(dirname "$first")
+    local names
+    names=$(tr ' ' '\n' <<< "$paths" | xargs -r -n1 basename | paste -sd' ' -)
+    printf "\033[36mLog: %s file in %s\033[0m\n" "$count" "$dir"
+    if [[ "$count" -le 4 ]]; then
+        printf "     \033[2m%s\033[0m\n" "$names"
     else
-        # Più file (rotazione): elencarli tutti, l'utente deve poter capire
-        # su quale insieme è stato calcolato il risultato.
-        printf "\033[36mLog: %s file\033[0m \033[2m(%s)\033[0m\n" "$count" "$paths"
+        local head_n tail_n
+        head_n=$(tr ' ' '\n' <<< "$names" | head -2 | paste -sd' ' -)
+        tail_n=$(tr ' ' '\n' <<< "$names" | tail -1)
+        printf "     \033[2m%s … %s\033[0m\n" "$head_n" "$tail_n"
     fi
 }
 
@@ -156,7 +271,7 @@ dispatch_tool() {
                 "$(open_logs)"
             ;;
         filter_errors)
-            [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile per filter_errors"; return; }
+            [[ -z "$server" ]] && { skip_msg "server.log non disponibile per filter_errors"; return; }
             eval gawk "$tw_args" -f "$TOOLS_DIR/filter_errors.awk" \
                 "$(open_server_logs)"
             ;;
@@ -165,12 +280,12 @@ dispatch_tool() {
                 "$(open_logs)"
             ;;
         gc_stats)
-            [[ -z "$gc" ]] && { echo "[SKIP] gc.log non disponibile per gc_stats"; return; }
+            [[ -z "$gc" ]] && { skip_msg "gc.log non disponibile per gc_stats"; return; }
             eval gawk "$tw_args" -f "$TOOLS_DIR/gc_stats.awk" \
                 "$(open_gc_logs)"
             ;;
         correlate_gc_slow)
-            [[ -z "$gc" ]] && { echo "[SKIP] gc.log non disponibile per correlate_gc_slow"; return; }
+            [[ -z "$gc" ]] && { skip_msg "gc.log non disponibile per correlate_gc_slow"; return; }
             eval gawk "$tw_args" -f "$TOOLS_DIR/correlate_gc_slow.awk" \
                 -v threshold_ms="${THRESHOLD_MS:-500}" \
                 "$(open_gc_logs)" "$(open_logs)"
@@ -185,7 +300,7 @@ dispatch_tool() {
             # finestra ma ts_end nel presente farebbe comunque tail delle righe più
             # recenti, fuori dalla finestra richiesta.
             if [[ "${LOG_TYPE:-}" == "server" ]]; then
-                [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile"; return; }
+                [[ -z "$server" ]] && { skip_msg "server.log non disponibile"; return; }
                 if [[ "${TIME_EXPLICIT:-0}" == "1" ]]; then
                     logs_expr="$(open_server_logs)"
                     print_log_source "$logs_expr"
@@ -230,7 +345,7 @@ dispatch_tool() {
                 "$(open_logs)"
             ;;
         filter_app_errors)
-            [[ -z "$server" ]] && { echo "[SKIP] server.log non disponibile per filter_app_errors"; return; }
+            [[ -z "$server" ]] && { skip_msg "server.log non disponibile per filter_app_errors"; return; }
             eval gawk "$tw_args" -f "$TOOLS_DIR/filter_app_errors.awk" \
                 "$(open_server_logs)"
             ;;
@@ -242,21 +357,22 @@ dispatch_tool() {
             # bypassa la whitelist APP_LOG_NAMES e la catena fuzzy. Percorso eccezionale,
             # non quello normale — serve per i log imprevisti del profilo.
             if [[ -n "$log_glob" ]]; then
-                local glob_path=""
-                [[ -n "$gw_dir" ]] && glob_path=$(find "$gw_dir" -maxdepth 1 -name "$log_glob" 2>/dev/null | sort | head -1)
-                if [[ -z "$glob_path" ]]; then
-                    echo "[SKIP] Nessun log corrispondente a '$log_glob' in ${gw_dir:-<gw_dir non impostata>}"
+                local glob_expr=""
+                [[ -n "$gw_dir" ]] && glob_expr=$(open_glob_logs "$gw_dir" "$log_glob")
+                if [[ -z "$glob_expr" ]]; then
+                    skip_msg "Nessun log corrispondente a '$log_glob' in ${gw_dir:-<gw_dir non impostata>}"
                     return
                 fi
-                printf "\033[36mLog: %s\033[0m  \033[2m(glob: %s)\033[0m\n" "$glob_path" "$log_glob"
+                print_log_source "$glob_expr"
+                printf "\033[2m(glob: %s)\033[0m\n" "$log_glob"
                 eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
                     -f "$TOOLS_DIR/tail_named_log.awk" \
                     -v tail_n="${TAIL_N:-50}" \
-                    "$(open_log "$glob_path")"
+                    "$glob_expr"
                 return
             fi
             if [[ -z "$named_log" ]]; then
-                echo "[SKIP] Nessun log Guidewire specificato nella query"
+                skip_msg "Nessun log Guidewire specificato nella query"
                 return
             fi
             local log_path=""
@@ -274,7 +390,8 @@ dispatch_tool() {
                 fi
             fi
             if [[ -z "$log_path" ]]; then
-                echo "[SKIP] Log '$named_log' non trovato in ${gw_dir:-<gw_dir non impostata>}"
+                skip_msg "Log '$named_log' non trovato in ${gw_dir:-<gw_dir non impostata>}"
+                suggest_available_logs "$gw_dir" "$named_log"
                 return
             fi
             printf "\033[36mLog: %s\033[0m\n" "$log_path"
@@ -289,22 +406,22 @@ dispatch_tool() {
             local log_glob="${NAMED_LOG_GLOB:-}"
             # Stesso escape hatch di tail_named_log — vedi commento sopra.
             if [[ -n "$log_glob" ]]; then
-                local glob_path=""
-                [[ -n "$gw_dir" ]] && glob_path=$(find "$gw_dir" -maxdepth 1 -name "$log_glob" 2>/dev/null | sort | head -1)
-                if [[ -z "$glob_path" ]]; then
-                    echo "[SKIP] Nessun log corrispondente a '$log_glob' in ${gw_dir:-<gw_dir non impostata>}"
+                local glob_expr=""
+                [[ -n "$gw_dir" ]] && glob_expr=$(open_glob_logs "$gw_dir" "$log_glob")
+                if [[ -z "$glob_expr" ]]; then
+                    skip_msg "Nessun log corrispondente a '$log_glob' in ${gw_dir:-<gw_dir non impostata>}"
                     return
                 fi
-                printf "\033[36mLog: %s\033[0m  \033[2m(glob: %s)\033[0m  (level=%s)\n" \
-                    "$glob_path" "$log_glob" "${LOG_LEVEL:-ERROR}"
+                print_log_source "$glob_expr"
+                printf "\033[2m(glob: %s)\033[0m  (level=%s)\n" "$log_glob" "${LOG_LEVEL:-ERROR}"
                 eval gawk "$tw_args" -f "$TOOLS_DIR/grep_named_log.awk" \
                     -v level="${LOG_LEVEL:-ERROR}" \
                     -v tail_n="${TAIL_N:-50}" \
-                    "$(open_log "$glob_path")"
+                    "$glob_expr"
                 return
             fi
             if [[ -z "$named_log" ]]; then
-                echo "[SKIP] Nessun log Guidewire specificato nella query"
+                skip_msg "Nessun log Guidewire specificato nella query"
                 return
             fi
             local log_path=""
@@ -322,7 +439,8 @@ dispatch_tool() {
                 fi
             fi
             if [[ -z "$log_path" ]]; then
-                echo "[SKIP] Log '$named_log' non trovato in ${gw_dir:-<gw_dir non impostata>}"
+                skip_msg "Log '$named_log' non trovato in ${gw_dir:-<gw_dir non impostata>}"
+                suggest_available_logs "$gw_dir" "$named_log"
                 return
             fi
             printf "\033[36mLog: %s\033[0m  (level=%s)\n" "$log_path" "${LOG_LEVEL:-ERROR}"

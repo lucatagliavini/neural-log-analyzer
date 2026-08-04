@@ -79,6 +79,15 @@ _logfiles_read_first_ts() {
     elif [[ "$line" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})\ ([0-9]{2}):([0-9]{2}) ]]; then
         # Server log (JBoss): 2026-07-29 08:01:23,456
         ts=$(date -d "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}:${BASH_REMATCH[3]}:00" +%s 2>/dev/null || echo "")
+    elif [[ "$line" =~ ([0-9]{4}-[0-9]{2}-[0-9]{2})T([0-9]{2}):([0-9]{2}) ]]; then
+        # Log Guidewire: [thread] USER 2026-08-04T15:50:01,443 INFO messaggio
+        # Timestamp ISO8601 in posizione variabile, NON fra parentesi quadre e non
+        # a inizio riga — nessuno dei tre pattern sopra lo catturava, quindi tutti i
+        # log Guidewire davano ts_start=0 e il filtro temporale di select_log_files
+        # non poteva discriminarli. Difetto preesistente, emerso testando il glob
+        # sulle rotazioni (2026-08-04). Va ULTIMO: il ramo GC sopra è più specifico
+        # (richiede la parentesi quadra) e deve avere precedenza.
+        ts=$(date -d "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}:${BASH_REMATCH[3]}:00" +%s 2>/dev/null || echo "")
     fi
     echo "${ts:-0}"
 }
@@ -145,4 +154,103 @@ select_log_files() {
         out+="${f}|"
     done
     echo "${out%|}"
+}
+
+# Rimuove il suffisso di rotazione dal nome di un file di log, restituendo il
+# "nome logico" — la chiave per capire se due file sono lo stesso log in momenti
+# diversi o due log distinti.
+#   prod1nsse-cc.log                      -> prod1nsse-cc
+#   prod1nsse-cc.log-2026-07-26-17850.gz  -> prod1nsse-cc
+#   prod1nsse-cc.log.3.gz                 -> prod1nsse-cc
+logfile_logical_name() {
+    local base="${1##*/}"
+    base="${base%.gz}"
+    # -DATE-EPOCH oppure .N appesi dopo .log
+    base=$(sed -E 's/\.log([-.].*)?$/.log/' <<< "$base")
+    echo "${base%.log}"
+}
+
+# Risolve un glob in un singolo file "rappresentante", disambiguando quando il
+# pattern matcha log logicamente diversi (es. "*cc*.log" → cc, ccJBatch, ccCanaliz).
+#
+# Distinzione necessaria: le ROTAZIONI dello stesso log vanno lette insieme (ci
+# pensa select_log_files), mentre log DIVERSI richiedono una scelta. Senza questa
+# distinzione un `sort | head -1` sceglierebbe silenziosamente, che è il difetto
+# che questo progetto ha già pagato altrove.
+#
+# Uso:  path=$(resolve_log_glob DIR GLOB)
+# Stampa su stdout il path scelto; l'elenco di disambiguazione va su stderr, così
+# non inquina il valore di ritorno.
+resolve_log_glob() {
+    local dir="$1" glob="$2"
+    [[ -z "$dir" || -z "$glob" ]] && return 1
+
+    local -a matches=()
+    while IFS= read -r f; do [[ -n "$f" ]] && matches+=("$f"); done \
+        < <(find "$dir" -maxdepth 1 -name "$glob" 2>/dev/null | sort)
+    [[ "${#matches[@]}" -eq 0 ]] && return 1
+
+    # Raggruppa per nome logico; per ogni gruppo preferisce il file non ruotato
+    local -A rep=()
+    local -a order=()
+    local f lname
+    for f in "${matches[@]}"; do
+        lname=$(logfile_logical_name "$f")
+        if [[ -z "${rep[$lname]:-}" ]]; then
+            rep["$lname"]="$f"
+            order+=("$lname")
+        fi
+        # un file che finisce esattamente in .log è il corrente: ha priorità
+        [[ "$f" == *.log ]] && rep["$lname"]="$f"
+    done
+
+    # La SCELTA deve essere deterministica: `order[@]` segue l'ordine di find, che
+    # varia con locale e filesystem — basarsi su quello la renderebbe arbitraria
+    # (verificato: sul server "*cc*.log" sceglieva ccCanaliz, in locale cc).
+    # Criterio: nome logico più corto, poi alfabetico. Fra "cc", "ccCanaliz" e
+    # "ccJBatch" vince "cc" — il log base, non una sua variante: l'interpretazione
+    # più probabile di "*cc*". A parità di lunghezza preferisce il non-ruotato.
+    local _by_len
+    _by_len=$(for lname in "${order[@]}"; do printf '%d %s\n' "${#lname}" "$lname"; done \
+              | sort -k1,1n -k2,2 | awk '{print $2}')
+    local chosen="" _first=""
+    while IFS= read -r lname; do
+        [[ -z "$lname" ]] && continue
+        [[ -z "$_first" ]] && _first="${rep[$lname]}"
+        if [[ -z "$chosen" && "${rep[$lname]}" == *.log ]]; then chosen="${rep[$lname]}"; fi
+    done <<< "$_by_len"
+    [[ -z "$chosen" ]] && chosen="$_first"
+
+    # L'ELENCO invece si presenta in ordine alfabetico: è quello che l'utente si
+    # aspetta scorrendo una lista di nomi.
+    local _by_name
+    _by_name=$(printf '%s\n' "${order[@]}" | sort)
+    order=()
+    while IFS= read -r lname; do [[ -n "$lname" ]] && order+=("$lname"); done <<< "$_by_name"
+
+    if [[ "${#order[@]}" -gt 1 ]]; then
+        local _Y="\033[33m" _D="\033[2m" _X="\033[0m"
+        printf "${_Y}⚠ '%s' corrisponde a %d log diversi — mostrato il primo non ruotato:${_X}\n" \
+            "$glob" "${#order[@]}" >&2
+        local i=1
+        for lname in "${order[@]}"; do
+            if [[ "$i" -gt 10 ]]; then
+                printf "    ${_D}… e altri %d${_X}\n" "$(( ${#order[@]} - 10 ))" >&2
+                break
+            fi
+            local tag=""
+            [[ "${rep[$lname]}" == "$chosen" ]] && tag="  (mostrato)"
+            printf "    %d) %s%s\n" "$i" "${rep[$lname]##*/}" "$tag" >&2
+            i=$(( i + 1 ))
+        done
+        # Suggerisce il pattern che avrebbe selezionato univocamente il file scelto:
+        # dal nome logico si prende il segmento dopo l'ultimo '-' (il serverID che
+        # precede è la parte che l'utente non ricorda).
+        local _hint
+        _hint=$(logfile_logical_name "$chosen")
+        printf "  ${_D}Restringi il pattern per un match univoco, es: \"*-%s.log\"${_X}\n" \
+            "${_hint##*-}" >&2
+    fi
+
+    echo "$chosen"
 }

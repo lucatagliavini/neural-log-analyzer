@@ -199,8 +199,14 @@ run_query() {
 
     # NAMED_LOG: aggiorna il contesto solo se la query specifica un log esplicito;
     # altrimenti riusa l'ultimo log menzionato in sessione (es. "stessa cosa" / "nello stesso log")
+    # LOG_EXPLICIT: 1 se QUESTA query nomina un log, 0 se lo eredita dalla sessione.
+    # Non persistente, come TIME_EXPLICIT: serve all'avviso di incoerenza più sotto, che
+    # deve scattare solo su un log appena nominato — altrimenti dopo una query sul jgroups
+    # ogni query successiva mostrerebbe l'avviso pur non avendo nominato nulla.
+    LOG_EXPLICIT=0
     if [[ -n "$NAMED_LOG" ]]; then
         ACTIVE_NAMED_LOG="$NAMED_LOG"
+        LOG_EXPLICIT=1
     else
         NAMED_LOG="$ACTIVE_NAMED_LOG"
     fi
@@ -305,16 +311,31 @@ run_query() {
             "$tool" "$pct" "${TOOL_DESC[$tool]:-}"
     done <<< "$tools"
 
-    # La query nominava un .log che non siamo riusciti a risolvere (UNRESOLVED_LOG da
-    # param-extract.sh). Senza questo avviso il tool scelto legge un altro file — di
-    # solito l'access log via tail_log — e l'utente non ha modo di accorgersene.
-    if [[ -n "${UNRESOLVED_LOG:-}" ]]; then
-        local _Y="\033[33m" _D="\033[2m" _B="\033[1m" _X="\033[0m"
-        printf "\033[1m│\033[0m\n"
-        printf "\033[1m│\033[0m  ${_Y}⚠ \"%s\" non è tra i log noti di questo profilo.${_X}\n" "$UNRESOLVED_LOG"
-        printf "\033[1m│\033[0m    ${_D}Log noti:${_X} %s\n" "$(printf '%s, ' "${APP_LOG_NAMES[@]}" | sed 's/, $//')"
-        printf "\033[1m│\033[0m    ${_D}Per un log fuori da questa lista, usa un glob tra virgolette:${_X}\n"
-        printf "\033[1m│\033[0m    ${_D}es:${_X} ${_B}ultime 10 righe di \"*%s*.log\"${_X}\n" "${UNRESOLVED_LOG%.log}"
+    # L'avviso su UNRESOLVED_LOG è stato rimosso (2026-08-04): elencava gli alias di
+    # entities.conf, che possono divergere dal disco. Ora se il log non esiste
+    # ci pensa suggest_available_logs() in dispatch.sh, che guarda i file reali del
+    # nodo ed evidenzia i nomi simili — il refuso è l'errore tipico.
+
+    # La query nomina un log (NAMED_LOG risolto) ma nessuno dei tool attivati lo legge:
+    # `tail_log`/`filter_errors` aprono access log e server.log ignorando NAMED_LOG,
+    # quindi l'utente riceve dati plausibili dal file sbagliato senza accorgersene.
+    # Caso tipico: "errori di cluster nel jgroups log" (senza il punto) → filter_errors.
+    # L'incoerenza è rilevabile solo qui, dove si conoscono sia NAMED_LOG sia i tool
+    # scelti — nessuno dei due componenti da solo ha entrambe le informazioni.
+    if [[ -n "${NAMED_LOG:-}" && "${LOG_EXPLICIT:-0}" -eq 1 ]]; then
+        local _reads_named=0
+        while IFS=' ' read -r _t _; do
+            [[ "$_t" == "tail_named_log" || "$_t" == "grep_named_log" ]] && _reads_named=1
+        done <<< "$tools"
+        if [[ "$_reads_named" -eq 0 ]]; then
+            local _Y="\033[33m" _D="\033[2m" _B="\033[1m" _X="\033[0m"
+            printf "\033[1m│\033[0m\n"
+            printf "\033[1m│\033[0m  ${_Y}⚠ Hai nominato il log \"%s\" ma nessuno degli strumenti attivati lo legge.${_X}\n" \
+                "$NAMED_LOG"
+            printf "\033[1m│\033[0m    ${_D}Per leggere quel log, nominalo con l'estensione:${_X}\n"
+            printf "\033[1m│\033[0m    ${_D}es:${_X} ${_B}errori nel %s.log${_X}${_D}  ·  ${_X}${_B}ultime righe del %s.log${_X}\n" \
+                "$NAMED_LOG" "$NAMED_LOG"
+        fi
     fi
 
     printf "\033[1m│\033[0m\n"

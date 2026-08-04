@@ -4,10 +4,14 @@
 #
 # Copre i parametri che decidono QUALE file viene letto, dove un errore non
 # produce un crash ma un risultato plausibile e sbagliato:
-#   NAMED_LOG        nome log Guidewire risolto dalla whitelist APP_LOG_NAMES
+#   NAMED_LOG        nome del log: alias da APP_LOG_NAMES, oppure qualsiasi
+#                    "<nome>.log" via fallback (la whitelist è di alias, non di
+#                    log ammessi) — esclusi i log di infrastruttura
 #   NAMED_LOG_GLOB   escape hatch glob tra virgolette (+ validazione path traversal)
-#   UNRESOLVED_LOG   la query nomina un .log che non siamo riusciti a risolvere
 #   SEARCH_PATTERN   stringa di ricerca per search_all_logs
+#
+# Copre anche suggest_available_logs() e skip_msg() di dispatch.sh, che completano
+# la diagnostica quando il log richiesto non esiste.
 #
 # Uso: bash tests/test-param-extract.sh [--profile <dir>]
 #
@@ -71,6 +75,19 @@ assert_eq "senza asterisco: non e' un glob" "" \
 assert_eq "senza .log finale: non e' un glob" "" \
     "$(_extract 'ultime righe di "*c1nss*"' NAMED_LOG_GLOB)"
 
+# File ruotati: sul nodo la rotazione produce "…-cc.log-2026-07-26-<epoch>.gz",
+# dove ".log" sta IN MEZZO. Richiedere ".log" finale rendeva il glob incapace di
+# raggiungere qualsiasi storico.
+assert_eq "glob ruotato .log.gz accettato" "*-cc.log.gz" \
+    "$(_extract 'ultime righe di "*-cc.log.gz"' NAMED_LOG_GLOB)"
+assert_eq "glob ruotato con data accettato" "*-cc.log-2026-07-26-1785016801.gz" \
+    "$(_extract 'ultime righe di "*-cc.log-2026-07-26-1785016801.gz"' NAMED_LOG_GLOB)"
+assert_eq "glob ruotato con wildcard finale accettato" "*-cc.log-*.gz" \
+    "$(_extract 'ultime righe di "*-cc.log-*.gz"' NAMED_LOG_GLOB)"
+# ".logico" non e' un log: la regex ancora ".log" a fine token o prima di [-.]
+assert_eq "'.logico' rifiutato" "" \
+    "$(_extract 'ultime righe di "*.logico"' NAMED_LOG_GLOB)"
+
 # Validazione: input che finisce in `find -name`, la whitelist e' obbligatoria
 assert_eq "path traversal '..' rifiutato" "" \
     "$(_extract 'righe di "../*.log"' NAMED_LOG_GLOB)"
@@ -79,25 +96,42 @@ assert_eq "slash rifiutato" "" \
 assert_eq "traversal senza glob ignorato" "" \
     "$(_extract 'righe di "../../etc/passwd"' NAMED_LOG_GLOB)"
 
-# ─── UNRESOLVED_LOG — la query nomina un log che non sappiamo risolvere ───────
-section "UNRESOLVED_LOG (avviso all'utente)"
+# ─── NAMED_LOG oltre la whitelist ─────────────────────────────────────────────
+section "NAMED_LOG fuori whitelist (fallback)"
 
-# Il caso reale che ha motivato questa variabile: senza avviso, tail_log apre
-# l'access log di Undertow e l'utente non ha modo di accorgersene.
-assert_eq "nome fuori whitelist rilevato" "pc1nssprod.log" \
-    "$(_extract 'ultime 10 righe del pc1nssprod.log del nodo 5 di produzione' UNRESOLVED_LOG)"
-assert_eq "match parziale della whitelist rilevato" "xyzapi.log" \
-    "$(_extract 'ultime righe del xyzapi.log' UNRESOLVED_LOG)"
-assert_eq "log risolto: nessun avviso" "" \
-    "$(_extract 'ultime righe del cc.log' UNRESOLVED_LOG)"
-assert_eq "glob valido: nessun avviso" "" \
-    "$(_extract 'ultime 10 righe di "*c1nssprod*.log"' UNRESOLVED_LOG)"
-assert_eq "server.log legittimo: nessun avviso" "" \
-    "$(_extract 'ultime righe del server.log' UNRESOLVED_LOG)"
-assert_eq "gc.log legittimo: nessun avviso" "" \
-    "$(_extract 'ultime righe del gc.log' UNRESOLVED_LOG)"
-assert_eq "nessun .log nella query: nessun avviso" "" \
-    "$(_extract 'ultime 100 righe' UNRESOLVED_LOG)"
+# NAMED_LOG risolve QUALSIASI "<token>.log" sintatticamente valido, non solo i nomi
+# in APP_LOG_NAMES: quella è una lista di alias (scorciatoie usabili senza
+# estensione), non di log ammessi. Sul nodo i log sono 28 contro 16 in whitelist.
+assert_eq "nome fuori whitelist risolto" "pc1nssprod" \
+    "$(_extract 'ultime 10 righe del pc1nssprod.log del nodo 5 di produzione' NAMED_LOG)"
+# Il case va preservato: i nomi reali hanno maiuscole e finiscono in `find -name`,
+# che è case-sensitive
+assert_eq "case preservato per find -name" "concurrentDataChangeExceptionLog" \
+    "$(_extract 'ultime righe del concurrentDataChangeExceptionLog.log' NAMED_LOG)"
+assert_eq "match parziale whitelist risolto per intero" "xyzapi" \
+    "$(_extract 'ultime righe del xyzapi.log' NAMED_LOG)"
+# I log di infrastruttura restano esclusi: hanno tool dedicati (filter_errors,
+# tail_log via LOG_TYPE)
+assert_eq "server.log escluso dal fallback" "" \
+    "$(_extract 'righe di errore nel server.log' NAMED_LOG)"
+assert_eq "gc.log escluso dal fallback" "" \
+    "$(_extract 'ultime righe del gc.log' NAMED_LOG)"
+assert_eq "nessun .log: NAMED_LOG vuoto" "" \
+    "$(_extract 'ultime 100 righe' NAMED_LOG)"
+# Il valore finisce in `find -name`: serve almeno un alfanumerico, altrimenti
+# "..log" darebbe base "." e "-.log" darebbe "-"
+assert_eq "'..log' rifiutato (nessun alfanumerico)" "" \
+    "$(_extract 'righe di ..log' NAMED_LOG)"
+assert_eq "'-.log' rifiutato (nessun alfanumerico)" "" \
+    "$(_extract 'righe di -.log' NAMED_LOG)"
+
+# UNRESOLVED_LOG è stato rimosso: da quando NAMED_LOG risolve qualsiasi nome restava
+# vuoto in ogni caso reale, e suggest_available_logs() fa lo stesso lavoro guardando
+# i file del nodo invece degli alias di configurazione. Qui si verifica che non venga
+# più emesso, così un ripristino accidentale non passa inosservato.
+_emitted=$(bash "$ROOT_DIR/lib/param-extract.sh" 'ultime righe del qualsiasi.log' 2>/dev/null \
+           | grep -c "^UNRESOLVED_LOG=" || true)
+assert_eq "UNRESOLVED_LOG non piu' emesso" "0" "$_emitted"
 
 # ─── SEARCH_PATTERN — non deve collidere con il glob ──────────────────────────
 section "SEARCH_PATTERN vs NAMED_LOG_GLOB"
@@ -108,6 +142,109 @@ assert_eq "ricerca non popola il glob" "" \
     "$(_extract 'cerca "NullPointerException" in produzione' NAMED_LOG_GLOB)"
 assert_eq "trigger senza virgolette: __MISSING__" "__MISSING__" \
     "$(_extract 'cerca NullPointerException in produzione' SEARCH_PATTERN)"
+
+# ─── utils-logfiles: nome logico e risoluzione glob ───────────────────────────
+section "utils-logfiles (rotazione e disambiguazione)"
+
+source "$ROOT_DIR/lib/utils-logfiles.sh"
+
+# Il "nome logico" e' la chiave per distinguere le rotazioni dello stesso log
+# (da leggere insieme) da log diversi (da disambiguare).
+assert_eq "nome logico: file corrente" "prod1nsse-cc" \
+    "$(logfile_logical_name "prod1nsse-cc.log")"
+assert_eq "nome logico: ruotato con data" "prod1nsse-cc" \
+    "$(logfile_logical_name "/dir/prod1nsse-cc.log-2026-07-26-1785016801.gz")"
+assert_eq "nome logico: ruotato numerico" "prod1nsse-cc" \
+    "$(logfile_logical_name "prod1nsse-cc.log.3.gz")"
+assert_eq "nome logico: log diverso non collide" "prod1nsse-ccJBatch" \
+    "$(logfile_logical_name "prod1nsse-ccJBatch.log")"
+
+# resolve_log_glob su fixture temporanea
+_FIX=$(mktemp -d)
+for _f in prod1nsse-cc.log prod1nsse-ccCanaliz.log prod1nsse-ccJBatch.log; do
+    echo "[main] SYSTEM 2026-08-04T12:00:00,000 INFO riga" > "$_FIX/$_f"
+done
+echo "[main] SYSTEM 2026-08-01T10:00:00,000 INFO storica" | gzip \
+    > "$_FIX/prod1nsse-cc.log-2026-08-01-178500000.gz"
+
+# Match univoco (solo rotazioni dello stesso log): nessuna disambiguazione
+assert_eq "glob univoco sceglie il corrente" "prod1nsse-cc.log" \
+    "$(basename "$(resolve_log_glob "$_FIX" '*-cc.log' 2>/dev/null)")"
+# Match ambiguo (log diversi): sceglie il non-ruotato e avvisa su stderr
+assert_eq "glob ambiguo sceglie un non-ruotato" "prod1nsse-cc.log" \
+    "$(basename "$(resolve_log_glob "$_FIX" '*cc*.log' 2>/dev/null)")"
+_amb_msg=$(resolve_log_glob "$_FIX" '*cc*.log' 2>&1 >/dev/null | head -1)
+if [[ "$_amb_msg" == *"corrisponde a 3 log diversi"* ]]; then
+    printf "  ${GREEN}PASS${RESET}  glob ambiguo avvisa con l'elenco\n"; pass=$(( pass + 1 ))
+else
+    printf "  ${RED}${BOLD}FAIL${RESET}  glob ambiguo: avviso assente o diverso\n"
+    printf "        ottenuto: '%s'\n" "$_amb_msg"; fail=$(( fail + 1 ))
+fi
+
+# Timestamp Guidewire: prima non era riconosciuto (ts=0 per tutti i log Guidewire),
+# quindi il filtro temporale di select_log_files non poteva discriminare.
+_gw_ts=$(_logfiles_read_first_ts "$_FIX/prod1nsse-cc.log")
+assert_eq "ts Guidewire letto (non 0)" "2026-08-04" \
+    "$(date -d "@$_gw_ts" +%Y-%m-%d 2>/dev/null)"
+_gz_ts=$(_logfiles_read_first_ts "$_FIX/prod1nsse-cc.log-2026-08-01-178500000.gz")
+assert_eq "ts Guidewire letto da .gz" "2026-08-01" \
+    "$(date -d "@$_gz_ts" +%Y-%m-%d 2>/dev/null)"
+
+rm -rf "$_FIX"
+
+# ─── suggest_available_logs: cosa c'è davvero sul nodo ────────────────────────
+section "suggest_available_logs (aiuto sui log inesistenti)"
+
+# L'avviso di param-extract mostra gli ALIAS di entities.conf, che possono divergere
+# dal disco ("plugin" in whitelist contro "plugins" reale). Qui si guarda il disco.
+source "$ROOT_DIR/lib/dispatch.sh" 2>/dev/null || true
+
+_FIX2=$(mktemp -d)
+for _f in prod1nsse-cc.log prod1nsse-plugins.log prod1nsse-policysearch.log; do
+    echo "[main] SYSTEM 2026-08-04T12:00:00,000 INFO r" > "$_FIX2/$_f"
+done
+
+_near=$(suggest_available_logs "$_FIX2" "plugin" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+if [[ "$_near" == *"Forse cercavi"* && "$_near" == *"plugins.log"* ]]; then
+    printf "  ${GREEN}PASS${RESET}  nome simile suggerito (plugin → plugins)\n"; pass=$(( pass + 1 ))
+else
+    printf "  ${RED}${BOLD}FAIL${RESET}  nome simile non suggerito: '%s'\n" "$_near"; fail=$(( fail + 1 ))
+fi
+
+_all=$(suggest_available_logs "$_FIX2" "inesistente" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+if [[ "$_all" == *"Log presenti"* && "$_all" == *"policysearch"* ]]; then
+    printf "  ${GREEN}PASS${RESET}  nome assente → elenco dei log reali\n"; pass=$(( pass + 1 ))
+else
+    printf "  ${RED}${BOLD}FAIL${RESET}  elenco non prodotto: '%s'\n" "$_all"; fail=$(( fail + 1 ))
+fi
+
+_empty=$(suggest_available_logs "$_FIX2/inesistente" "x" 2>&1)
+assert_eq "dir inesistente: nessun output" "" "$_empty"
+
+rm -rf "$_FIX2"
+
+# ─── skip_msg: warning visibile ───────────────────────────────────────────────
+section "skip_msg (visibilita' dei warning)"
+
+# Gli [SKIP] erano testo bianco identico all'output normale e si perdevano fra le
+# righe di log: ora sono gialli. \033[33m = giallo, \033[0m = reset.
+_sk=$(skip_msg "messaggio di prova")
+if [[ "$_sk" == $'\033[33m'* && "$_sk" == *$'\033[0m' ]]; then
+    printf "  ${GREEN}PASS${RESET}  [SKIP] colorato in giallo\n"; pass=$(( pass + 1 ))
+else
+    printf "  ${RED}${BOLD}FAIL${RESET}  [SKIP] non colorato: %q\n" "$_sk"; fail=$(( fail + 1 ))
+fi
+assert_eq "[SKIP] conserva il messaggio" "[SKIP] messaggio di prova" \
+    "$(sed 's/\x1b\[[0-9;]*m//g' <<< "$_sk")"
+# printf con il messaggio come ARGOMENTO, non come formato: un % nel nome di un log
+# non deve essere interpretato
+assert_eq "[SKIP] robusto su '%'" "[SKIP] Log 100%_x non trovato" \
+    "$(skip_msg 'Log 100%_x non trovato' | sed 's/\x1b\[[0-9;]*m//g')"
+
+# Nessun `echo "[SKIP]` residuo in dispatch.sh: tutti devono passare da skip_msg,
+# altrimenti sfuggirebbero alla colorazione
+_raw=$(grep -c 'echo "\[SKIP\]' "$ROOT_DIR/lib/dispatch.sh" || true)
+assert_eq "nessun [SKIP] non colorato in dispatch.sh" "0" "$_raw"
 
 # ─── Riepilogo ────────────────────────────────────────────────────────────────
 echo ""

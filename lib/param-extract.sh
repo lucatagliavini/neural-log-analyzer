@@ -90,6 +90,38 @@ for _log_name in $_sorted_log_names; do
     fi
 done
 
+# Fallback: la query nomina un "<token>.log" che non è nella whitelist.
+# APP_LOG_NAMES è una lista di ALIAS noti (scorciatoie che l'utente può usare senza
+# estensione, es. "errori nel cc"), non di log AMMESSI: sul nodo di produzione i log
+# sono 28 e la whitelist ne elenca 16, quindi limitarsi ad essa renderebbe
+# irraggiungibili 12 log reali — fra cui concurrentDataChangeExceptionLog,
+# inbound_mq_messages, controllo_pagamenti. La risoluzione del path la fa `find` in
+# dispatch.sh, che sa già cosa c'è sul disco.
+#
+# Si usa il case ORIGINALE ($1, non $query lowercase): i nomi reali contengono
+# maiuscole (ccJBatch, JF4U_TRACKING, concurrentDataChangeExceptionLog) e finiscono
+# in `find -name`, che è case-sensitive.
+#
+# Esclusi i log di infrastruttura (basename da system.conf): hanno tool dedicati.
+if [[ -z "$NAMED_LOG" ]]; then
+    _fb=$(grep -oE "[A-Za-z0-9_.-]+\.log\b" <<< "$1" | head -1)
+    if [[ -n "$_fb" ]]; then
+        _fb_base="${_fb%.log}"
+        _fb_ok=1
+        # Il valore finisce in `find -name`: whitelist obbligatoria, non difensiva.
+        [[ "$_fb_base" == *".."* ]] && _fb_ok=0
+        [[ ! "$_fb_base" =~ ^[A-Za-z0-9_.-]+$ ]] && _fb_ok=0
+        # Serve almeno un alfanumerico: "..log" passerebbe la whitelist con base "."
+        # e "-.log" con base "-", che non sono nomi di log. Innocui per `find -name`
+        # (che tratta il valore come pattern di nome, non come path) ma privi di senso.
+        [[ ! "$_fb_base" =~ [A-Za-z0-9] ]] && _fb_ok=0
+        for _sysb in "${ACCESS_LOG_BASE:-}" "${SERVER_LOG_BASE:-}" "${GC_LOG_BASE:-}"; do
+            [[ -n "$_sysb" && "${_fb_base,,}" == "${_sysb,,}" ]] && _fb_ok=0
+        done
+        [[ "$_fb_ok" -eq 1 ]] && NAMED_LOG="$_fb_base"
+    fi
+fi
+
 # Tipo di log per tail_log: "server"/"applicativo" → server.log, default → access log
 # SERVER_LOG_FORMAT viene da system.conf — non hardcodiamo il nome della tecnologia.
 LOG_TYPE=""
@@ -127,10 +159,18 @@ fi
 # Il valore finisce in `find -name` (dispatch.sh): è input non fidato, quindi la
 # whitelist di caratteri è obbligatoria, non difensiva. '/' e '..' permetterebbero
 # di uscire dalla directory dei log nonostante -maxdepth 1.
+#
+# Accetta anche le forme dei file ruotati: sul nodo la rotazione produce
+# `prod1nsse-cc.log-2026-07-26-1785016801.gz`, dove ".log" sta IN MEZZO e
+# l'estensione finale è ".gz". Richiedere ".log" finale (come faceva la prima
+# versione) rendeva il glob incapace di raggiungere qualsiasi storico.
+# Nota: la forma canonica resta `"*-cc.log"` — dispatch.sh la espande alle
+# rotazioni via select_log_files, quindi l'utente non deve scrivere il .gz a mano.
 NAMED_LOG_GLOB=""
 _glob_raw=$(echo "$1" | sed -n 's/.*"\([^"]*\)".*/\1/p' | head -1)
 [[ -z "$_glob_raw" ]] && _glob_raw=$(echo "$1" | sed -n "s/.*'\([^']*\)'.*/\1/p" | head -1)
-if [[ -n "$_glob_raw" && "$_glob_raw" == *'*'* && "$_glob_raw" == *.log ]]; then
+if [[ -n "$_glob_raw" && "$_glob_raw" == *'*'* \
+      && "$_glob_raw" =~ \.log([-.][A-Za-z0-9_.*-]*)?$ ]]; then
     if [[ "$_glob_raw" == *".."* ]]; then
         echo "[WARN] param-extract: glob rifiutato (contiene '..'): $_glob_raw" >&2
     elif [[ ! "$_glob_raw" =~ ^[A-Za-z0-9_.*-]+$ ]]; then
@@ -140,31 +180,13 @@ if [[ -n "$_glob_raw" && "$_glob_raw" == *'*'* && "$_glob_raw" == *.log ]]; then
     fi
 fi
 
-# La query nomina un file .log che non siamo riusciti a risolvere?
-# Caso reale: "ultime 10 righe del pc1nssprod.log" → pc1nssprod non è in APP_LOG_NAMES
-# e non è un glob, quindi NAMED_LOG resta vuoto, il classificatore ripiega su tail_log
-# e l'utente riceve l'access log di Undertow senza alcun indizio del cambio di argomento.
-# Qui si registra solo il nome non risolto; chi lo consuma (chatbot.sh) avvisa l'utente.
-#
-# Va DOPO il blocco NAMED_LOG_GLOB: leggerlo prima darebbe un falso avviso su ogni
-# query con glob valido.
-#
-# Esclusi i log non-Guidewire legittimi (access/server/gc, nomi da system.conf): quelli
-# sono gestiti da tail_log via LOG_TYPE e non sono "non risolti".
-UNRESOLVED_LOG=""
-if [[ -z "$NAMED_LOG" && -z "$NAMED_LOG_GLOB" ]]; then
-    _cand=$(grep -oiE "[a-z0-9_.-]+\.log\b" <<< "$query" | head -1)
-    if [[ -n "$_cand" ]]; then
-        _cand_base="${_cand%.log}"
-        _is_known=0
-        for _known in "${ACCESS_LOG_BASE:-}" "${SERVER_LOG_BASE:-}" "${GC_LOG_BASE:-}" \
-                      access server gc; do
-            [[ -z "$_known" ]] && continue
-            [[ "${_cand_base,,}" == "${_known,,}" ]] && { _is_known=1; break; }
-        done
-        [[ "$_is_known" -eq 0 ]] && UNRESOLVED_LOG="$_cand"
-    fi
-fi
+# UNRESOLVED_LOG rimosso (2026-08-04): segnalava un ".log" che non riuscivamo a
+# risolvere, per avvisare l'utente prima che il tool leggesse un altro file. Da quando
+# NAMED_LOG risolve QUALSIASI "<token>.log" (vedi il fallback sopra) restava vuoto in
+# ogni caso reale — e il suo lavoro lo fa meglio suggest_available_logs() in
+# dispatch.sh, che elenca i log effettivamente presenti sul nodo invece degli alias
+# di entities.conf: informazione più accurata, perché la whitelist può divergere dal
+# disco ("plugin" in configurazione contro "plugins" reale).
 
 echo "TIME_FROM='${TIME_FROM}'"
 echo "TIME_TO='${TIME_TO}'"
@@ -179,7 +201,6 @@ echo "LOG_LEVEL='${LOG_LEVEL}'"
 echo "LOG_TYPE='${LOG_TYPE}'"
 echo "SEARCH_PATTERN='${SEARCH_PATTERN}'"
 echo "NAMED_LOG_GLOB='${NAMED_LOG_GLOB}'"
-echo "UNRESOLVED_LOG='${UNRESOLVED_LOG}'"
 # Entità normalizzate — arrivano da normalize-query.sh (unica fonte di verità).
 # param-extract le riemette invariate così il chiamante può fare un unico eval.
 echo "DETECTED_APP='${DETECTED_APP:-}'"
