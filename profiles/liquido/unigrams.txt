@@ -155,11 +155,19 @@ posso.fare|puoi.fare|cosa.fare|cosa.posso :: 2
 analisi\b                        :: 1
 
 # ── Log Guidewire specifici ───────────────────────────────────────────────────
-cc\.log|claimcenter.log     :: 2
-api\.log                    :: 2
-database\.log|db\.log       :: 2
-messaging\.log              :: 2
-performance.integr|perf.int  :: 2
+# Alternanza esplicita sui 15 nomi di entities.conf:APP_LOG_NAMES (unica fonte di
+# verità) + <app>.log (normalize-query.sh normalizza "cc.log"→"<app>.log" in
+# produzione) + ramo glob quotato per l'escape hatch NAMED_LOG_GLOB (Fase 6).
+# Sostituisce i 4 unigram precedenti (cc.log/api.log/database.log/messaging.log),
+# che coprivano solo 9 dei 15 nomi in tutto (insieme a performance/jgroups sotto)
+# — vedi piano Fase 4. performance.integr e jgroups restano separati perché
+# matchano anche senza ".log" letterale (es. "jgroups log", "performance_integrations").
+# I nomi vanno scritti MINUSCOLI: query-to-features.sh:22-23 fa lowercase di
+# NORM_QUERY e `grep -qE` è case-sensitive, quindi "ccJBatch" nel pattern non
+# matcherebbe mai "ccjbatch" nella query normalizzata (verificato 2026-08-04:
+# ccJBatch passava i test solo per via di `batch\b`, ccCanaliz non matchava affatto).
+(cc|api|database|messaging|performance_integr|jgroups|plugin|ruleengine|studio|ccjbatch|cccanaliz|claimnumgen|contactsearch|velocity|arbitrato|<app>)\.log|\*[a-z0-9_-]*\.log :: 2
+performance.integr|perf.int :: 2
 jgroups                     :: 2
 plugin[s.]|ruleengine|studio :: 1
 coda|queue\b|batch\b        :: 1

@@ -13,6 +13,7 @@ import re
 import sys
 import os
 import argparse
+import shlex
 
 
 # ─── Parsing file di configurazione bash ────────────────────────────────────
@@ -36,16 +37,15 @@ def _array_block(text, varname):
 
 
 def parse_simple_array(text, varname):
-    """Estrae VAR=( item... ) come lista ordinata (un item per riga, strip quote)."""
+    """Estrae VAR=( item... ) come lista ordinata.
+    Gestisce sia un item per riga sia array bash su riga singola
+    (es. AVAILABLE_APPS=("ClaimCenter" "ContactManager")) — usa shlex.split
+    per rispettare le virgolette invece di uno strip ingenuo."""
     block = _array_block(text, varname)
     if block is None:
         return []
-    items = []
-    for line in block.splitlines():
-        line = re.sub(r'\s*#.*$', '', line).strip().strip('"\'')
-        if line:
-            items.append(line)
-    return items
+    stripped_lines = [re.sub(r'\s*#.*$', '', line) for line in block.splitlines()]
+    return shlex.split(' '.join(stripped_lines))
 
 
 def parse_assoc_array(text, varname):
@@ -97,10 +97,20 @@ def load_profile(profile_dir):
     cfg['available_apps']  = parse_simple_array(system, 'AVAILABLE_APPS')
 
     entity_app = parse_assoc_array(entities, 'ENTITY_APP')
-    cfg['entity_app_keys'] = sorted(entity_app.keys(), key=len, reverse=True)
+    # Ordine esplicito (lunghezza decrescente, poi alfabetico) — replica
+    # normalize-query.sh:33-34/2.4: "${!ARR[@]}" ha ordine hash bash non garantito,
+    # con break-al-primo-match questo renderebbe la scelta indefinita a parità di
+    # lunghezza (es. le chiavi di ENV_NODE_CODE hanno tutte 4 caratteri).
+    cfg['entity_app_keys'] = sorted(entity_app.keys(), key=lambda k: (-len(k), k))
 
-    cfg['env_node_code']   = parse_assoc_array(system, 'ENV_NODE_CODE')
-    cfg['env_synonyms']    = parse_assoc_array(entities, 'ENV_SYNONYMS')
+    env_node_code = parse_assoc_array(system, 'ENV_NODE_CODE')
+    cfg['env_node_code'] = {k: env_node_code[k] for k in sorted(env_node_code, key=lambda k: (-len(k), k))}
+    env_synonyms = parse_assoc_array(entities, 'ENV_SYNONYMS')
+    cfg['env_synonyms'] = {k: env_synonyms[k] for k in sorted(env_synonyms, key=lambda k: (-len(k), k))}
+
+    cfg['app_canonical']       = parse_assoc_array(entities, 'APP_CANONICAL')
+    cfg['app_short_aliases']   = parse_assoc_array(entities, 'APP_SHORT_ALIASES')
+    cfg['app_alias_regex']     = parse_assoc_array(entities, 'APP_ALIAS_REGEX')
 
     raw_node_patterns      = parse_simple_array(entities, 'NODE_PATTERNS')
     cfg['node_patterns']   = [posix_to_python(p) for p in raw_node_patterns]
@@ -163,9 +173,13 @@ def load_bigrams(path):
 # ─── Normalizzazione entità (equivalente normalize-query.sh) ────────────────
 
 def _word_sub(norm, literal, replacement):
-    """Sostituisce `literal` rispettando confini di parola (non-lettera)."""
-    pat = r'(?<![a-zA-Z])' + re.escape(literal) + r'(?![a-zA-Z])'
-    return re.sub(pat, replacement, norm, flags=re.IGNORECASE)
+    """Sostituisce `literal` rispettando confini di parola (non-lettera).
+    Usa gruppi di ritorno consumanti come sed -E "s/(^|[^a-zA-Z])X([^a-zA-Z]|$)/\\1<Y>\\2/g"
+    (normalize-query.sh:39,49,59), non un lookaround non-consumante: su occorrenze
+    adiacenti ("jboss jboss") sed consuma il separatore e salta la seconda occorrenza,
+    un lookaround la sostituirebbe due volte."""
+    pat = r'(^|[^a-zA-Z])' + re.escape(literal) + r'([^a-zA-Z]|$)'
+    return re.sub(pat, r'\1' + replacement + r'\2', norm, flags=re.IGNORECASE)
 
 
 def normalize_query(query, cfg):
@@ -204,6 +218,8 @@ def normalize_query(query, cfg):
             node_code = hostname[2:4]
             nums      = re.findall(r'[0-9]+$', hostname)
             node_num  = nums[0].lstrip('0') if nums else '0'
+            if not node_num:
+                node_num = '0'  # "00" -> lstrip svuota la stringa; fallback come normalize-query.sh:77-78
             if not detected_env:
                 inv = {v: k for k, v in cfg['env_node_code'].items()}
                 detected_env = inv.get(node_code, '')
@@ -221,16 +237,24 @@ def normalize_query(query, cfg):
                 norm = re.sub(pat, '<NODE>', norm, flags=re.IGNORECASE)
                 break
 
-    # 4. Abbreviazioni cc/cm (solo dopo sostituzione ENV/NODE)
+    # 4. Abbreviazioni APP_SHORT_ALIASES (solo dopo sostituzione ENV/NODE, come in bash).
+    # Nota: qui si usa \b (grep -qE "\b...\b"), non il costrutto (?<![a-z]) delle
+    # sezioni 1-3 — replica intenzionale della semantica diversa di normalize-query.sh:121.
     if not detected_app:
-        if re.search(r'\bcc\b', norm):
-            if 'ClaimCenter' in cfg['available_apps']:
-                detected_app = 'claimcenter'
-                norm = re.sub(r'\bcc\b', '<APP>', norm)
-        elif re.search(r'\bcm\b|contact.?manager', norm, re.IGNORECASE):
-            if 'ContactManager' in cfg['available_apps']:
-                detected_app = 'contactmanager'
-                norm = re.sub(r'\bcm\b|contact.?manager', '<APP>', norm, flags=re.IGNORECASE)
+        available_lower = {a.lower() for a in cfg['available_apps']}
+        for abbr, target in cfg['app_short_aliases'].items():
+            canonical = cfg['app_canonical'].get(target, '').lower()
+            if canonical not in available_lower and target not in available_lower:
+                continue
+            if re.search(r'\b' + re.escape(abbr) + r'\b', norm):
+                detected_app = target
+                norm = re.sub(r'\b' + re.escape(abbr) + r'\b', '<APP>', norm)
+                break
+            rx = cfg['app_alias_regex'].get(target, '')
+            if rx and re.search(rx, norm):
+                detected_app = target
+                norm = re.sub(rx, '<APP>', norm)
+                break
 
     return norm
 
@@ -238,6 +262,11 @@ def normalize_query(query, cfg):
 # ─── Vettorizzazione (equivalente query-to-features.sh) ─────────────────────
 
 def vectorize(query, unigrams, bigrams):
+    # Replica query-to-features.sh:22-23: lowercase applicato di nuovo qui,
+    # non solo in normalize_query() — i placeholder <APP>/<ENV>/<NODE> arrivano
+    # in maiuscolo da normalize_query() ma i pattern del vocabolario li
+    # referenziano minuscoli (<app>.log).
+    query = query.lower()
     features = []
     for pat, weight in unigrams:
         try:

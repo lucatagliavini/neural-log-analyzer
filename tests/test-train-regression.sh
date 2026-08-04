@@ -1,13 +1,23 @@
 #!/bin/bash
 #
 # test-train-regression.sh — verifica che lib/train.py produca sempre gli stessi
-# pesi a parita' di input. train.py e' deterministico (nessun random.shuffle,
-# full-batch gradient descent), quindi stesso seed + stesso dataset + stessi
-# iperparametri devono dare pesi bit-identici, run dopo run.
+# pesi a parita' di input. train.py e' algoritmicamente deterministico (nessun
+# random.shuffle, full-batch gradient descent), quindi stesso seed + stesso dataset
+# + stessi iperparametri devono dare pesi bit-identici, run dopo run.
 #
 # Se questo test fallisce dopo una modifica a train.py, la modifica ha alterato
 # il comportamento di default (non solo aggiunto una capacita' opt-in) — va
 # capito se e' voluto prima di procedere.
+#
+# ATTENZIONE — thread e riproducibilita' bit-per-bit (verificato 2026-08-04).
+# PyTorch parallelizza le op su CPU: con piu' thread l'ordine di riduzione in
+# floating point non e' garantito, quindi gli md5 dei pesi VARIANO tra run pur
+# essendo l'algoritmo deterministico. Misurato su 8 core: 3 run multi-thread ->
+# 2 checksum distinti; 3 run con OMP_NUM_THREADS=1 -> bit-identici.
+# Per questo il test forza il single-thread: senza, fallisce a intermittenza e
+# il fallimento sembra una regressione di train.py quando non lo e'.
+# Nota: il training di produzione (train.sh) NON forza il single-thread — la',
+# la velocita' conta piu' della riproducibilita' bit-per-bit.
 #
 # Uso: bash tests/test-train-regression.sh
 #
@@ -28,16 +38,32 @@ trap 'rm -rf "$WORK"' EXIT
 
 RED="\033[31m"; GREEN="\033[32m"; RESET="\033[0m"
 
-# Checksum di riferimento — presi da un run pre-modifica il 2026-08-03, quando
-# --loss/--val-split sono stati aggiunti (default = comportamento identico,
-# verificato a mano allora; qui lo si fissa una volta per tutte).
-EXPECTED_L1="7b526733610bdfa8da152fba674e4364"
-EXPECTED_L2="ed37e5cdeeb9bf52a4438b83b6ba7cfe"
+# Checksum di riferimento — rigenerati il 2026-08-04 dopo il fix del train/serve skew
+# sui named log (BACKLOG NLOG-1/5): il vocabolario è passato da 117 a 114 feature e il
+# dataset è stato ricostruito, quindi i valori precedenti non sono più raggiungibili.
+# Prodotti e verificati con OMP_NUM_THREADS=1 (3 run bit-identici) — vedi la nota sui
+# thread in testa al file: i valori multi-thread NON sono stabili.
+#
+# Nota: questi checksum dipendono da (topologia, dataset, seed, iperparametri, n. thread).
+# Qualsiasi modifica al vocabolario o a queries_labeled.txt li invalida per costruzione —
+# in quel caso rigenerarli, non "aggiustarli", e verificare che la riproducibilità regga
+# su almeno 3 run consecutivi.
+EXPECTED_L1="16aeeea5d2b298fab2503173755e6906"
+EXPECTED_L2="3e895f05501f0e6108e260a267abdc16"
 
-echo "[INFO] Genero pesi freschi (seed 7, topologia 117,48,15)..."
-"$NNET_INIT" "$WORK/model" 117,48,15 --activation sigmoid --method xavier --seed 7 --force > /dev/null
+# La topologia deve combaciare con NUM_FEATURES del profilo: train.py scarta le righe
+# con un numero di colonne diverso da num_features+num_outputs, e con dataset e topologia
+# disallineati il dataset si svuota (errore esplicito "Dataset vuoto", ma il test
+# morirebbe per set -e prima del confronto checksum — vedi sessione 2026-08-04).
+TOPOLOGY="114,48,15"
 
-echo "[INFO] Training deterministico: 200 epoche, patience 0 (no early stop)..."
+echo "[INFO] Genero pesi freschi (seed 7, topologia $TOPOLOGY)..."
+"$NNET_INIT" "$WORK/model" "$TOPOLOGY" --activation sigmoid --method xavier --seed 7 --force > /dev/null
+
+echo "[INFO] Training deterministico: 200 epoche, patience 0 (no early stop), 1 thread..."
+# OMP/MKL a 1 thread: vedi nota sulla riproducibilita' in testa al file. Senza questo
+# il test e' flaky (checksum diversi a run diversi sulla stessa macchina).
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
 "$VENV_PYTHON" "$TRAIN_PY" "$DATASET" "$WORK/model" \
     --epochs 200 --lr 0.01 --optimizer adam --min-delta 0.00005 --patience 0 \
     > "$WORK/train.log" 2>&1

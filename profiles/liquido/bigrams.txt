@@ -19,10 +19,12 @@ rig[ah]|tail\b               :: ultim|recent|recenti
 
 # ── log Guidewire + errore/problemi → grep_named_log (non tail_named_log) ────
 # peso 2 per battere unigram errore (peso 2)
-cc\.log|api\.log|database\.log|messaging\.log|jgroups|performance.integr :: errore|errori|warn|filtr|cerca|eccezioni|exception|problem|anomal|incident|cosa.non.va|non.va\b :: 2
+# Alternanza sui 15 nomi APP_LOG_NAMES (+ <app>.log + glob) — stesso pattern
+# dell'unigram in unigrams.txt, vedi piano Fase 4.
+(cc|api|database|messaging|performance_integr|jgroups|plugin|ruleengine|studio|ccjbatch|cccanaliz|claimnumgen|contactsearch|velocity|arbitrato|<app>)\.log|\*[a-z0-9_-]*\.log :: errore|errori|warn|filtr|cerca|eccezioni|exception|problem|anomal|incident|cosa.non.va|non.va\b :: 2
 
 # ── log Guidewire + mostra/riga → tail_named_log (non grep_named_log) ─────────
-cc\.log|api\.log|database\.log|messaging\.log|jgroups|performance.integr :: mostr|visualizz|dammi|rig[ah]|ultim|cosa.c.*nel|tail\b
+(cc|api|database|messaging|performance_integr|jgroups|plugin|ruleengine|studio|ccjbatch|cccanaliz|claimnumgen|contactsearch|velocity|arbitrato|<app>)\.log|\*[a-z0-9_-]*\.log :: mostr|visualizz|dammi|rig[ah]|ultim|cosa.c.*nel|tail\b
 
 # ── GC + lentezza/latenza → correlate_gc_slow (non gc_stats o service_times) ─
 # peso 2 per dominare su gc_stats e service_times

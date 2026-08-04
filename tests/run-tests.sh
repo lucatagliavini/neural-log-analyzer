@@ -10,6 +10,13 @@
 # --env <env>       ambiente target per level2 (es: prod, coll)
 # --node <node>     nodo target per level2 (es: 5, 12)
 # --profile <dir>   profilo da usare (default: profiles/liquido)
+# --parity          esegue anche il test di parità bash/Python (~4 min, 1008 query)
+#
+# Test standalone non inclusi qui (eseguirli separatamente):
+#   tests/test-normalize-query.sh     unit test della normalizzazione entità
+#   tests/test-normalize-parity.sh    parità bash/Python (vedi --parity)
+#   tests/test-train-regression.sh    determinismo dei pesi di train.py
+#   tests/smoke-tools.sh              smoke test sul server, richiede log reali
 #
 
 set -euo pipefail
@@ -19,13 +26,14 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LIB_DIR="$ROOT_DIR/lib"
 
 PROFILE_DIR="$ROOT_DIR/profiles/liquido"
-RUN_L1=1; RUN_L2=0
+RUN_L1=1; RUN_L2=0; RUN_PARITY=0
 L2_ENV=""; L2_NODE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --level1)  RUN_L1=1; shift ;;
         --level2)  RUN_L2=1; shift ;;
+        --parity)  RUN_PARITY=1; shift ;;
         --env)     L2_ENV="$2";  shift 2 ;;
         --node)    L2_NODE="$2"; shift 2 ;;
         --profile) PROFILE_DIR="$(cd "$2" && pwd)"; shift 2 ;;
@@ -128,6 +136,25 @@ INTENT_TESTS=(
     "!tail_named_log|problemi sul cc.log del nodo 12"
     "!tail_named_log|anomalie nel api.log"
 
+    # named log senza feature dedicata prima di NLOG-5 — coperti dall'alternanza
+    # sui 15 nomi di APP_LOG_NAMES. arbitrato e ccCanaliz hanno ZERO esempi nel
+    # dataset: se passano, la feature generalizza a nomi mai visti in training.
+    "tail_named_log|ultime righe del ccJBatch.log"
+    "grep_named_log|errori nel arbitrato.log"
+    "tail_named_log|ultime righe del claimnumgen.log"
+    "tail_named_log|mostrami il ccCanaliz.log"
+    # Nomi con maiuscole: normalize-query.sh fa lowercase e grep -qE è
+    # case-sensitive, quindi i pattern del vocabolario devono essere minuscoli.
+    # Prima del fix (2026-08-04) queste due instradavano su tail_log: ccJBatch
+    # passava solo grazie a `batch\b`, ccCanaliz non aveva rete di riserva.
+    "tail_named_log|ultime 2 righe del ccCanaliz.log"
+    "grep_named_log|errori nel ccCanaliz.log"
+
+    # escape hatch glob (NLOG-6) — il ramo \*[a-z0-9_-]*\.log del vocabolario è
+    # ciò che rende queste query classificabili; NAMED_LOG_GLOB da solo non basta.
+    "tail_named_log|ultime 10 righe di \"*c1nssprod*.log\""
+    "grep_named_log|errori nel \"*c1nssprod*.log\""
+
     # show_help — C14
     "show_help|aiuto"
     "show_help|cosa puoi fare"
@@ -149,8 +176,19 @@ run_intent_tests() {
             expected="${expected#!}"
         fi
 
-        top_result=$(PROFILE_DIR="$PROFILE_DIR" bash "$LIB_DIR/infer.sh" "$query" 2>/dev/null | \
-            awk '{ if ($2+0 > max) { max=$2+0; line=$0 } } END { print line }')
+        # Replica il percorso reale di chatbot.sh:179-180: normalizza la query ed
+        # esporta NORM_QUERY prima di invocare infer.sh. Senza questo il test misura
+        # un percorso che in produzione non esiste — è il difetto che ha reso
+        # invisibile il train/serve skew sui named log (BACKLOG NLOG-4).
+        # Subshell per query: le DETECTED_*/NORM_QUERY di un test non devono
+        # sopravvivere al successivo (chatbot.sh le eredita di proposito, i test no).
+        top_result=$(
+            export PROFILE_DIR
+            source <("$LIB_DIR/normalize-query.sh" "$query")
+            export NORM_QUERY
+            bash "$LIB_DIR/infer.sh" "$query" 2>/dev/null | \
+                awk '{ if ($2+0 > max) { max=$2+0; line=$0 } } END { print line }'
+        )
         top_tool="${top_result%% *}"
         top_prob="${top_result##* }"
         top_pct=$(awk -v p="${top_prob:-0}" 'BEGIN { printf "%.0f", p * 100 }')
@@ -243,6 +281,19 @@ printf "${BOLD}Neural Log Analyzer — Test Suite${RESET}  profilo: $(basename "
 
 [[ "$RUN_L1" -eq 1 ]] && run_intent_tests
 [[ "$RUN_L2" -eq 1 ]] && run_output_tests
+
+if [[ "$RUN_PARITY" -eq 1 ]]; then
+    print_header "PARITÀ — normalize-query.sh (bash) vs build_dataset.py (Python)"
+    # Opt-in: ~4 min (2 fork bash per query × 1008). Delega al test standalone,
+    # che è l'unica fonte di verità sul confronto — qui si aggrega solo l'esito.
+    if bash "$SCRIPT_DIR/test-normalize-parity.sh" --profile "$PROFILE_DIR"; then
+        pass=$(( pass + 1 ))
+        printf "  ${GREEN}PASS${RESET}  parità bash/Python su NORM_QUERY e vettori feature\n"
+    else
+        fail=$(( fail + 1 ))
+        printf "  ${RED}${BOLD}FAIL${RESET}  divergenza bash/Python — vedi output sopra\n"
+    fi
+fi
 
 echo ""
 printf "────────────────────────────────────────────────────────────────────\n"

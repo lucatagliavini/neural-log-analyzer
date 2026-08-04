@@ -43,7 +43,14 @@ done
 
 # ─── 2. Normalizzazione ENV ───────────────────────────────────────────────────
 # 2a. Match diretto sulle chiavi di ENV_NODE_CODE (prod, coll, cert, ...)
-for _env_name in "${!ENV_NODE_CODE[@]}"; do
+# Ordine esplicito (lunghezza decrescente, poi alfabetico) — "${!ARR[@]}" ha ordine
+# hash bash non garantito tra versioni; con break-al-primo-match questo rendeva
+# normalize-query.sh non deterministico rispetto alla propria config (tutte le
+# chiavi di ENV_NODE_CODE hanno la stessa lunghezza, quindi senza tie-break
+# alfabetico la scelta tra "test"/"prod"/... resterebbe indefinita).
+_sorted_envs=$(for k in "${!ENV_NODE_CODE[@]}"; do printf '%d %s\n' "${#k}" "$k"; done \
+               | sort -k1,1rn -k2,2 | awk '{print $2}')
+for _env_name in $_sorted_envs; do
     if echo "$norm_query" | grep -qE "(^|[^a-z])${_env_name}([^a-z]|$)"; then
         DETECTED_ENV="$_env_name"
         norm_query=$(echo "$norm_query" | sed -E "s/(^|[^a-zA-Z])${_env_name}([^a-zA-Z]|$)/\1<ENV>\2/g")
@@ -52,8 +59,11 @@ for _env_name in "${!ENV_NODE_CODE[@]}"; do
 done
 
 # 2b. Sinonimi italiani (da ENV_SYNONYMS in entities.conf) se non ancora trovato
+# Stesso ordine deterministico della 2a.
 if [[ -z "$DETECTED_ENV" ]] && declare -p ENV_SYNONYMS &>/dev/null; then
-    for _syn in "${!ENV_SYNONYMS[@]}"; do
+    _sorted_syns=$(for k in "${!ENV_SYNONYMS[@]}"; do printf '%d %s\n' "${#k}" "$k"; done \
+                   | sort -k1,1rn -k2,2 | awk '{print $2}')
+    for _syn in $_sorted_syns; do
         if echo "$norm_query" | grep -qiE "(^|[^a-z])${_syn}([^a-z]|$)"; then
             DETECTED_ENV="${ENV_SYNONYMS[$_syn]}"
             norm_query=$(echo "$norm_query" | sed -E "s/(^|[^a-zA-Z])${_syn}([^a-zA-Z]|$)/\1<ENV>\2/g")
