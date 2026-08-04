@@ -3,3 +3,5 @@ __pycache__/
 profiles/*/models/*.backup/
 profiles/*/models/*.backup2/
 tmp/
+# Contiene host e path dell'ambiente di produzione: resta locale per scelta.
+deploy.sh

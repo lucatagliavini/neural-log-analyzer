@@ -36,8 +36,8 @@ dispatcha il tool di analisi AWK corretto.
 `../neural-bash` (path relativo — le due cartelle devono restare sorelle). Gli script
 `train.sh`, `setup.sh`, `lib/infer.sh`, `lib/infer-dry.sh` invocano
 `../neural-bash/nnet-run.sh` / `../neural-bash/nnet-init.sh`. Separato da neural-bash il
-2026-08-03 (storia preservata via `git subtree split`); nessun remote GitHub configurato
-per ora, solo locale.
+2026-08-03 (storia preservata via `git subtree split`); remote `origin` su GitHub
+(`lucatagliavini/neural-log-analyzer`).
 
 ## Common Commands
 
