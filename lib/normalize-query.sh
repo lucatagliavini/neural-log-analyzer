@@ -114,6 +114,70 @@ if [[ -z "$DETECTED_NODE" ]]; then
     done
 fi
 
+# ─── 3.5 Normalizzazione LOGFILE ──────────────────────────────────────────────
+# Sostituisce i nomi di file di log con <LOGFILE>, così il classificatore impara
+# la *forma* "c'è un nome di logfile qui" e non l'elenco dei nomi. Un nome nel
+# vocabolario legherebbe il modello a un singolo deployment: es. jgroups esiste
+# solo per app con cache distribuita.
+#
+# Posizione vincolata su entrambi i lati:
+#  - DOPO la sezione 1 (APP longest-match): un nome app completo vince sempre,
+#    così "claimcenter.log" resta gestito come app.
+#  - PRIMA della sezione 4: `grep -qE '\bcc\b'` matcha dentro "cc.log" (il "." è
+#    word boundary), quindi se la sezione 4 agisse prima otterremmo "<APP>.log" —
+#    il pattern che questa sezione elimina.
+#
+# I log di infrastruttura (ACCESS_LOG_BASE/SERVER_LOG_BASE/GC_LOG_BASE da
+# system.conf) NON vengono toccati: hanno tool dedicati (filter_errors, tail_log
+# via LOG_TYPE) e generalizzarli li farebbe collassare sulla classe named-log.
+
+# La sostituzione è per FORMA, non per whitelist: qualsiasi <token>.log diventa
+# <LOGFILE>. Una whitelist qui limiterebbe la generalizzazione ai soli nomi noti —
+# sul nodo di produzione ci sono 28 log distinti e APP_LOG_NAMES ne elenca 16,
+# quindi i restanti resterebbero senza segnale per il classificatore.
+# Si esclude solo ciò che ha già un tool dedicato (vedi sotto).
+
+# a) Glob quotato: "*-cc.log" / '*-cc.log' → <LOGFILE> (virgolette incluse).
+#    Ha priorità: un pattern è già una scelta esplicita dell'utente.
+#    Non imposta DETECTED_APP — un glob arbitrario non identifica un'applicazione.
+_logfile_done=0
+if echo "$norm_query" | grep -qE '"[^"]*\*[^"]*\.log"'; then
+    norm_query=$(echo "$norm_query" | sed -E 's/"[^"]*\*[^"]*\.log"/<LOGFILE>/g')
+    _logfile_done=1
+elif echo "$norm_query" | grep -qE "'[^']*\*[^']*\.log'"; then
+    norm_query=$(echo "$norm_query" | sed -E "s/'[^']*\*[^']*\.log'/<LOGFILE>/g")
+    _logfile_done=1
+fi
+
+# b) Qualsiasi nome di logfile: "<token>.log" → <LOGFILE>.
+#    Sostituisce nome+estensione insieme, così non resta un token "cc" isolato che
+#    la sezione 4 trasformerebbe in <APP>.
+#    Esclusi i log di infrastruttura (basename da system.conf): hanno tool dedicati
+#    (filter_errors, tail_log via LOG_TYPE) e generalizzarli li farebbe collassare
+#    sulla classe named-log. L'esclusione è un semplice confronto in bash — in ERE
+#    non sarebbe esprimibile, perché `grep -E` non ha il lookahead negativo.
+if [[ "$_logfile_done" -eq 0 ]]; then
+    _cand_log=$(echo "$norm_query" | grep -oiE "[a-z0-9_.-]+\.log" | head -1)
+    if [[ -n "$_cand_log" ]]; then
+        _cand_base="${_cand_log%.log}"
+        _is_sys=0
+        for _sysbase in "${ACCESS_LOG_BASE:-}" "${SERVER_LOG_BASE:-}" "${GC_LOG_BASE:-}"; do
+            [[ -n "$_sysbase" && "${_cand_base,,}" == "${_sysbase,,}" ]] && { _is_sys=1; break; }
+        done
+        if [[ "$_is_sys" -eq 0 ]]; then
+            # c) Preserva DETECTED_APP quando il nome del log è anche uno short-alias
+            #    di app (cc→claimcenter, cm→contactmanager): serve a resolve-logs.sh
+            #    per costruire la directory Guidewire giusta. Data-driven.
+            if [[ -z "$DETECTED_APP" ]] && declare -p APP_SHORT_ALIASES &>/dev/null; then
+                _alias_target="${APP_SHORT_ALIASES[${_cand_base,,}]:-}"
+                [[ -n "$_alias_target" ]] && DETECTED_APP="$_alias_target"
+            fi
+            norm_query=$(echo "$norm_query" \
+                | sed -E "s/(^|[^a-zA-Z0-9_.-])${_cand_log}([^a-zA-Z0-9]|$)/\1<LOGFILE>\2/gI")
+        fi
+    fi
+fi
+
 # ─── 4. Normalizzazione APP: abbreviazioni brevi da APP_SHORT_ALIASES ────────
 # Dopo ENV/NODE per evitare collisioni con codici ambiente (es. "ce" = cert).
 # APP_SHORT_ALIASES e APP_ALIAS_REGEX sono definiti in entities.conf.

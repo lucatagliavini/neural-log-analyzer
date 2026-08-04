@@ -498,41 +498,41 @@ tail_named_log	cosa dice l'api.log
 grep_named_log	errori nell'api.log
 tail_named_log	controlla l'api.log
 tail_named_log	mostrami il database.log
-tail_named_log	ultime righe del database log
+tail_named_log	ultime righe del database.log
 tail_named_log	cosa c'è nel database.log
 grep_named_log	errori nel database.log
 tail_named_log	mostrami il messaging.log
 tail_named_log	ultime righe del messaging.log
 tail_named_log	messaggi in coda non processati nel messaging.log
-tail_named_log	cosa dice il messaging log
+tail_named_log	cosa dice il messaging.log
 grep_named_log	errori nel messaging.log
-tail_named_log	mostrami il performance_integrations log
-tail_named_log	ultime righe del performance_integr log
-tail_named_log	performance delle integrazioni nel log
+tail_named_log	mostrami il performance_integrations.log
+tail_named_log	ultime righe del performance_integr.log
+tail_named_log	performance delle integrazioni nel performance_integrations.log
 tail_named_log	latenze nel performance_integrations.log
 tail_named_log	mostrami il jgroups.log
 tail_named_log	ultime righe del jgroups.log
-grep_named_log	errori di cluster nel jgroups log
+grep_named_log	errori di cluster nel jgroups.log
 tail_named_log	cosa dice il jgroups.log
-tail_named_log	mostrami il plugin log
-grep_named_log	errori nei plugin nel log
-tail_named_log	ultime righe del ruleengine log
-tail_named_log	regole di business nel ruleengine log
+tail_named_log	mostrami il plugin.log
+grep_named_log	errori nel plugins.log
+tail_named_log	ultime righe del ruleengine.log
+tail_named_log	regole di business nel ruleengine.log
 tail_named_log	cosa c'è nel ruleengine.log
-tail_named_log	mostrami il ccJBatch log
-grep_named_log	errori nel batch log
-tail_named_log	ultime righe del ccJBatch
+tail_named_log	mostrami il ccJBatch.log
+grep_named_log	errori nel ccJBatch.log
+tail_named_log	ultime righe del ccJBatch.log
 tail_named_log	mostrami il studio.log
 tail_named_log	cosa c'è nel velocity.log
 tail_named_log	ultime righe del contactsearch.log
-grep_named_log	errori nel claimnumgen log
-tail_named_log	performance delle integrazioni nel log
-tail_named_log	controlla il log delle performance delle integrazioni
-tail_named_log	latenze delle integrazioni nel performance log
+grep_named_log	errori nel claimnumgen.log
+tail_named_log	performance delle integrazioni nel performance_integrations.log
+tail_named_log	controlla il performance_integrations.log
+tail_named_log	latenze nel performance_integrations.log
 
 # ─── generati automaticamente 2026-07-27 ──────────────────────────────
 grep_named_log	errori nel cc.log
-grep_named_log	mostrami gli errori del cc
+grep_named_log	mostrami gli errori del cc.log
 grep_named_log	cerca errori nel cc.log
 grep_named_log	exception nel cc.log
 grep_named_log	eccezioni nel cc.log
@@ -541,7 +541,7 @@ grep_named_log	warn nel cc.log
 grep_named_log	errori nel cc.log nell'ultima ora
 grep_named_log	errori nel cc.log di stamattina
 grep_named_log	errori nel api.log
-grep_named_log	mostrami gli errori del api
+grep_named_log	mostrami gli errori del api.log
 grep_named_log	cerca errori nel api.log
 grep_named_log	exception nel api.log
 grep_named_log	eccezioni nel api.log
@@ -549,7 +549,7 @@ grep_named_log	warning nel api.log
 grep_named_log	warn nel api.log
 grep_named_log	errori nel api.log nell'ultima ora
 grep_named_log	errori nel api.log di stamattina
-grep_named_log	mostrami gli errori del database
+grep_named_log	mostrami gli errori del database.log
 grep_named_log	cerca errori nel database.log
 grep_named_log	exception nel database.log
 grep_named_log	eccezioni nel database.log
@@ -557,7 +557,7 @@ grep_named_log	warning nel database.log
 grep_named_log	warn nel database.log
 grep_named_log	errori nel database.log nell'ultima ora
 grep_named_log	errori nel database.log di stamattina
-grep_named_log	mostrami gli errori del messaging
+grep_named_log	mostrami gli errori del messaging.log
 grep_named_log	cerca errori nel messaging.log
 grep_named_log	exception nel messaging.log
 grep_named_log	eccezioni nel messaging.log
@@ -566,7 +566,7 @@ grep_named_log	warn nel messaging.log
 grep_named_log	errori nel messaging.log nell'ultima ora
 grep_named_log	errori nel messaging.log di stamattina
 grep_named_log	errori nel performance_integr.log
-grep_named_log	mostrami gli errori del performance_integr
+grep_named_log	mostrami gli errori del performance_integr.log
 grep_named_log	cerca errori nel performance_integr.log
 grep_named_log	exception nel performance_integr.log
 grep_named_log	eccezioni nel performance_integr.log
@@ -814,7 +814,7 @@ grep_named_log	errori nel performance_integr.log di stamattina
 grep_named_log	filtra gli errori nel performance_integr.log
 grep_named_log	cerca exception nel performance_integr.log
 grep_named_log	errori nel jgroups.log
-grep_named_log	mostrami gli errori del jgroups
+grep_named_log	mostrami gli errori del jgroups.log
 grep_named_log	cerca errori nel jgroups.log
 grep_named_log	exception nel jgroups.log
 grep_named_log	eccezioni nel jgroups.log
@@ -943,6 +943,12 @@ tail_named_log	mostrami le ultime righe del cc.log
 tail_named_log	dammi la coda del cc.log
 tail_named_log	fammi vedere la fine del api.log
 tail_named_log	mostrami le ultime 100 righe del database.log
+tail_named_log	ultime 20 righe di "*-cc.log"
+tail_named_log	mostrami il "*ccCanaliz*.log"
+tail_named_log	ultime righe di '*-api.log'
+grep_named_log	errori nel "*-cc.log"
+grep_named_log	problemi nel "*jgroups*.log"
+grep_named_log	warning nel '*-database.log'
 
 # ── Fix vocab 2026-07-28: slow_requests "alto/sopra", filter_ip "chi", distribute_status "quali endpoint" ──
 

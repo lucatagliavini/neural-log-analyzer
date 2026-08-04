@@ -150,10 +150,26 @@ INTENT_TESTS=(
     "tail_named_log|ultime 2 righe del ccCanaliz.log"
     "grep_named_log|errori nel ccCanaliz.log"
 
-    # escape hatch glob (NLOG-6) — il ramo \*[a-z0-9_-]*\.log del vocabolario è
-    # ciò che rende queste query classificabili; NAMED_LOG_GLOB da solo non basta.
+    # escape hatch glob (NLOG-6) — il placeholder <LOGFILE> prodotto da
+    # normalize-query.sh è ciò che rende queste query classificabili.
     "tail_named_log|ultime 10 righe di \"*c1nssprod*.log\""
     "grep_named_log|errori nel \"*c1nssprod*.log\""
+    "tail_named_log|ultime righe di \"*-cc.log\""
+    "grep_named_log|warning nel '*-database.log'"
+
+    # Generalizzazione (BACKLOG LOGF): log NON presenti in APP_LOG_NAMES e mai visti
+    # in training. Se questi passano, il modello ha imparato la *forma* "<nome>.log"
+    # e non l'elenco dei nomi — è l'obiettivo dell'intero refactor.
+    "tail_named_log|ultime righe del policysearch.log"
+    "tail_named_log|ultime righe del concurrentDataChangeExceptionLog.log"
+    "grep_named_log|errori nel inbound_mq_messages.log"
+    "grep_named_log|errori nel controllo_pagamenti.log"
+    "tail_named_log|ultime 10 righe del pc1nssprod.log"
+
+    # I log di infrastruttura NON devono finire sui tool named-log: hanno i propri
+    # (filter_errors / tail_log via LOG_TYPE).
+    "!tail_named_log|righe di errore nel server.log"
+    "!grep_named_log|ultime righe del gc.log"
 
     # show_help — C14
     "show_help|aiuto"

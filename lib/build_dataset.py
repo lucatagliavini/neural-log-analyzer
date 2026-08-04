@@ -118,6 +118,18 @@ def load_profile(profile_dir):
     cfg['node_host_regex'] = parse_scalar(system, 'NODE_HOST_REGEX') \
                              or r'lx[a-z]{2}[a-z]+[a-z]{2}[0-9]+'
 
+    # Basename dei log di infrastruttura: esclusi da <LOGFILE> perché hanno tool
+    # dedicati (filter_errors, tail_log via LOG_TYPE). Sono l'unica cosa che serve
+    # sapere per la sezione 3.5: i nomi dei log applicativi NON servono, la
+    # sostituzione avviene per forma ("<token>.log").
+    cfg['system_log_bases'] = [
+        b.lower() for b in (
+            parse_scalar(system, 'ACCESS_LOG_BASE'),
+            parse_scalar(system, 'SERVER_LOG_BASE'),
+            parse_scalar(system, 'GC_LOG_BASE'),
+        ) if b
+    ]
+
     return cfg
 
 
@@ -236,6 +248,41 @@ def normalize_query(query, cfg):
                 detected_node = nums[0] if nums else ''
                 norm = re.sub(pat, '<NODE>', norm, flags=re.IGNORECASE)
                 break
+
+    # 3.5 LOGFILE — replica normalize-query.sh sezione 3.5.
+    # Sta fra NODE e APP_SHORT_ALIASES: dopo la sezione 1 perché un nome app completo
+    # vince sempre, prima della 4 perché `\bcc\b` matcha dentro "cc.log" (il "." è
+    # word boundary) e produrrebbe "<APP>.log".
+    logfile_done = False
+
+    # a) Glob quotato: ha priorità, è una scelta esplicita dell'utente.
+    #    Non imposta detected_app — un glob non identifica un'applicazione.
+    if re.search(r'"[^"]*\*[^"]*\.log"', norm):
+        norm = re.sub(r'"[^"]*\*[^"]*\.log"', '<LOGFILE>', norm)
+        logfile_done = True
+    elif re.search(r"'[^']*\*[^']*\.log'", norm):
+        norm = re.sub(r"'[^']*\*[^']*\.log'", '<LOGFILE>', norm)
+        logfile_done = True
+
+    # b) Qualsiasi "<token>.log" → <LOGFILE>, non solo i nomi noti: sul nodo di
+    #    produzione ci sono 28 log distinti e APP_LOG_NAMES ne elenca 16, quindi una
+    #    whitelist lascerebbe i restanti senza segnale. Esclusi solo i log di
+    #    infrastruttura, che hanno tool dedicati.
+    if not logfile_done:
+        m_log = re.search(r'[a-zA-Z0-9_.-]+\.log', norm)
+        if m_log:
+            cand_log = m_log.group(0)
+            cand_base = cand_log[:-len('.log')]
+            if cand_base.lower() not in cfg['system_log_bases']:
+                # c) Preserva detected_app quando il nome del log è anche uno
+                #    short-alias di app (cc→claimcenter, cm→contactmanager).
+                if not detected_app:
+                    alias_target = cfg['app_short_aliases'].get(cand_base.lower(), '')
+                    if alias_target:
+                        detected_app = alias_target
+                # Gruppi di ritorno consumanti come sed, non lookaround — vedi _word_sub().
+                pat = r'(^|[^a-zA-Z0-9_.-])' + re.escape(cand_log) + r'([^a-zA-Z0-9]|$)'
+                norm = re.sub(pat, r'\1<LOGFILE>\2', norm, flags=re.IGNORECASE)
 
     # 4. Abbreviazioni APP_SHORT_ALIASES (solo dopo sostituzione ENV/NODE, come in bash).
     # Nota: qui si usa \b (grep -qE "\b...\b"), non il costrutto (?<![a-z]) delle
