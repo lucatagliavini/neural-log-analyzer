@@ -29,7 +29,42 @@ Aggiungere una nuova applicazione richiede solo una riga in `entities.conf`, non
 | ID | Descrizione | Stima | Priorità |
 |----|-------------|-------|----------|
 | P1 | **`search_all_logs` parallelo** — ogni `_search_one` con `&` + tmpfile + `wait` + stampa ordinata in `dispatch.sh`. Speedup stimato 5-6× su nodi con molti log Guidewire (I/O-bound) | ~15 righe | **Fatto** |
-| P2 | **`query-to-features.sh`: da `echo \| grep -qE` a `[[ =~ ]]` nativo** — vedi analisi sotto | ~10 righe | Media |
+| P2 | **`query-to-features.sh`: da `echo \| grep -qE` a `[[ =~ ]]` nativo** — vedi analisi sotto | ~10 righe | **Fatto** (2026-08-04) |
+| P2-bis | **Stesso refactoring in `param-extract.sh` e `normalize-query.sh`** — valutato e scartato, vedi sotto | ~30 righe | **Chiuso: non si fa** (2026-08-04) |
+
+### P2-bis — perché non si fa
+
+Valutato dopo P2, con le verifiche di compatibilità già fatte (**48.672 confronti** su tutti i
+pattern reali × 1014 query: 0 divergenze, `[[:space:]]` incluso). Tecnicamente fattibile, ma
+il rapporto costo/beneficio non regge:
+
+**1. Il guadagno è invisibile.** Una query reale in produzione impiega **2146 ms** end-to-end:
+il 96% è lettura e parsing AWK dei file di log (su `cc.log` sono ~500.000 righe), irriducibile.
+La latenza del classificatore è 86 ms, il **4%** del totale. Portarla a ~50 ms significa
+2146 → 2110 ms: **1,7%**, sotto la soglia di percezione.
+
+**2. La composizione è diversa da P2.** In `query-to-features.sh` tutti i `grep` erano test
+booleani dentro un loop di 108 iterazioni — un fork eliminato valeva ×108. Qui ciascun `grep`
+gira **una volta sola** per query: ~1,5 ms a testa. E dei 35 punti, solo 25 sono `grep -q`
+convertibili; 11 sono `grep -o` (estrazioni, richiederebbero `BASH_REMATCH`) e **10 sono
+`sed -E`**, irriducibili con questa tecnica: `[[ =~ ]]` testa, non sostituisce, e
+`${var//pattern/}` supporta solo glob, non regex. Servirebbe riscrivere la logica, non
+rifattorizzarla.
+
+**3. Il rischio non è simmetrico al beneficio.** 36 ms su 2146 contro modificare 25 punti nel
+cuore della normalizzazione. `test-normalize-parity.sh` protegge dalle divergenze bash/Python,
+ma non da un errore che *entrambe* le implementazioni condividono — es. un `\b` scritto inline
+invece che in variabile (bash consuma il backslash e il match falla silenziosamente: trappola
+verificata durante questa valutazione, il primo test l'aveva mascherata).
+
+**Quando riaprirlo.** Solo se la latenza del classificatore diventa dominante — ad esempio con
+un profilo che legge log molto piccoli, o se il chatbot venisse usato in batch su migliaia di
+query. In quel caso partire da `param-extract.sh` (16 `grep -q`, nessun `sed`, nessun vincolo
+di parità) e non toccare `normalize-query.sh`.
+
+**Lezione di metodo**: le stime di P2/P2-bis confrontavano il guadagno con la latenza del
+*classificatore isolato*, non col tempo che l'utente percepisce. Misurare il totale
+end-to-end prima di ottimizzare un componente evita di lavorare sul 4%.
 
 ### P2 — Eliminare i fork per-pattern nella vectorizzazione
 
@@ -51,15 +86,27 @@ per pattern del vocabolario: 107 unigram × 2 processi + 7 bigram × fino a 4 =
 Il backend Python processa l'intero dataset in meno tempo di quanto bash impieghi per una
 singola query: la differenza non è il linguaggio, è il fork-per-pattern.
 
-**Compatibilità verificata.** 21.400 confronti (107 pattern × 200 query reali del dataset):
-**0 divergenze** tra `grep -E` e `[[ =~ ]]`, incluse le `\b` (estensione GNU, non ERE POSIX).
+**Compatibilità verificata.** Prima misura: 21.400 confronti (107 pattern × 200 query).
+Riverificata prima di applicare, col vocabolario a 108 feature: **116.610 confronti**
+(115 pattern — unigram + entrambi i lati dei bigram — × **tutte** le 1014 query reali),
+**0 divergenze**, incluse le `\b` (estensione GNU, non ERE POSIX) e il pattern `<logfile>`
+con parentesi angolari.
 
 **Punti di attenzione.**
 1. Il pattern va passato **non quotato** (`[[ $q =~ $p ]]`) — comportamento idiomatico di
    `=~`, ma un linter o un refactoring "che sistema il quoting" lo romperebbe in silenzio
-   trasformando ~100 regex in stringhe letterali. Vale un commento nel codice.
+   trasformando ~100 regex in stringhe letterali. Documentato nel codice.
 2. `\b` funziona perché bash e grep condividono la regex GNU su glibc. Con musl (Alpine) o
    BSD la garanzia decade: la dipendenza si sposta da `grep` al runtime bash.
+
+**Risultato (applicato 2026-08-04).** `query-to-features.sh` da **112 → 9 ms/query** (12×);
+catena `normalize + infer` da ~200 a **86 ms**. `test-normalize-parity.sh` **1014/1014
+identici** sui 108 valori di feature: il refactoring non ha cambiato un solo valore. Suite
+completa invariata (57/43/48 PASS, checksum di regressione OK). Sul server 19 ms/query —
+più lento in assoluto, stessa proporzione di miglioramento.
+
+Il tempo residuo si è spostato: dei 86 ms della catena, **36 sono in `normalize-query.sh`** e
+47 nel totale di `infer.sh` (che include la rete neurale in AWK). Vedi P2-bis.
 
 **Come validarlo.** `tests/test-normalize-parity.sh` confronta i 114 valori di feature tra
 bash e Python su tutte le query: deve restare 1008/1008 dopo la modifica. È la ragione per
@@ -210,8 +257,149 @@ l'asimmetria rendeva il fallback indistinguibile da un risultato corretto.
 | NLOG2-2 | Nessun avviso quando la query nomina un `.log` non risolvibile | **Fatto** (2026-08-04) — `UNRESOLVED_LOG` in `param-extract.sh` (esclude access/server/gc legittimi, calcolato **dopo** `NAMED_LOG_GLOB` per non dare falsi avvisi sui glob validi); `chatbot.sh` elenca i log noti e suggerisce il glob corrispondente al nome digitato |
 | NLOG2-3 | **`ccJBatch.log` e `ccCanaliz.log` risolti come `cc`** — il loop su `APP_LOG_NAMES` iterava nell'ordine del file e `\bcc` matcha il prefisso. Il classificatore instradava bene su `tail_named_log`, ma `dispatch.sh` apriva `cc.log`: file sbagliato, nessun errore | **Fatto** (2026-08-04) — longest-match con `sort -k1,1rn -k2,2`, stesso pattern di `normalize-query.sh`. Trovato dal nuovo `tests/test-param-extract.sh`, non a mano |
 | NLOG2-6 | **`ccJBatch`/`ccCanaliz` scritti con le maiuscole nei pattern del vocabolario** — `normalize-query.sh` fa lowercase e `grep -qE` è case-sensitive, quindi `ccJBatch` nel pattern non matcha mai `ccjbatch` nella query normalizzata. `ccCanaliz.log` instradava su `tail_log` (98%, access log); `ccJBatch.log` passava i test al 92% **solo per via di `batch\b`**, non della feature named-log (che valeva 0) — un test verde per la ragione sbagliata | **Fatto** (2026-08-04) — pattern portati in minuscolo in `unigrams.txt` e nei 2 bigram. Dataset rigenerato **bit-identico** (nessun esempio labeled usa quella forma) → **nessun retrain**. Routing: `ccCanaliz.log` da `tail_log` a `tail_named_log` 99.1%, `ccJBatch.log` da 92% a 99.8%. Suite 46→48 test |
-| NLOG2-4 | Mismatch semantico vocabolario ↔ whitelist: il pattern del classificatore matcha per **sottostringa** (`(cc\|api\|…)\.log` matcha `api.log` dentro `xyzapi.log` → `tail_named_log` 99%), `param-extract.sh` per **word boundary** (`\bapi` non matcha → `NAMED_LOG` vuoto → `[SKIP] Nessun log Guidewire specificato`, messaggio contraddittorio). Oggi mitigato da NLOG2-2 (l'utente riceve un avviso utile invece dello SKIP), ma la causa resta. Due opzioni: ancorare il pattern del vocabolario (**richiede retrain**) o allentare `param-extract.sh` (nessun retrain, ma `xyzapi.log` verrebbe risolto come `api.log` — probabilmente sbagliato) | **Da discutere** — riprendere insieme a NLOG2-5 |
-| NLOG2-5 | **Tool "lista log" (proposta utente 2026-08-04)** — uno strumento che mostri all'utente quali log può nominare, invece di lasciarglielo scoprire per tentativi. Complemento naturale di NLOG2-2: quello dice "non conosco questo nome", questo direbbe "ecco cosa conosco". Da chiarire: nuova classe del classificatore o estensione di `show_help`? Lista statica da `APP_LOG_NAMES` o `find` sui file realmente presenti sul nodo (più utile ma dipende dal contesto env/nodo attivo)? Include anche access/server/gc? | **Da discutere** |
+| NLOG2-4 | Mismatch semantico vocabolario ↔ whitelist: il classificatore instradava su `tail_named_log` per qualsiasi `<nome>.log`, ma `param-extract.sh` risolveva `NAMED_LOG` solo dai nomi in `APP_LOG_NAMES` → per i 12 log reali fuori whitelist (`policysearch`, `concurrentDataChangeExceptionLog`, `inbound_mq_messages`, …) l'utente riceveva `[SKIP]` e doveva ripiegare sul glob | **Fatto** (2026-08-04) — vedi LOGF-10/11 |
+| NLOG2-5 | **Tool "lista log"** — spostato in NEXT-1, pianificato per la prossima sessione | Pianificato |
+
+---
+
+## NEXT — Prossima sessione (pianificato 2026-08-04)
+
+Due lavori concordati con l'utente, da fare insieme perché condividono il retrain e toccano
+gli stessi file. Nessuno dei due richiede modifiche alla topologia della rete.
+
+### NEXT-1 — Tool "lista log"
+
+**Obiettivo.** Mostrare all'utente quali log può nominare, invece di lasciarglielo scoprire per
+tentativi. Complemento di LOGF-11: `suggest_available_logs()` dice "ecco cosa c'è" *quando hai
+sbagliato*, questo lo direbbe *su richiesta* ("che log ci sono?", "quali log posso vedere").
+
+**Il mattone esiste già**: `suggest_available_logs()` in `dispatch.sh` fa il `find` sul nodo,
+filtra i nomi non digitabili (`${gw.cc.serverid}-messaging`) e li impagina in colonne.
+Manca solo l'aggancio: un tool che la invochi senza il ramo "forse cercavi".
+
+**Perché la lista va dal disco e non da `APP_LOG_NAMES`**: misurato sul nodo `lxprjbliq05` —
+28 log reali, la whitelist ne elenca 16, di cui **2 con nome sbagliato**
+(`performance_integr` contro `performance_integrations`, `plugin` contro `plugins`). Una lista
+statica mostrerebbe nomi inesistenti e tacerebbe su 12 log presenti: sarebbe una risposta
+autorevole e sbagliata, peggio del silenzio.
+
+**Decisioni ancora aperte:**
+1. **Nuova classe del classificatore o estensione di `show_help`?** Nuova classe = 16 tool,
+   ~20-30 esempi labeled, rebuild + retrain (la topologia cambia da `108,48,15` a
+   `108,48,16` — quindi `setup.sh --force` e pesi da zero). `show_help` non costa nulla ma
+   mescola "cosa so fare" con "cosa c'è su questo nodo", due domande diverse.
+2. **Include access/server/gc?** Si nominano con sintassi diversa (`"log applicativo"`,
+   `"access log"`) e passano da `LOG_TYPE`, non da `NAMED_LOG`. Elencarli insieme è più
+   completo ma suggerisce una sintassi che per loro non funziona.
+3. **Dipende dal contesto env/nodo attivo** (la dir Guidewire si risolve da `ACTIVE_ENV`/
+   `ACTIVE_NODE`/`ACTIVE_APP` via `resolve-logs.sh`): cosa risponde se il contesto non è
+   ancora impostato?
+
+### NEXT-2 — "Prime righe": direzione head/tail come parametro
+
+**Obiettivo.** Supportare `"prime 10 righe del cc.log"`, oggi non gestito (zero esempi nel
+dataset con "prime").
+
+**Decisione presa: un parametro, NON nuovi tool.** Scartata l'ipotesi `head_log` /
+`head_named_log`:
+- il classificatore non deve imparare una distinzione che si estrae dal testo — `"prime"` vs
+  `"ultime"` è la *direzione*, come `TAIL_N` è la *quantità*. Stesso ragionamento che ha
+  portato a `<LOGFILE>`: non moltiplicare le classi per informazione parametrica;
+- due classi in più significherebbero retrain di topologia e, in prospettiva, esplosione
+  combinatoria (head+named, head+glob, …);
+- il precedente nel progetto: `tail_log` già legge access **o** server log secondo `LOG_TYPE`,
+  senza chiamarsi `access_or_server_tail_log`. Convenzione implicita: il nome dice il *tipo di
+  analisi*, i parametri dicono le varianti.
+
+**Decisione presa: nessuna rinomina.** Valutato `htail_log`/`htail_named_log` e scartato —
+misurato il costo: **~24 file** e **134 righe di label nel dataset**, perché i nomi dei tool
+sono le label di training e l'ordine dell'output layer in `domain.conf:TOOL_NAMES` (la
+posizione determina quale neurone rappresenta quale classe). Beneficio puramente nominale, e
+`htail` è un neologismo che non chiarisce nulla. Se un domani servisse un nome neutro, i
+candidati sono `show_log`/`read_log`, ma il costo resterebbe lo stesso.
+
+**Implementazione:**
+1. `param-extract.sh` — nuovo `LOG_ORDER` (`head` se la query dice "prime"/"iniziali"/
+   "all'inizio", altrimenti `tail`). Stesso schema di `TAIL_N`.
+2. `lib/tools/tail_log.awk` e `tail_named_log.awk` — nuovo `-v order="head|tail"`. Con `head`
+   si stampa direttamente e si esce, **senza** il buffer circolare `buf[count % n]`: molto più
+   semplice e molto più veloce (non serve leggere l'intero file — su `cc.log` sono ~500.000
+   righe).
+3. `dispatch.sh` — passa `-v order="${LOG_ORDER:-tail}"` nei rami interessati.
+4. **`TOOL_DESC` in `domain.conf`** — richiesta esplicita dell'utente: frasi chiare che
+   rendano scopribile la funzione, perché `show_help` è dove l'utente scopre cosa può chiedere.
+   Es. `"Prime o ultime N righe di un file di log (es: «ultime 50 righe», «prime 20 righe»)"`.
+   `TOOL_DESC` non entra nel vocabolario → nessun impatto sul modello.
+5. Esempi labeled: ~10-15 con "prime N righe", per classi **esistenti** → rebuild + retrain
+   ordinario, **nessun cambio di topologia**.
+
+**Da decidere in implementazione**: con `head`, il filtro temporale seleziona le prime righe
+*del file* o le prime *dentro la finestra*? Propendo per le seconde, coerente con come `tail`
+rispetta già la finestra.
+
+---
+
+## LOGF — Generalizzazione dei nomi di log (2026-08-04)
+
+Il vocabolario conteneva l'alternanza esplicita dei 15 nomi di `APP_LOG_NAMES` più 7 feature
+per-nome (`api`, `\bdatabase\b`, `jgroups`, …): il classificatore *conosceva* i log del
+cliente. Come nota l'utente, `jgroups` esiste solo per applicazioni con cache distribuita —
+inciderlo nei pesi lega il modello a un singolo deployment, mentre il modello deve
+sopravvivere al cambio di cliente. Costo già misurabile: sul nodo di produzione i log sono
+**28**, la whitelist ne copriva 16, di cui 2 con nome sbagliato (`performance_integr` vs
+`performance_integrations`, `plugin` vs `plugins`); 15 log reali erano irraggiungibili. E un
+nome nel vocabolario è fragile: `ccCanaliz` aveva smesso di funzionare per un problema di
+maiuscole.
+
+| ID | Descrizione | Stato |
+|----|-------------|-------|
+| LOGF-1 | **Placeholder `<LOGFILE>`** in `normalize-query.sh` (nuova sezione 3.5, fra NODE e APP_SHORT_ALIASES). Sostituisce **qualsiasi** `<token>.log` e i glob quotati — non una whitelist: una lista limiterebbe la generalizzazione ai soli nomi noti. Esclusi i 3 log di infrastruttura (`ACCESS_LOG_BASE`/`SERVER_LOG_BASE`/`GC_LOG_BASE` da `system.conf`), che hanno tool dedicati. Vincolo d'ordine: dopo la sezione 1 (un nome app completo vince), prima della 4 (`\bcc\b` matcha dentro `cc.log` e produrrebbe `<APP>.log`) | **Fatto** |
+| LOGF-2 | **`DETECTED_APP` preservato** quando il nome del log è anche uno short-alias di app (`cc`→claimcenter, `cm`→contactmanager): serve a `resolve-logs.sh` per costruire la directory Guidewire. Data-driven da `APP_SHORT_ALIASES`, non hardcoded | **Fatto** |
+| LOGF-3 | **Vocabolario**: 6 righe con nomi concreti rimosse, sostituite da **una** riga `<logfile> :: 2`; `patternA` dei 2 bigram → `<logfile>`. Con le parentesi angolari, non `\blogfile\b` (matcherebbe la parola digitata dall'utente). **114 → 108 feature** | **Fatto** |
+| LOGF-4 | **Dataset**: 22 esempi riformulati con `.log` esplicito (`"database log"` → `"database.log"`, `"performance delle integrazioni nel log"` → `"…nel performance_integrations.log"`) perché senza le feature per-nome producevano un vettore identico a query `tail_log` di classe diversa. Aggiunti **6 esempi con glob quotato**, prima assenti: il ramo glob era testato ma non addestrato. Le 6 query anaforiche (`"warn nello stesso log"`) intatte — usano `ACTIVE_NAMED_LOG` | **Fatto** |
+| LOGF-5 | **`cm` aggiunto a `APP_LOG_NAMES`**: `cm.log` esiste realmente (`prod2nssi-cm.log` in `*/ContactManager/Guidewire/`), non è solo un alias | **Fatto** |
+| LOGF-6 | **Glob e rotazione**: la validazione richiedeva `.log` **finale**, ma i ruotati sono `…-cc.log-2026-07-26-<epoch>.gz` con `.log` in mezzo → il glob non raggiungeva alcuno storico. Ora la regex ancora `\.log([-.]…)?$`, che accetta le forme ruotate e rifiuta `.logico` | **Fatto** |
+| LOGF-7 | **Finestra temporale nel ramo glob**: faceva `find \| head -1`, ignorando `TIME_FROM`/`TIME_TO`. Ora passa da `select_log_files()` (`utils-logfiles.sh`), l'unica implementazione del filtro temporale, così "righe di ieri" seleziona la rotazione giusta. Filtro per **nome logico esatto**: `select_log_files` cerca `BASE*`, quindi `prod1nsse-cc` matcherebbe anche `prod1nsse-ccCanaliz.log` | **Fatto** |
+| LOGF-8 | **Disambiguazione multi-match**: `"*cc*.log"` matcha 4 log distinti e prima ne veniva scelto uno con `sort \| head -1` silenzioso. Ora `resolve_log_glob()` raggruppa per nome logico e, se i gruppi sono ≥2, stampa un elenco numerato in giallo con il pattern suggerito per restringere. Nessun prompt interattivo (romperebbe `--query` e i test); il tool procede col non-ruotato | **Fatto** |
+| LOGF-9 | **`_logfiles_read_first_ts` non riconosceva il formato Guidewire** (`[thread] USER 2026-08-04T15:50:01,443 INFO`: ISO8601 non fra parentesi quadre e non a inizio riga) → **ts_start=0 per tutti i log Guidewire**, quindi il filtro temporale non poteva discriminarli, né per il glob né per i named log. Difetto preesistente, emerso testando le rotazioni. Aggiunto un quarto pattern, in coda perché il ramo GC è più specifico | **Fatto** |
+
+| LOGF-10 | **`NAMED_LOG` risolve qualsiasi `<token>.log`**, non solo i nomi in `APP_LOG_NAMES`: quella è una lista di **alias** (scorciatoie usabili senza estensione, es. `"errori nel cc"`), non di log **ammessi**. Usa il case ORIGINALE (`$1`, non `$query` lowercase) perché i nomi reali hanno maiuscole (`ccJBatch`, `JF4U_TRACKING`, `concurrentDataChangeExceptionLog`) e finiscono in `find -name`, case-sensitive. Validazione anti-traversal e esclusione dei log di infrastruttura anche sul fallback. Chiude NLOG2-4 | **Fatto** |
+| LOGF-11 | **`suggest_available_logs()`** in `dispatch.sh`: quando un log non esiste, elenca quelli **realmente presenti** sul nodo (l'avviso di `param-extract.sh` mostra gli alias di `entities.conf`, che divergono dal disco — `plugin` in whitelist contro `plugins` reale). Se un nome simile esiste lo evidenzia (`plugin` → `plugins.log`): l'errore tipico è un refuso. Scarta i nomi non digitabili — sul nodo esiste `${gw.cc.serverid}-messaging.log`, un placeholder Guidewire non risolto | **Fatto** |
+
+| LOGF-12 | **Avviso di incoerenza `NAMED_LOG` ↔ tool**: se la query nomina un log ma nessuno dei tool attivati lo legge (`"errori di cluster nel jgroups log"` → `filter_errors`, che apre `server.log`), l'utente riceveva dati plausibili dal file sbagliato in silenzio. `chatbot.sh` ora avvisa e mostra la sintassi corretta. L'incoerenza è rilevabile **solo** in `chatbot.sh`, dove si conoscono sia `NAMED_LOG` sia i tool scelti. Introdotto `LOG_EXPLICIT` (non persistente, come `TIME_EXPLICIT`) per distinguere "nominato in questa query" da "ereditato da `ACTIVE_NAMED_LOG`": senza, dopo una query sul jgroups ogni query successiva avrebbe mostrato l'avviso | **Fatto** |
+| LOGF-13 | **`[SKIP]` in giallo** (`skip_msg()` in `dispatch.sh`): erano testo bianco identico all'output normale e si perdevano fra le righe di log. 11 occorrenze convertite; un test verifica che non ne resti nessuna con `echo` diretto, così una futura aggiunta non sfugge alla colorazione | **Fatto** |
+
+| LOGF-14 | **Elenco dei log in colonne**: `suggest_available_logs` stampava i 27 nomi su una riga sola (~470 caratteri), che il terminale spezzava dove capita tagliando i nomi a metà (`Card_` / `denunce_…`). Ora `column -c` + `expand` — **non** `column -t`, che formatta una tabella da input già colonnato e produce una sola colonna; e senza `expand` i TAB di `column` disallineano tutti i nomi oltre 8 caratteri. Fallback a 3 colonne fisse se `column` manca | **Fatto** |
+| LOGF-15 | **`UNRESOLVED_LOG` rimosso** (3 punti in `param-extract.sh`, 4 in `chatbot.sh`, asserzioni nei test): da LOGF-10 restava vuoto in ogni caso reale, e `suggest_available_logs()` fa lo stesso lavoro guardando i **file del nodo** invece degli alias di `entities.conf` — informazione più accurata, perché la configurazione può divergere dal disco. Un test verifica che non venga più emesso, così un ripristino accidentale non passa inosservato | **Fatto** |
+| LOGF-16 | **Validazione `NAMED_LOG`**: richiede almeno un carattere alfanumerico. `"..log"` produceva base `.` e `"-.log"` produceva `-`, che passavano la whitelist. Innocui per `find -name` (verificato: 0 risultati, il valore è un pattern di *nome*, non un path) ma privi di senso | **Fatto** |
+
+**Feature `api` mantenuta.** Il piano la elencava fra i nomi da rimuovere, ma sta nella sezione
+*Endpoint / URL* e significa *endpoint HTTP*: serve a 17 esempi `distribute_status` ed è
+l'**unica feature attiva** di `"quali api hanno più fallimenti"`, che senza di essa resterebbe
+a vettore zero. Classificata male perché coincide lessicalmente con `api.log`.
+
+**Retrain**: 1014 esempi, 108→48→15, early stopping epoca 1263, MSE **0.001223**,
+exact_match **98.1%**, F1 **0.988** — migliori del modello a 114 feature (0.001320 / 97.7% /
+0.986): più snello e generalizza meglio. 0 zero-vector.
+
+**Generalizzazione verificata** su log mai visti in training e assenti dalla whitelist:
+`policysearch.log`, `concurrentDataChangeExceptionLog.log`, `inbound_mq_messages.log`,
+`controllo_pagamenti.log`, `KPI_METADATI_TRACKING.log`, `pc1nssprod.log` → tutti
+`tail_named_log`/`grep_named_log` al 97-99%.
+
+**Conseguenza accettata (non un difetto).** Le query che nominano un log **senza** `.log`
+(`"ultime righe del database log"`) sono ora indistinguibili da `"ultime righe del log"`:
+sono entrambe sottospecificate, e il vettore identico rappresenta fedelmente quella vaghezza.
+Chi vuole un log preciso lo identifica — `database.log` o `'*database*.log'`.
+
+**Nota architetturale.** `infer.sh` non funziona più da solo sui named log: la feature si
+attiva sul placeholder, che esiste solo dopo `normalize-query.sh`. È il prezzo — corretto — di
+aver spostato conoscenza dal modello alla pipeline. `run-tests.sh` esporta già `NORM_QUERY`
+(NLOG-4), quindi misura il path reale.
+
+**`APP_LOG_NAMES` resta usata solo in `param-extract.sh`** per risolvere `NAMED_LOG` → file:
+la conoscenza dei nomi è uscita dai *pesi* e resta nella *configurazione*, versionabile per
+profilo senza retrain. Non abbiamo eliminato la whitelist: l'abbiamo tolta dai pesi.
 
 ---
 
@@ -233,7 +421,19 @@ l'asimmetria rendeva il fallback indistinguibile da un risultato corretto.
 
 | ID | Descrizione | Stato |
 |----|-------------|-------|
-| DEDUP-1 | **Normalizzazione ID numerici in chiave dedup** — `WorkItemPeriodicWork_Ext:1778994` e `:1778995` sono deduplicati separatamente perché l'ID è parte del messaggio. Normalizzare la chiave rimuovendo numeri/UUID ridurrebbe il rumore ma nasconderebbe quanti WorkItem distinti sono bloccati (informazione utile per valutare la gravità). **Da discutere prima di implementare**: opzione configurabile? Soglia minima? Solo in modalità "summary"? | Da discutere |
+| DEDUP-1 | **Normalizzazione ID numerici in chiave dedup** — `WorkItemPeriodicWork_Ext:1778994` e `:1778995` sono deduplicati separatamente perché l'ID è parte del messaggio. Normalizzare la chiave rimuovendo numeri/UUID ridurrebbe il rumore ma nasconderebbe quanti WorkItem distinti sono bloccati | **Chiuso: non si fa** (2026-08-04) |
+
+**Perché non si fa.** Deciso di non implementarlo: aggiungerebbe confusione senza risolvere un
+problema reale. Il conteggio degli ID distinti è **informazione diagnostica**, non rumore — è
+il dato che dice se sono bloccati 2 WorkItem o 200, e la gravità dell'incidente dipende
+proprio da quello. Le alternative valutate (opzione configurabile, soglia minima, solo in
+modalità summary) aggiungerebbero un parametro in più da spiegare e ricordare, per nascondere
+un dato che serve.
+
+Se in futuro il rumore diventasse un problema concreto (es. un log con migliaia di ID distinti
+in poche righe di output), la strada da valutare non è normalizzare la chiave ma **aggregare
+nel footer** — "42 WorkItem distinti" invece di 42 righe — così il conteggio resta visibile e
+l'output no. Riaprire solo con un caso reale in mano, non in astratto.
 
 ---
 
