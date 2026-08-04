@@ -22,6 +22,21 @@ source "$PROFILE_DIR/domain.conf"
 query="${NORM_QUERY:-${1,,}}"
 query="${query,,}"  # lowercase uniforme anche in caso di fallback
 
+# Il matching usa il costrutto nativo `[[ =~ ]]` invece di `echo | grep -qE`: questo
+# script gira una volta per query e con 108 pattern faceva ~242 fork (2 processi per
+# unigram, fino a 4 per bigram), cioè 112 ms per query contro ~5 ms nativi.
+#
+# ATTENZIONE — il pattern va passato NON quotato: `[[ $q =~ $p ]]`, non
+# `[[ $q =~ "$p" ]]`. Quotandolo, bash lo tratta come stringa LETTERALE e ~100 regex
+# smettono silenziosamente di matchare. È l'opposto della regola abituale "quota
+# sempre le variabili", quindi un linter o un refactoring "che sistema il quoting"
+# romperebbe tutto senza errori. Verificato: `grep -E` e `[[ =~ ]]` danno lo stesso
+# risultato su 116.610 confronti (115 pattern × 1014 query reali), incluse le \b che
+# sono un'estensione GNU. Su glibc bash e grep condividono la stessa libreria regex;
+# con musl (Alpine) o BSD la garanzia decade.
+# La rete di sicurezza è tests/test-normalize-parity.sh, che confronta i 108 valori
+# di feature fra questo script e vectorize() in Python su tutte le query.
+
 # ─── UNIGRAM ─────────────────────────────────────────────────────────────────
 features=()
 for entry in "${UNIGRAMS[@]}"; do
@@ -29,7 +44,7 @@ for entry in "${UNIGRAMS[@]}"; do
     weight="${entry##*::}"
     pattern="${pattern// /}"
     weight="${weight// /}"
-    if echo "$query" | grep -qE "$pattern" 2>/dev/null; then
+    if [[ "$query" =~ $pattern ]]; then
         features+=("$weight")
     else
         features+=("0")
@@ -53,8 +68,8 @@ for bigram in "${BIGRAMS[@]}"; do
         weight="1"
         patB="$last"
     fi
-    if echo "$query" | grep -qE "$patA" 2>/dev/null && \
-       echo "$query" | grep -qE "$patB" 2>/dev/null; then
+    # Pattern non quotati: vedi la nota sopra
+    if [[ "$query" =~ $patA ]] && [[ "$query" =~ $patB ]]; then
         features+=("$weight")
     else
         features+=("0")
