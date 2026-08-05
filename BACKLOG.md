@@ -1,6 +1,21 @@
 # Backlog — neural-log-analyzer
 
-Aggiornato: 2026-08-04
+Aggiornato: 2026-08-05
+
+---
+
+## MIGR — Migrazione a Python (nuovo progetto)
+
+Valutata la conversione dell'orchestrazione (chatbot.sh, dispatch.sh, normalize-query.sh,
+param-extract.sh, query-to-features.sh — NON i 14 tool AWK, che restano tali) verso Python,
+per manutenibilità: doppia implementazione bash/Python già causa di bug reali (NLOG-2),
+array paralleli in domain.conf senza validazione automatica (gap ARCH-4), quoting bash come
+minefield documentato (P2). Piano di migrazione concreto in un **repository separato**,
+`../neural-log-lanalyzer` (stesso pattern di separazione già usato per `neural-bash`):
+`../neural-log-lanalyzer/docs/MIGRATION-PLAN.md`. Questo repository resta lo stato di
+riferimento comportamentale finché la migrazione non è completa — fix e feature continuano
+qui, non nel nuovo progetto, così il piano parte da un comportamento verificato e non da
+difetti noti da correggere due volte.
 
 ---
 
