@@ -163,6 +163,55 @@ _has_out_of_range_ts=0
 echo "$_out_time" | grep -qE '06:21:38|10:10:30' && _has_out_of_range_ts=1
 assert_true "filtro temporale: nessun timestamp fuori range nell'output" "$(( 1 - _has_out_of_range_ts ))"
 
+# ─── Filtro temporale su righe senza timestamp proprio (stack trace) ─────────
+section "Filtro temporale: righe di stack trace ereditano il timestamp dell'eccezione"
+
+# Bug reale (2026-08-05): "cerca searchHub" matcha anche "at ...SearchHubExtApi..."
+# nello stack trace per puro caso testuale (case-insensitive). Quella riga non ha
+# un timestamp proprio: prima del fix veniva SEMPRE mantenuta, anche quando
+# l'eccezione a cui appartiene (con il suo vero timestamp) è fuori dal range
+# richiesto — risultato: MATCH>0 ma PRIMO/ULTIMO MATCH vuoti ("-").
+_FIX3="$(mktemp -d)"
+_node3_dir="$_FIX3/prod/lxprjbliq04"
+mkdir -p "$_node3_dir/prod/ClaimCenter" "$_node3_dir/ClaimCenter/Guidewire"
+cat > "$_node3_dir/ClaimCenter/Guidewire/policysearch.log" <<'EOF'
+                2026-08-05T10:27:38,925 ERROR SEARCHHUB: fuori range
+	at it.unipol.sx.bo.SearchHubExtApi.searchHubSxApi(SearchHubExtApi.gs:163)
+	at it.unipol.sx.bo.SearchHubExtApi$block_0_.invoke(SearchHubExtApi.gs:196)
+                2026-08-05T16:30:00,000 ERROR SEARCHHUB: dentro range
+	at it.unipol.sx.bo.SearchHubExtApi.searchHubSxApi(SearchHubExtApi.gs:200)
+	at it.unipol.sx.bo.SearchHubExtApi$block_0_.invoke(SearchHubExtApi.gs:210)
+EOF
+
+export LOG_BASE_DIR="$_FIX3"
+export DETECTED_NODE="04" ACTIVE_NODE="04"
+export SERVER_LOG_DIR="" SERVER_LOG=""
+export ACCESS_LOG_DIR="" ACCESS_LOG=""
+export GC_LOG_DIR="" GC_LOG=""
+export GUIDEWIRE_LOG_DIR="$_node3_dir/ClaimCenter/Guidewire"
+export SEARCH_PATTERN="searchHub"
+export TIME_FROM="2026-08-05T16:00" TIME_TO="2026-08-05T16:59"
+
+_out_stack=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+rm -rf "$_FIX3"
+unset TIME_FROM TIME_TO
+
+# 3 righe nel range (l'eccezione delle 16:30 + i suoi 2 frame): non 5 (tutte).
+_match_count3=$(echo "$_out_stack" | grep -E '^\s*policysearch\.log' | grep -oE '[0-9]+' | head -1)
+assert_true "stack trace: solo le 3 righe dell'eccezione in range sono contate (trovate: ${_match_count3:-?})" \
+    "$([[ "${_match_count3:-0}" -eq 3 ]] && echo 1 || echo 0)"
+
+# La riga fuori range (10:27) non deve comparire come timestamp nell'output.
+_has_out_of_range3=0
+echo "$_out_stack" | grep -q '10:27:38' && _has_out_of_range3=1
+assert_true "stack trace: timestamp fuori range (10:27) non nell'output" "$(( 1 - _has_out_of_range3 ))"
+
+# PRIMO/ULTIMO MATCH devono essere popolati (non "-"): i frame senza timestamp
+# proprio devono ereditare quello dell'eccezione in range, non restare vuoti.
+_has_dash_ts=0
+echo "$_out_stack" | grep -E '^\s*policysearch\.log' | grep -qE '│\s+-\s+│' && _has_dash_ts=1
+assert_true "stack trace: PRIMO/ULTIMO MATCH popolati (non '-')" "$(( 1 - _has_dash_ts ))"
+
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"
