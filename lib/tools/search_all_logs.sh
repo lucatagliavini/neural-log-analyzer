@@ -78,7 +78,15 @@ _sal_add() {
 # e l'ambiente è noto, itera su tutti i nodi trovati su disco via
 # list_env_node_dirs() (utils-nodes.sh).
 # Nodo singolo: usa le variabili di contesto già risolte dalla sessione.
+# _multi_node: unica fonte di verità per "la tabella mostra la colonna nodo" —
+# riusata sotto per header, separatore, righe e alternanza colore. Prima erano
+# decisioni ripetute con criteri diversi (l'header guardava DETECTED_NODE, le
+# righe guardavano "$_n non vuoto") e potevano disallinearsi: bug reale
+# (2026-08-05) — in nodo singolo $_n è SEMPRE popolato (ACTIVE_NODE ha default
+# "01" in chatbot.sh), quindi le righe mostravano comunque "nodo NN  " mentre
+# l'header, guardando DETECTED_NODE, non riservava quello spazio.
 if [[ -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]]; then
+    _multi_node=1
     _scope_label="${ACTIVE_ENV} (tutti i nodi)"
     ENV_NAME="$ACTIVE_ENV" APP="${ACTIVE_APP:-}"
     while IFS= read -r _node_dir; do
@@ -93,6 +101,7 @@ if [[ -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]]; then
         fi
     done < <(list_env_node_dirs "${ACTIVE_ENV}")
 else
+    _multi_node=0
     _scope_label="nodo ${ACTIVE_NODE:-?}"
     access="${ACCESS_LOG:-}"
     server="${SERVER_LOG:-}"
@@ -187,19 +196,29 @@ fi
 bar_max=12 best_hits=0 best_node=""
 _prev_node="" _row_dim=0
 
-# Header — colonne allineate alle righe dati.
-# Nelle righe dati il prefisso nodo è "nodo NN  " = 9 chars visibili;
-# l'header usa %-9s per occupare la stessa larghezza.
+# Larghezza colonna nodo calcolata dalla lunghezza reale dei numeri di nodo
+# raccolti (non una costante scritta a mano): "nodo " (5) + cifre + 2 spazi.
+# Così un nodo a 3 cifre (es. "100") non disallinea più header/separatore/righe
+# come con la larghezza fissa 9 di prima.
+_node_w=0
+if [[ "$_multi_node" -eq 1 ]]; then
+    for _rn in "${res_nodes[@]}"; do
+        [[ "${#_rn}" -gt "$_node_w" ]] && _node_w="${#_rn}"
+    done
+fi
+_node_col_w=0
+[[ "$_multi_node" -eq 1 ]] && _node_col_w=$(( 5 + _node_w + 2 ))
+
+# Header — colonna nodo presente solo in modalità multi-nodo, stessa larghezza
+# usata sotto per le righe dati (_node_col_w), non più duplicata a mano.
 # I separatori │ precedono le colonne timestamp sia nell'header che nei dati.
 _node_hdr_str=""
-[[ -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]] && \
-    _node_hdr_str=$(printf "${_D}%-9s${_X}" "NODO")
+[[ "$_node_col_w" -gt 0 ]] && _node_hdr_str=$(printf "${_D}%-${_node_col_w}s${_X}" "NODO")
 printf "  %s${_D}%-${max_lbl}s  %-12s  %6s  │  %-19s  │  %-19s${_X}\n" \
     "$_node_hdr_str" "LOG" "" "MATCH" "PRIMO MATCH" "ULTIMO MATCH"
-# Larghezza separatore = prefisso nodo (9 se multi-nodo, 0 se singolo)
+# Larghezza separatore = colonna nodo (0 se nodo singolo)
 #   + max_lbl + 2 + 12 + 2 + 6 + (2+│+2) + 19 + (2+│+2) + 19 = max_lbl + 70
-_sep_w=$(( max_lbl + 70 ))
-[[ -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]] && _sep_w=$(( _sep_w + 9 ))
+_sep_w=$(( max_lbl + 70 + _node_col_w ))
 printf "  ${_D}%s${_X}\n" "$(printf '─%.0s' $(seq 1 "$_sep_w"))"
 
 for (( i=0; i<total_files; i++ )); do
@@ -211,7 +230,10 @@ for (( i=0; i<total_files; i++ )); do
     _tlast="${res_last[$i]:-}"
     _n="${res_nodes[$i]:-}"
 
-    if [[ "$_n" != "$_prev_node" ]]; then
+    # Alternanza colore per gruppo nodo: solo in modalità multi-nodo, altrimenti
+    # $_n è costante su tutte le righe (nodo singolo) e la prima riga flipperebbe
+    # _row_dim a DIM per il resto della tabella senza motivo — bug reale (2026-08-05).
+    if [[ "$_multi_node" -eq 1 && "$_n" != "$_prev_node" ]]; then
         _prev_node="$_n"
         (( _row_dim = 1 - _row_dim ))
     fi
@@ -232,9 +254,13 @@ for (( i=0; i<total_files; i++ )); do
     [[ "$_h" -gt $(( max_hits / 3 ))     ]] && bc="$_Y"
     [[ "$_h" -gt $(( max_hits * 2 / 3 )) ]] && bc="$_R"
 
-    # "nodo" in DIM, numero sempre bold+white, filename nella tonalità della riga
+    # "nodo" in DIM, numero sempre bold+white, filename nella tonalità della riga.
+    # Il numero è pad-dato a _node_w cifre così la colonna resta allineata
+    # all'header anche quando i nodi hanno lunghezze diverse (es. "4" e "12").
     node_col=""
-    [[ -n "$_n" ]] && node_col="${_D}nodo ${_X}\033[1m\033[97m${_n}${_X}  "
+    if [[ "$_multi_node" -eq 1 ]]; then
+        node_col=$(printf "${_D}nodo ${_X}\033[1m\033[97m%${_node_w}s${_X}  " "$_n")
+    fi
 
     printf "  ${node_col}${_RL}%-${max_lbl}s${_X}  ${bc}%s${_X}%s  %6d" \
         "$_l" "$bar" "$bar_pad" "$_h"

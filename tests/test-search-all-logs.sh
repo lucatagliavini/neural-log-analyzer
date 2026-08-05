@@ -1,0 +1,127 @@
+#!/bin/bash
+#
+# test-search-all-logs.sh — unit test per lib/tools/search_all_logs.sh.
+#
+# Copre l'allineamento della tabella nodo/log, che era rotto in due modi
+# indipendenti (bug reale, 2026-08-05):
+#   1. Nodo singolo: la colonna "NODO" non era prevista dall'header (guardava
+#      DETECTED_NODE) ma le righe la stampavano comunque (guardavano "$_n non
+#      vuoto" — sempre vero, perché ACTIVE_NODE ha un default in chatbot.sh).
+#   2. Multi-nodo: l'header usava una larghezza fissa (9 char) che si sarebbe
+#      disallineata con numeri di nodo a 3+ cifre.
+# Il fix introduce _multi_node come unica fonte di verità e una larghezza
+# colonna calcolata dai dati reali — questi test verificano che le due
+# proprietà (colonna assente in nodo singolo, larghezza coerente in multi-nodo)
+# valgano sull'output effettivo del tool, non sulla sua implementazione interna.
+#
+# Uso: bash tests/test-search-all-logs.sh
+#
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+GREEN="\033[32m"; RED="\033[31m"; BOLD="\033[1m"; DIM="\033[2m"; RESET="\033[0m"
+pass=0; fail=0
+
+assert_true() {
+    local desc="$1" cond="$2"
+    if [[ "$cond" -eq 1 ]]; then
+        printf "  ${GREEN}PASS${RESET}  %s\n" "$desc"
+        pass=$(( pass + 1 ))
+    else
+        printf "  ${RED}${BOLD}FAIL${RESET}  %s\n" "$desc"
+        fail=$(( fail + 1 ))
+    fi
+}
+
+section() { printf "\n${BOLD}── %s ${RESET}${DIM}%s${RESET}\n" "$1" "────────────────────────────"; }
+
+# ─── Fixture: struttura minima LOG_BASE_DIR/env/nodo/env/app + Guidewire ──────
+_FIX="$(mktemp -d)"
+trap 'rm -rf "$_FIX"' EXIT
+
+_mk_node() {
+    local node_num="$1"
+    local node_dir="$_FIX/prod/lxprjbliq${node_num}"
+    mkdir -p "$node_dir/prod/ClaimCenter" "$node_dir/ClaimCenter/Guidewire"
+    echo "2026-08-05T10:00:00 INFO searchhub call" > "$node_dir/prod/ClaimCenter/server.log"
+    echo "2026-08-05T10:00:00 searchHub in cc" > "$node_dir/ClaimCenter/Guidewire/cc.log"
+}
+_mk_node "04"
+_mk_node "12"
+
+export LOG_BASE_DIR="$_FIX"
+export SEARCH_PATTERN="searchhub"
+export SEARCH_PARALLEL_JOBS=2
+export ACCESS_LOG_BASE="undertow_access_log" SERVER_LOG_BASE="server" GC_LOG_BASE="gc"
+export GUIDEWIRE_SUBPATH='$APP/Guidewire'
+export APP_SUBPATH='$ENV_NAME/$APP'
+export NODE_NAME_TEMPLATE='lx${ENV_CODE}jbliq${NODE_NUM}'
+export ACTIVE_ENV="prod" ACTIVE_APP="ClaimCenter"
+export PROFILE_DIR="$ROOT_DIR/profiles/liquido"
+
+_strip_ansi() { sed 's/\x1b\[[0-9;]*m//g'; }
+
+# ─── Nodo singolo: nessuna colonna nodo, nessun DIM permanente ────────────────
+section "Nodo singolo (DETECTED_NODE impostato)"
+
+unset DETECTED_NODE
+export DETECTED_NODE="04" ACTIVE_NODE="04"
+export SERVER_LOG_DIR="$_FIX/prod/lxprjbliq04/prod/ClaimCenter"
+export SERVER_LOG="$SERVER_LOG_DIR/server.log"
+export ACCESS_LOG_DIR="" ACCESS_LOG=""
+export GC_LOG_DIR="" GC_LOG=""
+export GUIDEWIRE_LOG_DIR="$_FIX/prod/lxprjbliq04/ClaimCenter/Guidewire"
+
+_out_single=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+
+_has_nodo_header=0
+echo "$_out_single" | grep -qE '^\s*NODO\s+LOG' && _has_nodo_header=1
+assert_true "nodo singolo: header non mostra colonna NODO" "$(( 1 - _has_nodo_header ))"
+
+_has_nodo_prefix=0
+echo "$_out_single" | grep -qE '^\s*nodo [0-9]' && _has_nodo_prefix=1
+assert_true "nodo singolo: righe non hanno prefisso 'nodo NN'" "$(( 1 - _has_nodo_prefix ))"
+
+# LOG deve essere la prima parola non-spazio della riga header (colonna 0, non 9)
+_log_col_ok=0
+echo "$_out_single" | grep -qE '^\s*LOG\s+MATCH' && _log_col_ok=1
+assert_true "nodo singolo: 'LOG' è la prima colonna dell'header" "$_log_col_ok"
+
+# ─── Multi-nodo: colonna NODO presente e allineata alle righe ─────────────────
+section "Multi-nodo (DETECTED_NODE vuoto, ACTIVE_ENV noto)"
+
+unset DETECTED_NODE ACTIVE_NODE SERVER_LOG_DIR SERVER_LOG ACCESS_LOG_DIR ACCESS_LOG GC_LOG_DIR GC_LOG GUIDEWIRE_LOG_DIR
+
+_out_multi=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+
+_hdr_line=$(echo "$_out_multi" | grep -E '^\s*NODO\s+LOG' | head -1)
+_row_line=$(echo "$_out_multi" | grep -E '^\s*nodo [0-9]+' | head -1)
+
+assert_true "multi-nodo: header mostra colonna NODO" "$([[ -n "$_hdr_line" ]] && echo 1 || echo 0)"
+assert_true "multi-nodo: almeno una riga con prefisso 'nodo NN'" "$([[ -n "$_row_line" ]] && echo 1 || echo 0)"
+
+# La colonna "LOG" nell'header e il filename nelle righe devono iniziare alla
+# stessa posizione di colonna — è esattamente il bug: header calcolava una
+# larghezza fissa (9), le righe una diversa (lunghezza reale di "nodo NN  ").
+if [[ -n "$_hdr_line" && -n "$_row_line" ]]; then
+    _hdr_log_pos=$(echo "$_hdr_line" | grep -boE 'LOG' | head -1 | cut -d: -f1)
+    # Nelle righe dati, il filename inizia subito dopo "nodo NN  " (dim/colore
+    # già stripped) — trova la posizione del primo carattere alfanumerico dopo
+    # il numero di nodo e gli spazi di padding.
+    _row_log_pos=$(echo "$_row_line" | grep -boE '[A-Za-z0-9._-]+\.log' | head -1 | cut -d: -f1)
+    assert_true "multi-nodo: colonna LOG allineata fra header e righe (hdr=$_hdr_log_pos riga=$_row_log_pos)" \
+        "$([[ "$_hdr_log_pos" -eq "$_row_log_pos" ]] && echo 1 || echo 0)"
+else
+    assert_true "multi-nodo: colonna LOG allineata (righe non trovate, salto)" 0
+fi
+
+# ─── Riepilogo ─────────────────────────────────────────────────────────────
+echo ""
+echo "═══════════════════════════════════════════════════"
+printf "  PASS: ${GREEN}%d${RESET}   FAIL: ${RED}%d${RESET}   TOTAL: %d\n" "$pass" "$fail" "$(( pass + fail ))"
+echo "═══════════════════════════════════════════════════"
+
+[[ "$fail" -eq 0 ]]
