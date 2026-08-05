@@ -4,6 +4,26 @@ Aggiornato: 2026-08-05
 
 ---
 
+## ⏭ PRIMO PUNTO SESSIONE SUCCESSIVA — SRCH-1
+
+## SRCH — Ricerca testuale in un log nominato (gap trovato in validazione produzione 2026-08-05)
+
+Trovato durante la validazione manuale di `search_all_logs`: non esiste un modo per cercare
+una stringa testuale in **un log specifico nominato dall'utente** (es. "cerca X nel cc.log").
+Oggi ci sono due metà di funzionalità che non si toccano:
+
+- `grep_named_log` filtra un log nominato solo per **livello** (ERROR/WARN/INFO), non accetta
+  un pattern testuale libero — `dispatch.sh:466-513` passa all'AWK solo `level` e `tail_n`,
+  nessun canale per un pattern testuale.
+- `search_all_logs` accetta un pattern testuale libero (`SEARCH_PATTERN`) ma cerca sempre su
+  **tutti** i log del nodo, mai su uno nominato dall'utente.
+
+| ID | Descrizione | Priorità |
+|----|-------------|----------|
+| SRCH-1 | Colmare il gap: o (a) `grep_named_log` accetta un pattern testuale oltre al livello, o (b) `search_all_logs` restringe la ricerca a `NAMED_LOG` quando la query lo specifica. Decidere l'approccio con l'utente prima di implementare (impatto su vocabolario/dataset da valutare: nuova combinazione di parametri, non necessariamente nuova classe) | **Alta — primo task della prossima sessione** |
+
+---
+
 ## MIGR — Migrazione a Python (nuovo progetto)
 
 Valutata la conversione dell'orchestrazione (chatbot.sh, dispatch.sh, normalize-query.sh,
