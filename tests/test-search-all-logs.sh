@@ -14,6 +14,13 @@
 # proprietà (colonna assente in nodo singolo, larghezza coerente in multi-nodo)
 # valgano sull'output effettivo del tool, non sulla sua implementazione interna.
 #
+# Copre anche il filtro temporale riga per riga (bug reale, 2026-08-05):
+# select_log_files() filtra solo a livello di FILE (include un file se il suo
+# intervallo si sovrappone al range richiesto), non riga per riga. Un
+# server.log non ruotato copre l'intera giornata, quindi "ultime 2 ore"
+# restituiva anche match fuori da quella finestra. Verificato scartando le
+# righe il cui timestamp non rientra in [TIME_FROM, TIME_TO].
+#
 # Uso: bash tests/test-search-all-logs.sh
 #
 
@@ -117,6 +124,44 @@ if [[ -n "$_hdr_line" && -n "$_row_line" ]]; then
 else
     assert_true "multi-nodo: colonna LOG allineata (righe non trovate, salto)" 0
 fi
+
+# ─── Filtro temporale riga per riga ────────────────────────────────────────
+section "Filtro temporale (TIME_FROM/TIME_TO applicato riga per riga)"
+
+_FIX2="$(mktemp -d)"
+_node2_dir="$_FIX2/prod/lxprjbliq04"
+mkdir -p "$_node2_dir/prod/ClaimCenter" "$_node2_dir/ClaimCenter/Guidewire"
+# 4 righe in server.log: 2 fuori dal range 16:00-16:59, 2 dentro.
+cat > "$_node2_dir/prod/ClaimCenter/server.log" <<'EOF'
+2026-08-05 06:21:38,000 INFO searchhub call fuori range
+2026-08-05 10:10:30,000 INFO searchhub call fuori range
+2026-08-05 16:00:00,000 INFO searchhub call dentro range
+2026-08-05 16:30:00,000 INFO searchhub call dentro range
+EOF
+
+export LOG_BASE_DIR="$_FIX2"
+export DETECTED_NODE="04" ACTIVE_NODE="04"
+export SERVER_LOG_DIR="$_node2_dir/prod/ClaimCenter"
+export SERVER_LOG="$SERVER_LOG_DIR/server.log"
+export ACCESS_LOG_DIR="" ACCESS_LOG=""
+export GC_LOG_DIR="" GC_LOG=""
+export GUIDEWIRE_LOG_DIR="$_node2_dir/ClaimCenter/Guidewire"
+export TIME_FROM="2026-08-05T16:00" TIME_TO="2026-08-05T16:59"
+
+_out_time=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+rm -rf "$_FIX2"
+unset TIME_FROM TIME_TO
+
+# La riga server.log deve riportare 2 MATCH (non 4): le due righe fuori range
+# vanno scartate anche se il file, nel suo complesso, si sovrappone al range.
+_match_count=$(echo "$_out_time" | grep -E '^\s*server\.log' | grep -oE '[0-9]+' | head -1)
+assert_true "filtro temporale: solo 2 dei 4 match sono nel range (trovati: ${_match_count:-?})" \
+    "$([[ "${_match_count:-0}" -eq 2 ]] && echo 1 || echo 0)"
+
+# Nessuna riga fuori range deve comparire come PRIMO/ULTIMO MATCH.
+_has_out_of_range_ts=0
+echo "$_out_time" | grep -qE '06:21:38|10:10:30' && _has_out_of_range_ts=1
+assert_true "filtro temporale: nessun timestamp fuori range nell'output" "$(( 1 - _has_out_of_range_ts ))"
 
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""

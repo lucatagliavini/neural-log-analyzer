@@ -41,6 +41,38 @@ tmp_dir=$(mktemp -d)
 _R="\033[31m" _Y="\033[33m" _G="\033[32m"
 _B="\033[1m"  _D="\033[2m"  _X="\033[0m"
 
+# Limiti di confronto per il filtro temporale riga per riga (sotto). Formato
+# "YYYY-MM-DD HH:MM:SS" — stesso formato normalizzato prodotto dall'estrazione
+# timestamp, così il confronto è una semplice comparazione di stringhe (nessuna
+# chiamata a `date`, coerente con l'ottimizzazione già fatta altrove nel
+# progetto per evitare subprocess in loop stretti). TIME_FROM/TIME_TO non
+# hanno i secondi: :00/:59 rendono i confronti inclusivi sul minuto.
+tf_cmp="" tt_cmp=""
+[[ -n "${TIME_FROM:-}" ]] && tf_cmp="${TIME_FROM/T/ }:00"
+[[ -n "${TIME_TO:-}"   ]] && tt_cmp="${TIME_TO/T/ }:59"
+declare -A _SAL_MONTHS=([Jan]=01 [Feb]=02 [Mar]=03 [Apr]=04 [May]=05 [Jun]=06
+                        [Jul]=07 [Aug]=08 [Sep]=09 [Oct]=10 [Nov]=11 [Dec]=12)
+
+# _sal_line_ts LINE — timestamp normalizzato "YYYY-MM-DD HH:MM:SS" di una riga
+# di log, o stringa vuota se non riconoscibile (es. continuazione di stack
+# trace). Equivalente bash-nativo di log_ts_from_line() (utils-logfiles.sh),
+# reimplementato con [[ =~ ]] invece di echo|grep per evitare un fork per
+# riga — stesso motivo per cui commit 2ebfa2f ha rimpiazzato echo|grep con
+# [[ =~ ]] nativo in query-to-features.sh (112ms → 9ms). Qui il volume di
+# righe da controllare (una per match, fino a ~2000 per file) rende la
+# differenza analoga.
+_sal_line_ts() {
+    local _line="$1"
+    if [[ "$_line" =~ ([0-9]{4}-[0-9]{2}-[0-9]{2})[T\ ]([0-9]{2}:[0-9]{2}:[0-9]{2}) ]]; then
+        echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+        return
+    fi
+    if [[ "$_line" =~ \[([0-9]{2})/([A-Za-z]{3})/([0-9]{4}):([0-9]{2}:[0-9]{2}:[0-9]{2}) ]]; then
+        local _mnum="${_SAL_MONTHS[${BASH_REMATCH[2]}]:-}"
+        [[ -n "$_mnum" ]] && echo "${BASH_REMATCH[3]}-${_mnum}-${BASH_REMATCH[1]} ${BASH_REMATCH[4]}"
+    fi
+}
+
 # Arrays paralleli: un elemento per file trovato
 all_labels=() all_paths=() all_nodes=()
 
@@ -140,6 +172,30 @@ for (( i=0; i<total_files; i++ )); do
         else
             _matches=$(grep -iE "$sp" "$pth" 2>/dev/null || true)
         fi
+
+        # Filtro temporale riga per riga — select_log_files() (sopra) filtra solo
+        # a livello di FILE (include il file se il suo intervallo si sovrappone
+        # al range), non riga per riga. Un log corrente non ruotato copre l'intera
+        # giornata: senza questo filtro "ultime 2 ore" restituiva anche match delle
+        # 10:10 o delle 06:21 — bug reale (2026-08-05). Stessa logica di in_range()
+        # in utils-time.awk (usata da filter_errors.awk), qui in bash perché questo
+        # tool non gira su AWK. Righe senza timestamp riconoscibile (continuazioni
+        # di stack trace) sono mantenute: scartarle butterebbe via contesto utile
+        # e non sono comunque il bersaglio primario del filtro temporale.
+        if [[ -n "$tf_cmp" || -n "$tt_cmp" ]]; then
+            _filtered=""
+            while IFS= read -r _line; do
+                [[ -z "$_line" ]] && continue
+                _lts=$(_sal_line_ts "$_line")
+                if [[ -n "$_lts" ]]; then
+                    [[ -n "$tf_cmp" && "$_lts" < "$tf_cmp" ]] && continue
+                    [[ -n "$tt_cmp" && "$_lts" > "$tt_cmp" ]] && continue
+                fi
+                _filtered+="${_line}"$'\n'
+            done <<< "$_matches"
+            _matches="${_filtered%$'\n'}"
+        fi
+
         hits=$(echo "$_matches" | grep -c '' 2>/dev/null || true)
         # grep -c '' conta 1 anche su stringa vuota — correggiamo
         [[ -z "$_matches" ]] && hits=0
@@ -237,11 +293,22 @@ for (( i=0; i<total_files; i++ )); do
         _prev_node="$_n"
         (( _row_dim = 1 - _row_dim ))
     fi
-    # _RL: colore riga per "nodo XX  filename" — alterna normale/DIM per gruppo nodo.
-    # Il numero nodo è sempre bold+white per garantire contrasto su entrambi gli sfondi.
-    # Barra, conteggio, timestamp sono sempre a colori pieni (non DIMmati).
+    # _RL: sfondo alternato per gruppo nodo, non solo testo attenuato — DIM (solo
+    # riduzione di luminosità del foreground) era troppo poco visibile per essere
+    # utile a distinguere i gruppi (segnalato dall'utente, 2026-08-05). \033[100m
+    # è sfondo grigio scuro (SGR bright-black, estensione aixterm ampiamente
+    # supportata, stesso registro esteso già usato per \033[97m bianco intenso).
+    # _RR ("reset riga") sostituisce ogni \033[0m INTERNO alla riga: un reset pieno
+    # cancellerebbe anche il background appena impostato, spegnendolo a metà riga.
+    # Solo l'ultimo \033[0m di fine riga resta un reset pieno (niente da preservare
+    # dopo). Il numero nodo resta sempre bold+white per garantire contrasto su
+    # entrambi gli sfondi.
     _RL="\033[0m"
-    [[ "$_row_dim" -eq 1 ]] && _RL="\033[2m"
+    _RR="\033[0m"
+    if [[ "$_row_dim" -eq 1 ]]; then
+        _RL="\033[100m"
+        _RR="\033[0m\033[100m"
+    fi
 
     bar_len=$(( _h * bar_max / max_hits ))
     [[ "$bar_len" -lt 1 ]] && bar_len=1
@@ -257,15 +324,16 @@ for (( i=0; i<total_files; i++ )); do
     # "nodo" in DIM, numero sempre bold+white, filename nella tonalità della riga.
     # Il numero è pad-dato a _node_w cifre così la colonna resta allineata
     # all'header anche quando i nodi hanno lunghezze diverse (es. "4" e "12").
+    # Usa _RR (non _X) per non spegnere il background a metà riga.
     node_col=""
     if [[ "$_multi_node" -eq 1 ]]; then
-        node_col=$(printf "${_D}nodo ${_X}\033[1m\033[97m%${_node_w}s${_X}  " "$_n")
+        node_col=$(printf "${_D}nodo ${_RR}\033[1m\033[97m%${_node_w}s${_RR}  " "$_n")
     fi
 
-    printf "  ${node_col}${_RL}%-${max_lbl}s${_X}  ${bc}%s${_X}%s  %6d" \
+    printf "  ${_RL}${node_col}%-${max_lbl}s${_RR}  ${bc}%s${_RR}%s  %6d" \
         "$_l" "$bar" "$bar_pad" "$_h"
-    printf "  ${_D}│${_X}  %-19s" "${_t:--}"
-    printf "  ${_D}│${_X}  %-19s\n" "${_tlast:--}"
+    printf "  ${_D}│${_RR}  %-19s" "${_t:--}"
+    printf "  ${_D}│${_RR}  %-19s${_X}\n" "${_tlast:--}"
 
     if [[ "$_h" -gt "$best_hits" ]]; then
         best_hits="$_h"; best_node="$_n"
