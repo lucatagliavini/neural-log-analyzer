@@ -70,6 +70,20 @@ assert_eq "'dall'inizio' -> head"      "head" "$(_extract "leggi il log dall'ini
 assert_eq "falso positivo evitato ('primavera')" "tail" \
     "$(_extract 'log della primavera scorsa' LOG_ORDER)"
 
+# ─── "oggi" — giorno di calendario intero, non "fino a ora" ──────────────────
+# Bug reale (2026-08-05): "oggi" produceva TIME_TO=now_hhmm invece di 23:59,
+# incoerente col default di sessione (chatbot.sh: oggi 00:00->23:59) e con
+# "ieri" (00:00->23:59). Segnalato dall'utente confrontando "stamattina" (finestra
+# fissa 06:00-12:00, coerente) con "oggi" (finestra che si restringeva all'ora
+# della query). Fix in lib/utils-time.sh: _RE_TODAY ora usa 23:59 fisso.
+section "\"oggi\" (giorno di calendario intero)"
+
+today="$(date +%Y-%m-%d)"
+assert_eq "'oggi' -> TIME_FROM inizio giornata" "${today}T00:00" \
+    "$(_extract 'errori oggi' TIME_FROM)"
+assert_eq "'oggi' -> TIME_TO fine giornata (23:59, non ora corrente)" "${today}T23:59" \
+    "$(_extract 'errori oggi' TIME_TO)"
+
 # ─── NAMED_LOG dalla whitelist ────────────────────────────────────────────────
 section "NAMED_LOG (whitelist APP_LOG_NAMES)"
 

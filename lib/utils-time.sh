@@ -247,9 +247,15 @@ resolve_time_range() {
         fi
 
     # ── "oggi" ────────────────────────────────────────────────────────────────
+    # Giorno di calendario intero (00:00→23:59), come "ieri" — non "ultime ore
+    # da ora" (quello è il gruppo _RE_LAST_*). Coerente col default di sessione
+    # in chatbot.sh (ACTIVE_TIME_FROM/TO inizializzati a oggi 00:00→23:59): senza
+    # questo, dire "oggi" esplicitamente in una query produceva una finestra più
+    # corta del default della sessione, un comportamento sorprendente segnalato
+    # dall'utente (2026-08-05).
     elif [[ -n "$(_qmatch "$query" "$_RE_TODAY")" ]]; then
         time_from="${now_date}T00:00"
-        time_to="${now_date}T${now_hhmm}"
+        time_to="${now_date}T23:59"
     fi
 
     # Sanity check: se _date ha restituito stringa vuota, azzera time_from
