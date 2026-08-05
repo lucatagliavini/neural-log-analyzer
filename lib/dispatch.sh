@@ -104,42 +104,28 @@ skip_msg() {
     printf "\033[33m[SKIP] %s\033[0m\n" "$1"
 }
 
-# Quando un log richiesto non esiste, elenca quelli realmente presenti sul nodo.
-# L'avviso di param-extract.sh mostra gli ALIAS noti da entities.conf, che possono
-# divergere dal disco (es. "plugin" in whitelist contro "plugins" reale): qui si
-# guarda cosa c'è davvero, che è l'informazione di cui l'utente ha bisogno.
-# Se un nome simile esiste lo si mette in evidenza — l'errore tipico è un refuso.
-suggest_available_logs() {
-    local dir="$1" wanted="${2:-}"
+# Estrae i nomi logici dei log ".log" presenti in una directory (Guidewire), uno
+# per riga su stdout. Scarta i nomi con caratteri non digitabili: sul nodo esiste
+# "${gw.cc.serverid}-messaging.log", un placeholder Guidewire non risolto nella
+# loro config — non è un log che qualcuno possa nominare, sarebbe solo rumore.
+# Condivisa da suggest_available_logs() (reattivo, su nome sbagliato) e
+# list_available_logs() (su richiesta esplicita) — stessa fonte di verità.
+_log_names_in_dir() {
+    local dir="$1"
     [[ -z "$dir" || ! -d "$dir" ]] && return
-    # Scarta i nomi con caratteri non digitabili: sul nodo esiste
-    # "${gw.cc.serverid}-messaging.log", un placeholder Guidewire non risolto nella
-    # loro config — non è un log che qualcuno possa nominare, sarebbe solo rumore.
-    local -a names=()
-    while IFS= read -r n; do [[ -n "$n" ]] && names+=("$n"); done < <(
-        find "$dir" -maxdepth 1 -name "*.log" 2>/dev/null \
-            | sed -E 's|.*/||; s/^[A-Za-z0-9]+-//; s/\.log$//' \
-            | grep -E '^[A-Za-z0-9_.-]+$' | sort -u)
+    find "$dir" -maxdepth 1 -name "*.log" 2>/dev/null \
+        | sed -E 's|.*/||; s/^[A-Za-z0-9]+-//; s/\.log$//' \
+        | grep -E '^[A-Za-z0-9_.-]+$' | sort -u
+}
+
+# Stampa un elenco di nomi impaginato in colonne allineate (assume DIM/RESET già
+# nell'ambiente chiamante). Su un nodo con 27 log una riga sola sono ~470 caratteri,
+# che il terminale spezza dove capita — tagliando i nomi a metà (Card_ / denunce_...)
+# e rendendo faticoso cercarne uno a vista.
+_print_names_in_columns() {
+    local -a names=("$@")
     [[ "${#names[@]}" -eq 0 ]] && return
-
-    local _D="\033[2m" _B="\033[1m" _X="\033[0m"
-    # Match parziale case-insensitive: cattura i refusi e le differenze di plurale
-    if [[ -n "$wanted" ]]; then
-        local -a near=()
-        local n
-        for n in "${names[@]}"; do
-            [[ "${n,,}" == *"${wanted,,}"* || "${wanted,,}" == *"${n,,}"* ]] && near+=("$n")
-        done
-        if [[ "${#near[@]}" -gt 0 ]]; then
-            printf "  ${_D}Forse cercavi:${_X} ${_B}%s${_X}\n" "$(printf '%s.log ' "${near[@]}")"
-            return
-        fi
-    fi
-
-    # In colonne allineate: su questo nodo i log sono 27 e su una riga sola sono ~470
-    # caratteri, che il terminale spezza dove capita — tagliando i nomi a metà
-    # (Card_ / denunce_...) e rendendo faticoso cercarne uno a vista.
-    printf "  ${_D}Log presenti su questo nodo (%d):${_X}\n" "${#names[@]}"
+    local _D="\033[2m" _X="\033[0m"
     local _w="${COLUMNS:-100}"
     [[ "$_w" -lt 40 ]] && _w=100
     local _line
@@ -158,6 +144,77 @@ suggest_available_logs() {
         done < <(printf '%s\n' "${names[@]}" | paste -d'\t' - - - \
                  | awk -F'\t' '{printf "%-34s %-34s %s\n", $1, $2, $3}')
     fi
+}
+
+# Quando un log richiesto non esiste, elenca quelli realmente presenti sul nodo.
+# L'avviso di param-extract.sh mostra gli ALIAS noti da entities.conf, che possono
+# divergere dal disco (es. "plugin" in whitelist contro "plugins" reale): qui si
+# guarda cosa c'è davvero, che è l'informazione di cui l'utente ha bisogno.
+# Se un nome simile esiste lo si mette in evidenza — l'errore tipico è un refuso.
+suggest_available_logs() {
+    local dir="$1" wanted="${2:-}"
+    local -a names=()
+    while IFS= read -r n; do [[ -n "$n" ]] && names+=("$n"); done < <(_log_names_in_dir "$dir")
+    [[ "${#names[@]}" -eq 0 ]] && return
+
+    local _D="\033[2m" _B="\033[1m" _X="\033[0m"
+    # Match parziale case-insensitive: cattura i refusi e le differenze di plurale
+    if [[ -n "$wanted" ]]; then
+        local -a near=()
+        local n
+        for n in "${names[@]}"; do
+            [[ "${n,,}" == *"${wanted,,}"* || "${wanted,,}" == *"${n,,}"* ]] && near+=("$n")
+        done
+        if [[ "${#near[@]}" -gt 0 ]]; then
+            printf "  ${_D}Forse cercavi:${_X} ${_B}%s${_X}\n" "$(printf '%s.log ' "${near[@]}")"
+            return
+        fi
+    fi
+
+    printf "  ${_D}Log presenti su questo nodo (%d):${_X}\n" "${#names[@]}"
+    _print_names_in_columns "${names[@]}"
+}
+
+# Elenco su richiesta esplicita (list_logs), non reattivo come suggest_available_logs().
+# Due sezioni perché le due famiglie si nominano con sintassi diversa: i Guidewire
+# via NAMED_LOG ("<nome>.log"), access/server/gc via LOG_TYPE ("access log", ecc.) —
+# mescolarli suggerirebbe una sintassi che per i secondi non funziona.
+list_available_logs() {
+    local _D="\033[2m" _B="\033[1m" _X="\033[0m"
+
+    printf "  ${_B}Log applicativi${_X}\n"
+    local -a gw_names=()
+    while IFS= read -r n; do [[ -n "$n" ]] && gw_names+=("$n"); done < <(_log_names_in_dir "${GUIDEWIRE_LOG_DIR:-}")
+    if [[ "${#gw_names[@]}" -eq 0 ]]; then
+        printf "  ${_D}Nessun log applicativo trovato sul nodo.${_X}\n"
+    else
+        printf "  ${_D}%d log, si nominano con l'estensione (es: «ultime righe del %s.log»):${_X}\n" \
+            "${#gw_names[@]}" "${gw_names[0]}"
+        _print_names_in_columns "${gw_names[@]}"
+    fi
+
+    printf "\n  ${_B}Log di sistema${_X}\n"
+    local found=0
+
+    local access_dir="${ACCESS_LOG_DIR:-$(dirname "${ACCESS_LOG:-.}" 2>/dev/null)}"
+    if [[ -n "${ACCESS_LOG_BASE:-}" ]] \
+        && find "$access_dir" -maxdepth 1 -type f -name "${ACCESS_LOG_BASE}*" 2>/dev/null | grep -q .; then
+        printf "  ${_D}presente — si chiede con: «access log»${_X}\n"
+        found=1
+    fi
+    local server_dir="${SERVER_LOG_DIR:-$(dirname "${SERVER_LOG:-.}" 2>/dev/null)}"
+    if [[ -n "${SERVER_LOG_BASE:-}" ]] \
+        && find "$server_dir" -maxdepth 1 -type f -name "${SERVER_LOG_BASE}*" 2>/dev/null | grep -q .; then
+        printf "  ${_D}presente — si chiede con: «server log»${_X}\n"
+        found=1
+    fi
+    local gc_dir="${GC_LOG_DIR:-$(dirname "${GC_LOG:-.}" 2>/dev/null)}"
+    if [[ -n "${GC_LOG_BASE:-}" ]] \
+        && find "$gc_dir" -maxdepth 1 -type f -name "${GC_LOG_BASE}*" 2>/dev/null | grep -q .; then
+        printf "  ${_D}presente — si chiede con: «statistiche gc»${_X}\n"
+        found=1
+    fi
+    [[ "$found" -eq 0 ]] && printf "  ${_D}Nessuno trovato sul nodo.${_X}\n"
 }
 
 # Stampa quale file (o quali) il tool sta effettivamente leggendo.
@@ -309,6 +366,7 @@ dispatch_tool() {
                         -f "$TOOLS_DIR/tail_log.awk" \
                         -v tail_n="${TAIL_N:-50}" -v log_kind="server" \
                         -v time_from="${TIME_FROM:-}" -v time_to="${TIME_TO:-}" \
+                        -v order="${LOG_ORDER:-tail}" \
                         "$logs_expr"
                 else
                     logs_expr="$(open_current_server_logs)"
@@ -316,6 +374,7 @@ dispatch_tool() {
                     eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
                         -f "$TOOLS_DIR/tail_log.awk" \
                         -v tail_n="${TAIL_N:-50}" \
+                        -v order="${LOG_ORDER:-tail}" \
                         "$logs_expr"
                 fi
             else
@@ -327,6 +386,7 @@ dispatch_tool() {
                         -f "$TOOLS_DIR/tail_log.awk" \
                         -v tail_n="${TAIL_N:-50}" -v log_kind="access" \
                         -v time_from="${TIME_FROM:-}" -v time_to="${TIME_TO:-}" \
+                        -v order="${LOG_ORDER:-tail}" \
                         "$logs_expr"
                 else
                     logs_expr="$(open_current_logs)"
@@ -334,6 +394,7 @@ dispatch_tool() {
                     eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
                         -f "$TOOLS_DIR/tail_log.awk" \
                         -v tail_n="${TAIL_N:-50}" \
+                        -v order="${LOG_ORDER:-tail}" \
                         "$logs_expr"
                 fi
             fi
@@ -368,6 +429,7 @@ dispatch_tool() {
                 eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
                     -f "$TOOLS_DIR/tail_named_log.awk" \
                     -v tail_n="${TAIL_N:-50}" \
+                    -v order="${LOG_ORDER:-tail}" \
                     "$glob_expr"
                 return
             fi
@@ -398,6 +460,7 @@ dispatch_tool() {
             eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
                 -f "$TOOLS_DIR/tail_named_log.awk" \
                 -v tail_n="${TAIL_N:-50}" \
+                -v order="${LOG_ORDER:-tail}" \
                 "$(open_log "$log_path")"
             ;;
         grep_named_log)
@@ -463,6 +526,9 @@ dispatch_tool() {
 
         show_help)
             print_help
+            ;;
+        list_logs)
+            list_available_logs
             ;;
         *)
             echo "[WARN] Tool sconosciuto: $tool" >&2

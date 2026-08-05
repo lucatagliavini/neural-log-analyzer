@@ -116,6 +116,11 @@ INTENT_TESTS=(
     "tail_log|ultime righe del log"
     "tail_log|ultime 100 righe"
 
+    # tail_log — LOG_ORDER (NEXT-2): "prime" resta tail_log, cambia solo la
+    # direzione estratta da param-extract.sh, non la classe.
+    "tail_log|prime 10 righe del log"
+    "tail_log|dammi le prime 20 richieste"
+
     # filter_ip
     "filter_ip|traffico per indirizzo ip sul nodo 2"
     "filter_ip|traffico dall'ip 10.0.0.1"
@@ -128,6 +133,10 @@ INTENT_TESTS=(
     "tail_named_log|ultime righe del cc.log"
     "tail_named_log|dammi la coda del api.log"
     "!grep_named_log|ultime righe del cc.log"
+
+    # tail_named_log — LOG_ORDER (NEXT-2)
+    "tail_named_log|prime 10 righe del cc.log"
+    "tail_named_log|mostrami le prime 20 righe del database.log"
 
     # grep_named_log — fix backlog
     "grep_named_log|problemi sul cc.log del nodo 12 di produzione"
@@ -176,6 +185,23 @@ INTENT_TESTS=(
     "show_help|cosa puoi fare"
     "show_help|help"
     "show_help|che strumenti hai"
+
+    # list_logs — LIST-1
+    "list_logs|che log ci sono"
+    "list_logs|quali log posso vedere"
+    "list_logs|elenco dei log disponibili"
+    "list_logs|lista dei log"
+    "list_logs|che log ci sono sul nodo 5"
+    "list_logs|quali log sono presenti sul nodo"
+    "list_logs|elenca tutti i log del nodo"
+    # confini — più importanti dei positivi: proteggono le due collisioni con
+    # show_help (capacità vs esistenza) e search_all_logs (c'è vs ci sono)
+    "!list_logs|quali log sai analizzare"
+    "!list_logs|in quali log c'è il claim 1-8101-2026-0473954"
+    "!list_logs|cerca NullPointerException in tutti i log"
+    "!list_logs|elenca le ultime righe del log"
+    "show_help|quali log sai leggere"
+    "search_all_logs|in quali log c'è la stringa NullPointerException"
 )
 
 run_intent_tests() {

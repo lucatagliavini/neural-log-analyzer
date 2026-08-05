@@ -38,10 +38,9 @@ trap 'rm -rf "$WORK"' EXIT
 
 RED="\033[31m"; GREEN="\033[32m"; RESET="\033[0m"
 
-# Checksum di riferimento — rigenerati il 2026-08-04 dopo la generalizzazione dei nomi
-# di log con il placeholder <LOGFILE> (BACKLOG LOGF): il vocabolario è passato da 114 a
-# 108 feature e il dataset da 1008 a 1014 esempi, quindi i valori precedenti non sono
-# più raggiungibili.
+# Checksum di riferimento — rigenerati il 2026-08-05 dopo l'aggiunta del tool list_logs
+# (NEXT-1): 2 unigram + 1 bigram nuovi (108 → 111 feature) e una nuova classe di output
+# (15 → 16 tool), quindi i valori precedenti non sono più raggiungibili.
 # Prodotti e verificati con OMP_NUM_THREADS=1 (3 run bit-identici) — vedi la nota sui
 # thread in testa al file: i valori multi-thread NON sono stabili.
 #
@@ -49,14 +48,14 @@ RED="\033[31m"; GREEN="\033[32m"; RESET="\033[0m"
 # Qualsiasi modifica al vocabolario o a queries_labeled.txt li invalida per costruzione —
 # in quel caso rigenerarli, non "aggiustarli", e verificare che la riproducibilità regga
 # su almeno 3 run consecutivi.
-EXPECTED_L1="c302165305eb23819a7dfb92800ab0da"
-EXPECTED_L2="4b506c4253bba751de45bf335111b305"
+EXPECTED_L1="29ad3a62474da4804b808e59ecf58263"
+EXPECTED_L2="5415c8077c393a3957d66935bb652df5"
 
 # La topologia deve combaciare con NUM_FEATURES del profilo: train.py scarta le righe
 # con un numero di colonne diverso da num_features+num_outputs, e con dataset e topologia
 # disallineati il dataset si svuota (errore esplicito "Dataset vuoto", ma il test
 # morirebbe per set -e prima del confronto checksum — vedi sessione 2026-08-04).
-TOPOLOGY="108,48,15"
+TOPOLOGY="111,48,16"
 
 echo "[INFO] Genero pesi freschi (seed 7, topologia $TOPOLOGY)..."
 "$NNET_INIT" "$WORK/model" "$TOPOLOGY" --activation sigmoid --method xavier --seed 7 --force > /dev/null

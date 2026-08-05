@@ -2,7 +2,8 @@
 #
 # Estrae parametri strutturati da una query in linguaggio naturale.
 # Emette variabili shell: TIME_FROM, TIME_TO, DATE_FILTER,
-#                         STATUS_CODE, THRESHOLD_MS, IP_FILTER, TAIL_N, NAMED_LOG
+#                         STATUS_CODE, THRESHOLD_MS, IP_FILTER, TAIL_N, LOG_ORDER,
+#                         NAMED_LOG
 #
 # Uso: eval "$(./lib/param-extract.sh "errori 500 delle ultime 3 ore")"
 #
@@ -53,6 +54,14 @@ if echo "$query" | grep -qE "ultim[ei] [0-9]+ *(rig[ah]|record|log|linee|lin)"; 
     TAIL_N=$(echo "$query" | grep -oE "ultim[ei] [0-9]+" | grep -oE "[0-9]+" | head -1)
 elif echo "$query" | grep -qE "(mostra|dammi|visualizza) [0-9]+ *(rig[ah]|record|log|linee)"; then
     TAIL_N=$(echo "$query" | grep -oE "[0-9]+" | head -1)
+fi
+
+# Direzione di lettura per tail_log/tail_named_log: "prime/iniziali/all'inizio"
+# → head, altrimenti tail (default). Stesso schema di TAIL_N: un parametro, non
+# una nuova classe — "prime" vs "ultime" è la direzione, non il tipo di analisi.
+LOG_ORDER="tail"
+if echo "$query" | grep -qE "\bprim[ei]\b|\biniziali\b|all.inizio"; then
+    LOG_ORDER="head"
 fi
 
 # Livello log per grep_named_log: "problemi/anomalie" → WARN+ (ERROR+WARN),
@@ -196,6 +205,7 @@ echo "STATUS_CODE='${STATUS_CODE}'"
 echo "THRESHOLD_MS='${THRESHOLD_MS}'"
 echo "IP_FILTER='${IP_FILTER}'"
 echo "TAIL_N='${TAIL_N}'"
+echo "LOG_ORDER='${LOG_ORDER}'"
 echo "NAMED_LOG='${NAMED_LOG}'"
 echo "LOG_LEVEL='${LOG_LEVEL}'"
 echo "LOG_TYPE='${LOG_TYPE}'"

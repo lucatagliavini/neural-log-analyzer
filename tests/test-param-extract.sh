@@ -55,6 +55,21 @@ assert_eq() {
 
 section() { printf "\n${BOLD}── %s ${RESET}${DIM}%s${RESET}\n" "$1" "────────────────────────────"; }
 
+# ─── LOG_ORDER (NEXT-2: head/tail come parametro) ─────────────────────────────
+section "LOG_ORDER (direzione head/tail)"
+
+assert_eq "default: tail"              "tail" "$(_extract 'ultime 10 righe del log' LOG_ORDER)"
+assert_eq "'prime N righe' -> head"    "head" "$(_extract 'prime 10 righe del log' LOG_ORDER)"
+# "prima" singolare non e' coperto di proposito: e' ambiguo in italiano
+# ("prima riga" ordinale vs "successo prima" temporale/"before"), e zero query
+# nel dataset lo usano nel senso ordinale. Solo "prime" plurale -> head.
+assert_eq "'prime righe' -> head"      "head" "$(_extract 'mostrami le prime righe' LOG_ORDER)"
+assert_eq "'righe iniziali' -> head"   "head" "$(_extract 'righe iniziali del cc.log' LOG_ORDER)"
+assert_eq "'dall'inizio' -> head"      "head" "$(_extract "leggi il log dall'inizio" LOG_ORDER)"
+# "primavera" non deve attivare head: \bprim[ei]\b richiede il confine di parola
+assert_eq "falso positivo evitato ('primavera')" "tail" \
+    "$(_extract 'log della primavera scorsa' LOG_ORDER)"
+
 # ─── NAMED_LOG dalla whitelist ────────────────────────────────────────────────
 section "NAMED_LOG (whitelist APP_LOG_NAMES)"
 

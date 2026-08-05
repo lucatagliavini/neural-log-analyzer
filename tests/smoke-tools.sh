@@ -56,6 +56,7 @@ declare -a TOOL_ORDER=(
     grep_named_log
     search_all_logs
     show_help
+    list_logs
 )
 
 declare -A TOOL_QUERY
@@ -74,6 +75,7 @@ TOOL_QUERY[tail_named_log]="ultime 30 righe del cc.log"
 TOOL_QUERY[grep_named_log]="problemi e anomalie nel cc.log"
 TOOL_QUERY[search_all_logs]="cerca NullPointerException nei log"
 TOOL_QUERY[show_help]="aiuto"
+TOOL_QUERY[list_logs]="che log ci sono"
 
 # ─── Filtra se --tool specificato ─────────────────────────────────────────────
 if [[ -n "$FILTER_TOOL" ]]; then

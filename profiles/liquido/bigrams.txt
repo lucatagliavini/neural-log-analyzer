@@ -29,3 +29,16 @@ rig[ah]|tail\b               :: ultim|recent|recenti
 # ── GC + lentezza/latenza → correlate_gc_slow (non gc_stats o service_times) ─
 # peso 2 per dominare su gc_stats e service_times
 gc\b|garbage|jvm\b|g1gc :: lent[oaie]|latenz|slow\b|impatto|degrada|rallent :: 2
+
+# ── interrogativo su "log" + predicato di esistenza → list_logs ───────────────
+# peso 2 per dominare l'unigram search_all_logs "dove.appare|...|in.quali.log"
+# (peso 2) e l'unigram show_help "quali.log.sai" (peso 2).
+# patternA = la FORMA interrogativa/quantificata sul contenitore ("quali log",
+# "che log", "tutti i log"); patternB = il predicato di ESISTENZA.
+# La co-presenza distingue "quali log CI SONO" (enumerare i contenitori) da
+# "in quali log C'È <token>" (cercare un contenuto): quest'ultima ha patternA ma
+# NON patternB, perché il pattern `ci.sono` non matcha "c'è".
+# NB: `log.applicativ` NON è in patternA — attivava la riga 216
+# (filter_app_errors "quante exception ci sono nel log applicativo").
+# Verificato: 0 esempi dei 1026 esistenti attivano la co-presenza.
+quali.log|che.log|quali.file.di.log|che.file.di.log|tutti.i.log :: ci.sono|sono.present|present|disponibil|esiston|elenc|lista :: 2

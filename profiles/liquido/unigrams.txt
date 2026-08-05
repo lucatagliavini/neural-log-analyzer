@@ -141,7 +141,7 @@ vediamo|un.occhiat         :: 1
 
 # ── Ricerca cross-log (C15) ───────────────────────────────────────────────────
 cerca\b|trova\b|ricerca\b|search\b :: 2
-dove.appare|dove.si.trova|in.quali.log|cerca.ovunque|tutti.i.log :: 2
+dove.appare|dove.si.trova|in.quali.log|cerca.ovunque|in.tutti.i.log :: 2
 
 # ── Help / assistenza (C14) ───────────────────────────────────────────────────
 aiuto|help\b|\baiutami\b         :: 2
@@ -175,3 +175,22 @@ coda|queue\b|batch\b        :: 1
 # plugin|ruleengine|studio / velocity — rimossi: erano nomi di log concreti nel
 # vocabolario, ora coperti da <logfile>. Le query che li usavano SENZA ".log"
 # ("errori nel jgroups log") sono state riformulate in queries_labeled.txt.
+
+# ── Elenco dei log presenti sul nodo (list_logs) ──────────────────────────────
+# Stato del FILESYSTEM ("quali log ci sono sul disco"), non capacità del chatbot
+# ("quali log so analizzare" → show_help) né ricerca di contenuto ("in quali log
+# c'è X" → search_all_logs). Il discriminante è il predicato di ESISTENZA
+# (ci sono / presenti / disponibili / esistono) ancorato al sostantivo "log".
+#
+# Niente spazi letterali: query-to-features.sh fa `${pattern// /}` e li rimuove.
+# `{0,14}` invece di `.*`: ancora il predicato al "log" a distanza di poche
+# parole ("log applicativi ci sono", "log di guidewire disponibili") senza
+# diventare `che.*analisi`-largo. Verificato: 0 match sui 1026 esempi esistenti.
+# Solo list_logs (1 classe) → peso 2, come i discriminatori di show_help/C15.
+log.{0,14}(ci.sono|sono.present|present|disponibil|esiston|abbiamo|posso.veder|posso.consultar|ho.a.disposizion|trovo) :: 2
+# Forma imperativa/nominale: "lista dei log", "elenco log del nodo 5".
+# NON `(lista|elenco).*log`: quella forma cattura 6 esempi esistenti (righe 403,
+# 411, 412, 413, 476, 477 — tail_log e filter_app_errors). Con l'ancoraggio
+# {0,14} + le sole forme "elenca i/tutti i log" i match diventano 0. Verificato.
+# Solo list_logs (1 classe) → peso 2.
+lista.{0,14}log|elenco.{0,14}log|elenca.i.log|elenca.tutti.i.log|elenca.i.file.di.log :: 2

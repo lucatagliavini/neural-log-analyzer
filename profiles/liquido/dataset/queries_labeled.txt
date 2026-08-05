@@ -833,8 +833,8 @@ grep_named_log	altri warning nel cc.log
 grep_named_log	altri errori nello stesso log guidewire
 grep_named_log	warning nel log guidewire corrente
 
-# ─── bigram [74]: GC + lentezza → correlate_gc_slow vs service_times ──────────
-# Esempi positivi correlate_gc_slow con bigram [74] attivo
+# ─── bigram [110]: GC + lentezza → correlate_gc_slow vs service_times ─────────
+# Esempi positivi correlate_gc_slow con bigram [110] attivo
 correlate_gc_slow	gc e lentezza delle richieste
 correlate_gc_slow	garbage collector e latenza alta
 correlate_gc_slow	jvm lenta durante il gc
@@ -1099,3 +1099,80 @@ correlate_gc_slow	cerca la correlazione tra gc pause e richieste lente
 correlate_gc_slow	cerca se il gc causa lentezza
 correlate_gc_slow	cerca se le pause gc impattano le richieste
 correlate_gc_slow	analizza la correlazione gc slow request
+
+# ─── NEXT-2: LOG_ORDER — "prime N righe" per tail_log/tail_named_log ─────────
+# Direzione (head/tail) è un parametro estratto da param-extract.sh, non una
+# feature che discrimina la classe: queste query restano tail_log/tail_named_log,
+# solo LOG_ORDER cambia. Servono esempi labeled perché zero query nel dataset
+# contenevano "prime" prima di oggi — senza training il classificatore non ha
+# mai visto la forma "prime N righe" insieme al contesto del tool giusto.
+tail_log	prime 10 righe del log
+tail_log	prime 50 righe di oggi
+tail_log	dammi le prime 20 richieste
+tail_log	mostrami le prime righe del log
+tail_log	prime righe del server log
+tail_log	prime 30 righe del log applicativo
+tail_log	fammi vedere le prime righe di oggi
+tail_named_log	prime 10 righe del cc.log
+tail_named_log	prime righe del api.log
+tail_named_log	mostrami le prime 20 righe del database.log
+tail_named_log	dammi le prime righe del messaging.log
+tail_named_log	prime 15 righe di "*-cc.log"
+
+# ─── LIST-1: list_logs — elenco dei log presenti sul nodo ─────────────────────
+# Stato del filesystem (28 log sul nodo di produzione), NON capacità del chatbot.
+# Confine con show_help: "quali log SAI analizzare" = capacità → show_help.
+# Confine con search_all_logs: "IN quali log C'È <token>" = contenuto → search.
+# Il discriminante è il predicato di esistenza (ci sono/presenti/disponibili).
+list_logs	che log ci sono
+list_logs	quali log ci sono
+list_logs	che log ci sono sul nodo 5
+list_logs	quali log ci sono in produzione
+list_logs	che log ci sono in collaudo
+list_logs	che log ci sono sul nodo di produzione
+list_logs	quali log posso vedere
+list_logs	che log posso vedere sul nodo 3
+list_logs	che log posso consultare
+list_logs	quali log sono presenti sul nodo
+list_logs	che log sono presenti in produzione
+list_logs	quali log esistono sul nodo 12
+list_logs	che log abbiamo sul nodo
+list_logs	quali log ho a disposizione
+list_logs	quali log trovo sul nodo 5
+list_logs	log disponibili
+list_logs	log disponibili sul nodo 7
+list_logs	elenco dei log disponibili
+list_logs	elenco dei log presenti sul nodo
+list_logs	elenco log del nodo 9
+list_logs	lista dei log
+list_logs	lista dei log disponibili
+list_logs	lista completa dei log del nodo 5
+list_logs	lista dei file di log del nodo
+list_logs	elenca i log
+list_logs	elenca tutti i log del nodo
+list_logs	elenca i log presenti in produzione
+list_logs	dimmi che log ci sono
+list_logs	mostrami quali log ci sono sul nodo 4
+list_logs	fammi vedere che log ci sono
+list_logs	che log applicativi ci sono
+list_logs	quali log applicativi ci sono sul nodo 5
+list_logs	che file di log ci sono sul nodo
+list_logs	quali file di log sono presenti
+
+# ─── LIST-1: negativi di confine — NON sono list_logs ─────────────────────────
+# [NEG → show_help] la domanda è sulle CAPACITÀ ("sai", "tipo di", "riesci"),
+# non sull'esistenza dei file. Rinforza le sole 2 righe esistenti (893-894).
+show_help	quali log sai leggere
+show_help	cosa sai analizzare tra i log
+show_help	che tipo di log ci sono nel tuo repertorio
+show_help	cosa puoi analizzare nei log applicativi
+show_help	su quali log puoi lavorare
+# [NEG → search_all_logs] c'è un TOKEN da cercare: "in quali log C'È <x>".
+# Rinforza il confine "c'è" (search) vs "ci sono" (list).
+search_all_logs	in quali log c'è la stringa NullPointerException
+search_all_logs	in quali log c'è il claim 1-8001-2026-0211995
+search_all_logs	dimmi in quali log appare DAOLavaParametri
+# [NEG OSTILE #1 → search_all_logs] attiva il bigram [103] (quali.log + ci.sono).
+search_all_logs	in quali log ci sono occorrenze di AssignmentException
+# [NEG OSTILE #2 → search_all_logs] attiva U2 (elenca.i.log) + appare\b.
+search_all_logs	elenca i log in cui appare NullPointerException

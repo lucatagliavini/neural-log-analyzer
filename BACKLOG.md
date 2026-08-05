@@ -258,7 +258,7 @@ l'asimmetria rendeva il fallback indistinguibile da un risultato corretto.
 | NLOG2-3 | **`ccJBatch.log` e `ccCanaliz.log` risolti come `cc`** — il loop su `APP_LOG_NAMES` iterava nell'ordine del file e `\bcc` matcha il prefisso. Il classificatore instradava bene su `tail_named_log`, ma `dispatch.sh` apriva `cc.log`: file sbagliato, nessun errore | **Fatto** (2026-08-04) — longest-match con `sort -k1,1rn -k2,2`, stesso pattern di `normalize-query.sh`. Trovato dal nuovo `tests/test-param-extract.sh`, non a mano |
 | NLOG2-6 | **`ccJBatch`/`ccCanaliz` scritti con le maiuscole nei pattern del vocabolario** — `normalize-query.sh` fa lowercase e `grep -qE` è case-sensitive, quindi `ccJBatch` nel pattern non matcha mai `ccjbatch` nella query normalizzata. `ccCanaliz.log` instradava su `tail_log` (98%, access log); `ccJBatch.log` passava i test al 92% **solo per via di `batch\b`**, non della feature named-log (che valeva 0) — un test verde per la ragione sbagliata | **Fatto** (2026-08-04) — pattern portati in minuscolo in `unigrams.txt` e nei 2 bigram. Dataset rigenerato **bit-identico** (nessun esempio labeled usa quella forma) → **nessun retrain**. Routing: `ccCanaliz.log` da `tail_log` a `tail_named_log` 99.1%, `ccJBatch.log` da 92% a 99.8%. Suite 46→48 test |
 | NLOG2-4 | Mismatch semantico vocabolario ↔ whitelist: il classificatore instradava su `tail_named_log` per qualsiasi `<nome>.log`, ma `param-extract.sh` risolveva `NAMED_LOG` solo dai nomi in `APP_LOG_NAMES` → per i 12 log reali fuori whitelist (`policysearch`, `concurrentDataChangeExceptionLog`, `inbound_mq_messages`, …) l'utente riceveva `[SKIP]` e doveva ripiegare sul glob | **Fatto** (2026-08-04) — vedi LOGF-10/11 |
-| NLOG2-5 | **Tool "lista log"** — spostato in NEXT-1, pianificato per la prossima sessione | Pianificato |
+| NLOG2-5 | **Tool "lista log"** — spostato in NEXT-1 | **Fatto** (2026-08-05) |
 
 ---
 
@@ -267,37 +267,76 @@ l'asimmetria rendeva il fallback indistinguibile da un risultato corretto.
 Due lavori concordati con l'utente, da fare insieme perché condividono il retrain e toccano
 gli stessi file. Nessuno dei due richiede modifiche alla topologia della rete.
 
-### NEXT-1 — Tool "lista log"
+### NEXT-1 — Tool "lista log" — **Fatto** (2026-08-05)
 
 **Obiettivo.** Mostrare all'utente quali log può nominare, invece di lasciarglielo scoprire per
 tentativi. Complemento di LOGF-11: `suggest_available_logs()` dice "ecco cosa c'è" *quando hai
 sbagliato*, questo lo direbbe *su richiesta* ("che log ci sono?", "quali log posso vedere").
 
-**Il mattone esiste già**: `suggest_available_logs()` in `dispatch.sh` fa il `find` sul nodo,
-filtra i nomi non digitabili (`${gw.cc.serverid}-messaging`) e li impagina in colonne.
-Manca solo l'aggancio: un tool che la invochi senza il ramo "forse cercavi".
+**Decisioni prese con l'utente:**
+1. **Nuova classe** `list_logs` (non estensione di `show_help`): "cosa so fare" (capacità
+   statiche) e "cosa c'è su questo nodo" (stato del filesystem) sono due domande diverse.
+   Topologia `108,48,15` → `111,48,16` (3 feature nuove + 1 classe nuova), retrain con pesi
+   da zero.
+2. **Include access/server/gc**, in **sezioni separate** perché si nominano con sintassi
+   diversa (`LOG_TYPE`, non `NAMED_LOG`): elencarli insieme senza distinguere suggerirebbe una
+   sintassi che per loro non funziona.
+3. **Richiede il contesto env/nodo**: coerente col resto del chatbot.
 
-**Perché la lista va dal disco e non da `APP_LOG_NAMES`**: misurato sul nodo `lxprjbliq05` —
-28 log reali, la whitelist ne elenca 16, di cui **2 con nome sbagliato**
-(`performance_integr` contro `performance_integrations`, `plugin` contro `plugins`). Una lista
-statica mostrerebbe nomi inesistenti e tacerebbe su 12 log presenti: sarebbe una risposta
-autorevole e sbagliata, peggio del silenzio.
+**Il problema misurato**: le query naturali («che log ci sono») avevano **vettore zero** —
+non classificabili — e due varianti collidevano con classi esistenti (`elenco dei log
+disponibili` → `tail_log` 85%, `lista dei log` → `show_help` 98%). Indagando le due collisioni
+attese la mappa reale era diversa da quella ipotizzata: `show_help` non richiedeva nessuna
+modifica (`che.*analisi` richiede la sottostringa letterale "analisi", assente in tutte le
+query candidate); la vera collisione con `search_all_logs` non era `in.quali.log` (innocuo) ma
+`tutti.i.log`, che scattava a peso 2 su «elenca tutti i log del nodo». Fix a costo minimo:
+`tutti.i.log` → `in.tutti.i.log`. Verificato ricalcolando la feature sull'intero dataset
+normalizzato: **0 divergenze su 1026 query** esistenti — rischio zero, misurato non stimato.
 
-**Decisioni ancora aperte:**
-1. **Nuova classe del classificatore o estensione di `show_help`?** Nuova classe = 16 tool,
-   ~20-30 esempi labeled, rebuild + retrain (la topologia cambia da `108,48,15` a
-   `108,48,16` — quindi `setup.sh --force` e pesi da zero). `show_help` non costa nulla ma
-   mescola "cosa so fare" con "cosa c'è su questo nodo", due domande diverse.
-2. **Include access/server/gc?** Si nominano con sintassi diversa (`"log applicativo"`,
-   `"access log"`) e passano da `LOG_TYPE`, non da `NAMED_LOG`. Elencarli insieme è più
-   completo ma suggerisce una sintassi che per loro non funziona.
-3. **Dipende dal contesto env/nodo attivo** (la dir Guidewire si risolve da `ACTIVE_ENV`/
-   `ACTIVE_NODE`/`ACTIVE_APP` via `resolve-logs.sh`): cosa risponde se il contesto non è
-   ancora impostato?
+**Implementazione:**
+1. `unigrams.txt`/`bigrams.txt` — 2 unigram + 1 bigram nuovi in append (108 → 111 feature,
+   indici esistenti invariati), tutti verificati a **0 falsi positivi sui 1026 esempi
+   preesistenti** prima di scrivere il codice. Il bigram (patternA = forma interrogativa sul
+   contenitore, patternB = predicato di esistenza) sfrutta che `ci.sono` non matcha `c'è`:
+   la distinzione «quali log **ci sono**» (list_logs) vs «in quali log **c'è** X»
+   (search_all_logs) è quasi tutta lì.
+2. `queries_labeled.txt` — 34 esempi `list_logs` + **10 negativi di confine** (5 `show_help`,
+   5 `search_all_logs`), di cui 3 deliberatamente ostili (attivano le nuove feature ma
+   restano della classe corretta) per insegnare il confine alla rete invece di nasconderlo.
+   3 esempi iniziali (`"che log sai leggere"`, `"quali tipi di log sai analizzare"`, `"quali
+   log riesci ad analizzare"`) risultavano a **vettore zero** al primo `build-dataset.sh` —
+   inutilizzabili per il training — e sono stati riformulati per aggrapparsi a pattern
+   `show_help` esistenti (`cosa.sai`, `quali.log.sai`) mantenendo l'intento del confine.
+3. `dispatch.sh` — estratto l'helper `_log_names_in_dir()` da `suggest_available_logs()`
+   (che oggi aveva il `find | sed | grep | sort -u` inline), condiviso con la nuova
+   `list_available_logs()` così l'elenco "su richiesta" e quello "hai sbagliato nome" non
+   divergono. `list_available_logs()`: sezione Guidewire (nomi dal disco) + sezione log di
+   sistema (verifica esistenza dei basename `ACCESS_LOG_BASE`/`SERVER_LOG_BASE`/`GC_LOG_BASE`
+   da `system.conf`, indicando come si chiedono). **Bug trovato in fase di test**: `find -maxdepth
+   1 -name "gc*"` matchava anche la *directory* stessa se il suo basename iniziava per `gc`
+   (qui la fixture di test si chiamava `gc`), dando un falso "presente" — fix con `-type f`.
+4. `domain.conf` — `NUM_TOOLS` 15→16, `list_logs` in coda a `TOOL_NAMES` (la posizione è
+   l'indice del neurone di output), nuova categoria help "Esplora log del nodo".
 
-### NEXT-2 — "Prime righe": direzione head/tail come parametro
+**Retrain**: 1070 esempi (1026+44), topologia `111,48,16`, MSE 0.001033, exact_match 98.5%,
+F1 0.990. Verificato con `--dry-run` su tutte le query di confine incluse le 2 ostili: tutte
+instradano correttamente (95-100%), nessun bisogno del piano B (bigram di disambiguazione
+già progettato ma non servito).
 
-**Obiettivo.** Supportare `"prime 10 righe del cc.log"`, oggi non gestito (zero esempi nel
+**Diff-check pre-training**: confrontando `queries.txt` prima/dopo, le righe preesistenti
+dovevano differire solo per le 3 colonne nuove (a zero). Il primo controllo segnalava 298
+righe diverse — falso allarme dovuto a un bug di indicizzazione nello script di verifica (il
+bigram nuovo, appeso in coda a `bigrams.txt`, è all'indice 110 non 103): corretto lo script,
+**0 righe realmente diverse**. Le regex erano corrette come da analisi statica preliminare.
+
+Test: `run-tests.sh --level1` 61→**74 PASS**; `test-param-extract.sh` **49 PASS** (invariato,
+verifica che il refactor di `suggest_available_logs()` non abbia introdotto regressioni);
+`test-normalize-parity.sh` **1070/1070**; `test-train-regression.sh` checksum rigenerati
+(`29ad3a62…`/`5415c807…`, topologia `111,48,16`), verificati bit-identici su 3 run.
+
+### NEXT-2 — "Prime righe": direzione head/tail come parametro — **Fatto** (2026-08-05)
+
+**Obiettivo.** Supportare `"prime 10 righe del cc.log"`, prima non gestito (zero esempi nel
 dataset con "prime").
 
 **Decisione presa: un parametro, NON nuovi tool.** Scartata l'ipotesi `head_log` /
@@ -305,7 +344,7 @@ dataset con "prime").
 - il classificatore non deve imparare una distinzione che si estrae dal testo — `"prime"` vs
   `"ultime"` è la *direzione*, come `TAIL_N` è la *quantità*. Stesso ragionamento che ha
   portato a `<LOGFILE>`: non moltiplicare le classi per informazione parametrica;
-- due classi in più significherebbero retrain di topologia e, in prospettiva, esplosione
+- due classi in più avrebbero richiesto retrain di topologia e, in prospettiva, esplosione
   combinatoria (head+named, head+glob, …);
 - il precedente nel progetto: `tail_log` già legge access **o** server log secondo `LOG_TYPE`,
   senza chiamarsi `access_or_server_tail_log`. Convenzione implicita: il nome dice il *tipo di
@@ -314,28 +353,39 @@ dataset con "prime").
 **Decisione presa: nessuna rinomina.** Valutato `htail_log`/`htail_named_log` e scartato —
 misurato il costo: **~24 file** e **134 righe di label nel dataset**, perché i nomi dei tool
 sono le label di training e l'ordine dell'output layer in `domain.conf:TOOL_NAMES` (la
-posizione determina quale neurone rappresenta quale classe). Beneficio puramente nominale, e
-`htail` è un neologismo che non chiarisce nulla. Se un domani servisse un nome neutro, i
-candidati sono `show_log`/`read_log`, ma il costo resterebbe lo stesso.
+posizione determina quale neurone rappresenta quale classe). Beneficio puramente nominale.
 
 **Implementazione:**
-1. `param-extract.sh` — nuovo `LOG_ORDER` (`head` se la query dice "prime"/"iniziali"/
-   "all'inizio", altrimenti `tail`). Stesso schema di `TAIL_N`.
+1. `param-extract.sh` — nuovo `LOG_ORDER` (`head` se la query dice `\bprim[ei]\b`/
+   `iniziali`/`all.inizio`, altrimenti `tail`). Stesso schema di `TAIL_N`.
 2. `lib/tools/tail_log.awk` e `tail_named_log.awk` — nuovo `-v order="head|tail"`. Con `head`
-   si stampa direttamente e si esce, **senza** il buffer circolare `buf[count % n]`: molto più
-   semplice e molto più veloce (non serve leggere l'intero file — su `cc.log` sono ~500.000
-   righe).
-3. `dispatch.sh` — passa `-v order="${LOG_ORDER:-tail}"` nei rami interessati.
-4. **`TOOL_DESC` in `domain.conf`** — richiesta esplicita dell'utente: frasi chiare che
-   rendano scopribile la funzione, perché `show_help` è dove l'utente scopre cosa può chiedere.
-   Es. `"Prime o ultime N righe di un file di log (es: «ultime 50 righe», «prime 20 righe»)"`.
-   `TOOL_DESC` non entra nel vocabolario → nessun impatto sul modello.
-5. Esempi labeled: ~10-15 con "prime N righe", per classi **esistenti** → rebuild + retrain
-   ordinario, **nessun cambio di topologia**.
+   si stampa non appena si raggiungono `tail_n` righe ed esce (`exit` nella regola principale),
+   **senza** il buffer circolare `buf[count % n]`: niente lettura del resto del file (su
+   `cc.log` sono ~500.000 righe).
+3. `dispatch.sh` — `-v order="${LOG_ORDER:-tail}"` propagato in tutti e 6 i punti di invocazione
+   dei due tool (4 rami di `tail_log`, 2 di `tail_named_log` inclusa la variante glob).
+4. `TOOL_DESC` in `domain.conf` (profili `liquido` e `usnext`) — descrizione aggiornata con
+   esempio "prime/ultime N righe", scopribile via `show_help`.
+5. 12 esempi labeled con "prime N righe" per le classi esistenti (`tail_log`/`tail_named_log`,
+   incluso un caso con glob quotato) → dataset 1014→1026, retrain ordinario, topologia invariata
+   `108,48,15`. Modello migliorato rispetto al precedente: MSE 0.001223→0.000908, exact_match
+   98.1%→98.4%, F1 0.988→0.990.
 
-**Da decidere in implementazione**: con `head`, il filtro temporale seleziona le prime righe
-*del file* o le prime *dentro la finestra*? Propendo per le seconde, coerente con come `tail`
-rispetta già la finestra.
+**Decisione presa in implementazione**: con `head`, il filtro temporale (quando presente) filtra
+le righe *prima* del conteggio head — quindi seleziona le prime righe **dentro la finestra**,
+non le prime del file, coerente con `tail`. Verificato in `tail_log.awk`: il check
+`time_from/time_to` con `next` avviene prima del branch `head_mode`. `tail_named_log.awk` non ha
+mai avuto filtro temporale (nessun cambiamento in merito).
+
+**Gap noto, lasciato aperto di proposito**: `\bprim[ei]\b` copre solo il plurale ("prime
+righe"). "Prima" singolare non è incluso — in italiano è ambiguo tra ordinale ("prima riga" →
+head) e temporale ("successo prima" → before), e zero query nel dataset lo usano nel senso
+ordinale. Documentato come test in `tests/test-param-extract.sh` per evitare regressioni
+accidentali che lo aggiungano senza dati a supporto.
+
+Suite: `run-tests.sh --level1` 57→**61 PASS**; `test-param-extract.sh` 43→**49 PASS**;
+`test-normalize-parity.sh` **1026/1026**; `test-train-regression.sh` checksum rigenerati
+(`c36f4a0e…`/`2aab4849…`, dataset cambiato) e riverificati bit-identici su 3 run.
 
 ---
 
