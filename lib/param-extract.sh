@@ -47,11 +47,11 @@ if echo "$query" | grep -qE "\b([0-9]{1,3}\.){3}[0-9]{1,3}\b"; then
     IP_FILTER=$(echo "$query" | grep -oE "\b([0-9]{1,3}\.){3}[0-9]{1,3}\b" | head -1)
 fi
 
-# Numero di righe per tail — richiede "ultime/ultimi N righe/righe/record/log"
+# Numero di righe per tail — richiede "ultime/ultimi/prime/primi N righe/record/log"
 # per non confliggere con "ultime 2 ore" / "ultimi 30 minuti"
 TAIL_N="50"
-if echo "$query" | grep -qE "ultim[ei] [0-9]+ *(rig[ah]|record|log|linee|lin)"; then
-    TAIL_N=$(echo "$query" | grep -oE "ultim[ei] [0-9]+" | grep -oE "[0-9]+" | head -1)
+if echo "$query" | grep -qE "(ultim|prim)[ei] [0-9]+ *(rig[ah]|record|log|linee|lin)"; then
+    TAIL_N=$(echo "$query" | grep -oE "(ultim|prim)[ei] [0-9]+" | grep -oE "[0-9]+" | head -1)
 elif echo "$query" | grep -qE "(mostra|dammi|visualizza) [0-9]+ *(rig[ah]|record|log|linee)"; then
     TAIL_N=$(echo "$query" | grep -oE "[0-9]+" | head -1)
 fi
@@ -132,10 +132,19 @@ if [[ -z "$NAMED_LOG" ]]; then
 fi
 
 # Tipo di log per tail_log: "server"/"applicativo" → server.log, default → access log
-# SERVER_LOG_FORMAT viene da system.conf — non hardcodiamo il nome della tecnologia.
+# SERVER_LOG_BASE ("server") viene da system.conf — è il nome con cui gli utenti
+# chiamano il file, non SERVER_LOG_FORMAT ("jboss"), che è la tecnologia sottostante
+# e non un sinonimo con cui una query nomina il log.
+#
+# Bug reale (2026-08-05): la regex copriva solo l'ordine "log <parola>" (log
+# applicativo, log jboss, log di sistema), mai l'ordine inverso "<parola> log"
+# (server log, server.log) — nonostante il dataset di training labeled contenga
+# entrambi gli ordini per "server" (query-to-features.sh li normalizza correttamente,
+# solo questo file li ignorava). "ultime righe del server.log" restava con
+# LOG_TYPE='' e tail_log leggeva l'access log invece del server log.
 LOG_TYPE=""
-_srv_fmt="${SERVER_LOG_FORMAT:-server}"
-if echo "$query" | grep -qiE "\b(log[[:space:]]+(applicativ|dell.applicaz|di[[:space:]]+sistema|${_srv_fmt})|applicativ[oa][[:space:]]+log)\b"; then
+_srv_words="server|applicativ[oa]?|dell.applicaz\\w*|${SERVER_LOG_FORMAT:-server}"
+if echo "$query" | grep -qiE "\blog[[:space:]]+(${_srv_words}|di[[:space:]]+sistema)\b|\b(${_srv_words})[.[:space:]]+log\b"; then
     LOG_TYPE="server"
 fi
 

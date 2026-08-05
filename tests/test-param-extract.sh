@@ -70,6 +70,41 @@ assert_eq "'dall'inizio' -> head"      "head" "$(_extract "leggi il log dall'ini
 assert_eq "falso positivo evitato ('primavera')" "tail" \
     "$(_extract 'log della primavera scorsa' LOG_ORDER)"
 
+# ─── TAIL_N — "prime N righe" deve rispettare N, non ricadere sul default ────
+# Bug reale (2026-08-05): il branch TAIL_N riconosceva solo "ultim[ei] N righe",
+# non "prim[ei] N righe" — quindi "prime 10 righe" restava a TAIL_N=50 (il
+# default) pur avendo scritto un numero esplicito. LOG_ORDER intanto diventava
+# correttamente "head": i due parametri divergevano silenziosamente.
+section "TAIL_N con \"prime N righe\""
+
+assert_eq "'prime 10 righe' -> TAIL_N=10 (non il default 50)" "10" \
+    "$(_extract 'prime 10 righe del log' TAIL_N)"
+assert_eq "'prime 10 righe di \"server.log\"' -> TAIL_N=10" "10" \
+    "$(_extract 'prime 10 righe del "server.log"' TAIL_N)"
+
+# ─── LOG_TYPE — "server log"/"server.log" deve risolvere al server log ──────
+# Bug reale (2026-08-05): la regex copriva solo l'ordine "log <parola>" (log
+# applicativo, log jboss, log di sistema), mai l'ordine inverso "<parola> log"
+# (server log, server.log) — nonostante il dataset labeled contenga entrambi gli
+# ordini per "server". "ultime righe del server.log" restava con LOG_TYPE=''
+# (fallback access log) invece di leggere il server log richiesto esplicitamente.
+section "LOG_TYPE (\"server log\" / \"server.log\" in entrambi gli ordini)"
+
+assert_eq "'server log' -> LOG_TYPE=server"    "server" \
+    "$(_extract 'ultime righe del server log' LOG_TYPE)"
+assert_eq "'server.log' tra virgolette -> LOG_TYPE=server" "server" \
+    "$(_extract 'ultime 10 righe del "server.log"' LOG_TYPE)"
+assert_eq "'log \"server.log\"' -> LOG_TYPE=server" "server" \
+    "$(_extract 'ultime 10 righe del log "server.log"' LOG_TYPE)"
+assert_eq "'log applicativo' (ordine originale) -> LOG_TYPE=server" "server" \
+    "$(_extract 'ultime righe del log applicativo' LOG_TYPE)"
+assert_eq "'log di sistema' -> LOG_TYPE=server"  "server" \
+    "$(_extract 'ultime righe del log di sistema' LOG_TYPE)"
+# Falso positivo da evitare: un NAMED_LOG che contiene "server" come sottostringa
+# non deve attivare LOG_TYPE=server (il \b finale su "server" li distingue).
+assert_eq "falso positivo evitato ('serverfarm.log')" "" \
+    "$(_extract 'ultime righe del serverfarm.log' LOG_TYPE)"
+
 # ─── "oggi" — giorno di calendario intero, non "fino a ora" ──────────────────
 # Bug reale (2026-08-05): "oggi" produceva TIME_TO=now_hhmm invece di 23:59,
 # incoerente col default di sessione (chatbot.sh: oggi 00:00->23:59) e con
