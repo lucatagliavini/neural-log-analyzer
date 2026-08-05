@@ -207,6 +207,45 @@ assert_eq "ricerca non popola il glob" "" \
 assert_eq "trigger senza virgolette: __MISSING__" "__MISSING__" \
     "$(_extract 'cerca NullPointerException in produzione' SEARCH_PATTERN)"
 
+# ─── DETECTED_NODE deve sopravvivere all'eval di param-extract.sh ─────────────
+# Bug reale (2026-08-05): chatbot.sh:179-198 esegue normalize-query.sh (che
+# popola DETECTED_NODE), poi invoca param-extract.sh via `eval "$(... )"`.
+# param-extract.sh gira in un sottoprocesso (command substitution) e non fa
+# altro che RI-EMETTERE DETECTED_NODE così com'è nel suo ambiente (vedi righe
+# 223-227 del file) — non lo calcola. Se DETECTED_NODE non è esportata dalla
+# shell chiamante prima di quella eval, il sottoprocesso lo eredita vuoto e lo
+# ri-emette vuoto, azzerando nella shell padre il valore appena rilevato da
+# normalize-query.sh. Impattava solo search_all_logs, l'unico tool che legge
+# DETECTED_NODE direttamente invece di ACTIVE_NODE (già risolto prima
+# dell'eval): "cerca X nel log del nodo 12" perdeva lo scope sul nodo 12 e
+# cercava su tutti i nodi. Fix: export DETECTED_APP DETECTED_ENV DETECTED_NODE
+# subito dopo normalize-query.sh, stesso pattern già usato per NORM_QUERY.
+section "DETECTED_NODE attraverso l'eval di param-extract.sh (replica chatbot.sh)"
+
+_query='cerca "searchHub" nel log del nodo 12'
+
+_without_export=$(
+    source <("$ROOT_DIR/lib/normalize-query.sh" "$_query")
+    eval "$(bash "$ROOT_DIR/lib/param-extract.sh" "$_query")"
+    echo "$DETECTED_NODE"
+)
+assert_eq "senza export: DETECTED_NODE si azzera (bug riprodotto)" "" "$_without_export"
+
+_with_export=$(
+    source <("$ROOT_DIR/lib/normalize-query.sh" "$_query")
+    export DETECTED_APP DETECTED_ENV DETECTED_NODE
+    eval "$(bash "$ROOT_DIR/lib/param-extract.sh" "$_query")"
+    echo "$DETECTED_NODE"
+)
+assert_eq "con export: DETECTED_NODE sopravvive (fix)" "12" "$_with_export"
+
+assert_eq "chatbot.sh esporta DETECTED_NODE prima dell'eval" "1" \
+    "$(awk '
+        /export NORM_QUERY/  { seen_norm=1 }
+        seen_norm && /export DETECTED_APP DETECTED_ENV DETECTED_NODE/ { found=1 }
+        /param-extract\.sh/ && found { print 1; exit }
+    ' "$ROOT_DIR/chatbot.sh")"
+
 # ─── utils-logfiles: nome logico e risoluzione glob ───────────────────────────
 section "utils-logfiles (rotazione e disambiguazione)"
 

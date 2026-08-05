@@ -178,6 +178,14 @@ run_query() {
     # Normalizza la query ed estrai entità (APP, ENV, NODE) — unica fonte di verità
     source <("$LIB_DIR/normalize-query.sh" "$query")
     export NORM_QUERY
+    # Esportate perché param-extract.sh (sotto) gira in un sottoprocesso via
+    # command substitution: senza export eredita queste variabili vuote e le
+    # ri-emette invariate (vedi commento in param-extract.sh), azzerando qui
+    # sotto quanto appena rilevato: bug reale (2026-08-05) — DETECTED_NODE
+    # tornava vuoto dopo l'eval di param-extract.sh, facendo perdere il nodo
+    # specificato in query a search_all_logs (unico tool che legge
+    # DETECTED_NODE direttamente invece di ACTIVE_NODE già risolto sopra).
+    export DETECTED_APP DETECTED_ENV DETECTED_NODE
 
     local ctx_changed=0
     [[ -n "$DETECTED_ENV"  && "$DETECTED_ENV"  != "$ACTIVE_ENV"  ]] && { ACTIVE_ENV="$DETECTED_ENV";  ctx_changed=1; }
