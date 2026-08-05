@@ -81,7 +81,7 @@ END {
         cnt   = _dup_cnt[dk]
         color = (rl == "ERROR") ? RED : (rl == "WARN") ? YELLOW : (rl == "INFO") ? WHT : ""
         rst   = (color != "") ? RESET : ""
-        cnt_str = (cnt > 1) ? sprintf(" (×%d)", cnt) : ""
+        cnt_str = (cnt > 1) ? sprintf(" %s(×%d)%s", CYAN, cnt, RESET) : ""
         printf "%s%-5s%s  %s%s%s  %s%s\n", \
             color, rl, rst, \
             DIM, substr(_dup_ts[dk], 1, 19), RESET, \

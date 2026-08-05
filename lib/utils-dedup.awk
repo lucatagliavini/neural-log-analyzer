@@ -52,7 +52,7 @@ function dedup_print(max_rows,    i, dk, rl, cnt, color, rst, cnt_str, n_lines, 
         cnt   = _dup_cnt[dk]
         color = (rl == "ERROR") ? RED : (rl == "WARN") ? YELLOW : (rl == "INFO") ? WHT : ""
         rst   = (color != "") ? RESET : ""
-        cnt_str = (cnt > 1) ? sprintf(" (×%d)", cnt) : ""
+        cnt_str = (cnt > 1) ? sprintf(" %s(×%d)%s", CYAN, cnt, RESET) : ""
 
         n_lines = split(_dup_msg[dk], msg_lines, "\n")
         printf "%s[%s] %-5s%s  %s%s\n", color, _dup_ts[dk], rl, rst, substr(msg_lines[1], 1, 120), cnt_str
