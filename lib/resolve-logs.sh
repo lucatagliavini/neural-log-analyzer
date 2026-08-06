@@ -12,9 +12,12 @@
 #
 # Struttura attesa:
 #   <base_dir>/<env>/<NODE_NAME_TEMPLATE>/<APP_SUBPATH>/
-#     server.log, gc.log, undertow_access_log.*.log
+#     ${SERVER_LOG_BASE}.log, ${GC_LOG_BASE}.log, ${ACCESS_LOG_BASE}.*.log
 #
-# NODE_NAME_TEMPLATE, APP_SUBPATH e GUIDEWIRE_SUBPATH sono template in system.conf.
+# NODE_NAME_TEMPLATE, APP_SUBPATH, GUIDEWIRE_SUBPATH e i tre *_LOG_BASE sono
+# definiti in system.conf — niente hardcoded qui (ARCH-6, "nessun default
+# implicito nel codice", consolidato 2026-08-06 rimuovendo la duplicazione
+# 'undertow_access_log'/'server'/'gc' che c'era prima in questo file).
 #
 
 # Carica sistema e dominio dal profilo attivo
@@ -66,6 +69,18 @@ if [[ ! -d "$APP_DIR" ]]; then
     exit 1
 fi
 
+# ─── Validazione *_LOG_BASE ────────────────────────────────────────────────────
+# Nessun default implicito (ARCH-6): un profilo che non li definisce deve
+# fallire qui in modo esplicito, non produrre path come "${APP_DIR}/.log"
+# con basename vuoto. Stesso pattern di guard di SERVER_LOG_FORMAT in
+# dispatch.sh.
+for _b in ACCESS_LOG_BASE SERVER_LOG_BASE GC_LOG_BASE; do
+    if [[ -z "${!_b:-}" ]]; then
+        echo "echo '[ERROR] resolve-logs: $_b non impostato in system.conf' >&2" >&2
+        exit 1
+    fi
+done
+
 # ─── File di log ─────────────────────────────────────────────────────────────
 resolve_log_file() {
     local base_path="$1"
@@ -75,21 +90,21 @@ resolve_log_file() {
     fi
 }
 
-SERVER_LOG_PATH=$(resolve_log_file "$APP_DIR/server.log")
+SERVER_LOG_PATH=$(resolve_log_file "$APP_DIR/${SERVER_LOG_BASE}.log")
 
 # Access log: path del file corrente (usato solo per validazione esistenza)
-ACCESS_LOG_PATH=$(resolve_log_file "$APP_DIR/undertow_access_log.log")
+ACCESS_LOG_PATH=$(resolve_log_file "$APP_DIR/${ACCESS_LOG_BASE}.log")
 if [[ -z "$ACCESS_LOG_PATH" ]]; then
     # fallback: qualsiasi file undertow presente
-    ACCESS_LOG_PATH=$(find "$APP_DIR" -maxdepth 1 -name "undertow_access_log*" 2>/dev/null | sort -r | head -1)
+    ACCESS_LOG_PATH=$(find "$APP_DIR" -maxdepth 1 -name "${ACCESS_LOG_BASE}*" 2>/dev/null | sort -r | head -1)
 fi
 if [[ -z "$ACCESS_LOG_PATH" ]]; then
-    echo "echo '[ERROR] resolve-logs: nessun undertow_access_log in $APP_DIR' >&2" >&2
+    echo "echo '[ERROR] resolve-logs: nessun ${ACCESS_LOG_BASE} in $APP_DIR' >&2" >&2
     exit 1
 fi
 
 # GC log: path del file corrente (usato solo per validazione esistenza)
-GC_LOG_PATH=$(resolve_log_file "$APP_DIR/gc.log")
+GC_LOG_PATH=$(resolve_log_file "$APP_DIR/${GC_LOG_BASE}.log")
 
 # ─── Guidewire log dir (opzionale, vuoto se GUIDEWIRE_SUBPATH è vuoto) ────────
 GW_LOG_DIR=""
@@ -100,13 +115,13 @@ fi
 # ─── Output ──────────────────────────────────────────────────────────────────
 echo "ACCESS_LOG='${ACCESS_LOG_PATH}'"
 echo "ACCESS_LOG_DIR='${APP_DIR}'"
-echo "ACCESS_LOG_BASE='undertow_access_log'"
+echo "ACCESS_LOG_BASE='${ACCESS_LOG_BASE}'"
 echo "SERVER_LOG='${SERVER_LOG_PATH}'"
 echo "SERVER_LOG_DIR='${APP_DIR}'"
-echo "SERVER_LOG_BASE='server'"
+echo "SERVER_LOG_BASE='${SERVER_LOG_BASE}'"
 echo "GC_LOG='${GC_LOG_PATH:-}'"
 echo "GC_LOG_DIR='${APP_DIR}'"
-echo "GC_LOG_BASE='gc'"
+echo "GC_LOG_BASE='${GC_LOG_BASE}'"
 echo "ACTIVE_NODE='${NODE_NUM}'"
 echo "ACTIVE_ENV='${ENV_NAME}'"
 echo "ACTIVE_APP='${APP}'"

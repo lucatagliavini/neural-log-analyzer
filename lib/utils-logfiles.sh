@@ -45,27 +45,7 @@
 #   - BASENAME.log-DATE-EPOCH.gz  (rotazione giornaliera compressa)
 #
 
-# Estrae e normalizza il timestamp da una singola riga di log in formato leggibile
-# YYYY-MM-DD HH:MM:SS. Supporta:
-#   server.log  → YYYY-MM-DD HH:MM:SS,mmm (o con T)
-#   gc.log      → [YYYY-MM-DDTHH:MM:SS
-#   access log  → [DD/Mon/YYYY:HH:MM:SS
-# Restituisce stringa vuota se nessun formato riconosciuto.
-log_ts_from_line() {
-    local _line="$1" _ts
-    _ts=$(echo "$_line" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}' | head -1)
-    if [[ -n "$_ts" ]]; then echo "${_ts/T/ }"; return; fi
-    _ts=$(echo "$_line" | grep -oE '\[[0-9]{2}/[A-Za-z]{3}/[0-9]{4}:[0-9]{2}:[0-9]{2}:[0-9]{2}' | head -1)
-    if [[ -n "$_ts" ]]; then
-        local _d="${_ts:1:2}" _m="${_ts:4:3}" _y="${_ts:8:4}" _t="${_ts:13:8}" _mn
-        case "${_m,,}" in
-            jan) _mn=01;; feb) _mn=02;; mar) _mn=03;; apr) _mn=04;;
-            may) _mn=05;; jun) _mn=06;; jul) _mn=07;; aug) _mn=08;;
-            sep) _mn=09;; oct) _mn=10;; nov) _mn=11;; dec) _mn=12;; *) _mn="??";;
-        esac
-        echo "${_y}-${_mn}-${_d} ${_t}"
-    fi
-}
+source "$(dirname "${BASH_SOURCE[0]}")/utils-log.sh"
 
 _logfiles_read_first_ts() {
     local f="$1"
@@ -215,20 +195,24 @@ select_log_files_grouped() {
             if [[ "$do_filter" -eq 1 && "$ts_start" -gt 0 && "$ts_start" -gt "$tt_epoch" ]]; then
                 # Interamente dopo la finestra: escludi, ma continua a
                 # scendere — un file più vecchio può comunque essere in range.
+                log_debug "select_log_files_grouped: escluso $(basename "$f") (ts_start=$ts_start > tt=$tt_epoch)"
                 continue
             fi
 
             ts_start_map["$f"]=$ts_start
             selected+=("$f")
+            log_debug "select_log_files_grouped: incluso $(basename "$f") (ts_start=$ts_start)"
 
             [[ "$do_filter" -eq 0 ]] && continue
             if [[ "$ts_start" -gt 0 && "$ts_start" -le "$tf_epoch" ]]; then
                 # La finestra è coperta: tutto ciò che è più vecchio non serve.
+                log_debug "select_log_files_grouped: finestra coperta da $(basename "$f"), stop su gruppo '$logical'"
                 break
             fi
             # ts_start ignoto (0): conservativo, non si ferma sull'ignoto.
         done
     done
+    log_debug "select_log_files_grouped: dir=$dir filtro='${name_filter:-*}' gruppi=${#group_order[@]} selezionati=${#selected[@]}"
 
     # Ordina TUTTI i selezionati per ts_start crescente (insertion sort)
     local n=${#selected[@]}

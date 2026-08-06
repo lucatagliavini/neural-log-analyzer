@@ -140,6 +140,36 @@ queries_labeled.txt
   vengono sempre letti da `system.conf`/`entities.conf`, mai da fallback impliciti nel
   codice (rifattorizzato in ARCH-6, vedi BACKLOG.md).
 
+## Principi di progettazione
+
+Stabiliti 2026-08-06, durante la generalizzazione della selezione file di log
+(PERF-SAL). Valgono per tutto il progetto, non solo per un intervento
+specifico:
+
+1. **Generalizzazione**: i tool sono funzioni generalizzate applicabili a più
+   contesti. Solo la parte *finale* di analisi è specifica della tecnologia.
+   La selezione dei file di log, comprensiva delle rotazioni, funziona per
+   qualsiasi log indipendentemente dal `BASE` — JBoss, Guidewire, e in altri
+   profili applicativi o webserver (`select_log_files_grouped`,
+   `lib/utils-logfiles.sh`).
+2. **Logica centralizzata**: un solo punto di verità per ogni comportamento,
+   per semplificare il debug ed evitare difetti divergenti negli stessi
+   percorsi. Prima di aggiungere un ramo condizionale a un tool, valutare se
+   la logica appartiene a una funzione condivisa.
+3. **Logging DEBUG configurabile**: le fasi non visibili all'utente
+   (selezione file, decisioni di pruning) vanno tracciate su un log a
+   livello configurabile (`BOT_LOG_LEVEL`/`BOT_LOG_FILE` in `system.conf`,
+   `lib/utils-log.sh`), mai su stdout — che è l'output formattato su cui
+   asseriscono i test.
+4. **Feedback progressivo**: durante le fasi che durano più di qualche
+   decimo di secondo, il bot comunica cosa sta facendo (su stderr,
+   condizionato a `[[ -t 2 ]]`, prefisso `⋯ ` per non collidere con le
+   asserzioni dei test sulla prima colonna). L'utente non deve trovarsi
+   davanti a una shell apparentemente ferma.
+5. **Pruning conservativo**: escludere un file per errore è un bug di
+   correttezza; includerlo per errore è solo lentezza. In caso di dubbio
+   (timestamp non riconoscibile, formato inatteso), includere sempre.
+
 ## Dependencies
 
 - `gawk` — richiesto (usato da tutti i tool AWK e dal framework neurale)

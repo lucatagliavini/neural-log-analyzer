@@ -42,6 +42,24 @@ _AWK_TOOL="$(dirname "${BASH_SOURCE[0]}")/search_all_logs.awk"
 _R="\033[31m" _Y="\033[33m" _G="\033[32m"
 _B="\033[1m"  _D="\033[2m"  _X="\033[0m"
 
+# Feedback progressivo (principio di progetto, 2026-08-06): le fasi di
+# selezione file e ricerca possono durare più di qualche decimo di secondo
+# su nodi con molti log — l'utente non deve trovarsi davanti a una shell
+# apparentemente ferma. Solo su stderr e solo se stderr è un TTY: sotto
+# `$(...)` (modalità --query, tutti i test) stderr non è un terminale,
+# quindi resta silenzioso senza bisogno di un flag dedicato. Il prefisso
+# "⋯ " è OBBLIGATORIO: le asserzioni dei test leggono la prima colonna con
+# `grep -E '^\s*server\.log'` — una riga di progresso che inizia a colonna 0
+# con un nome di log nudo la romperebbe (verificato in fase di analisi).
+_sal_progress() {
+    [[ -t 2 ]] || return
+    printf "\r\033[K  ${_D}⋯ %s${_X}" "$1" >&2
+}
+_sal_progress_clear() {
+    [[ -t 2 ]] || return
+    printf "\r\033[K" >&2
+}
+
 # Limiti di confronto per il filtro temporale (passati a search_all_logs.awk).
 # Formato "YYYY-MM-DD HH:MM:SS", stesso formato prodotto dall'estrazione
 # timestamp: il confronto è una semplice comparazione di stringhe. TIME_FROM/
@@ -97,12 +115,14 @@ _sal_add() {
 # (2026-08-05) — in nodo singolo $_n è SEMPRE popolato (ACTIVE_NODE ha default
 # "01" in chatbot.sh), quindi le righe mostravano comunque "nodo NN  " mentre
 # l'header, guardando DETECTED_NODE, non riservava quello spazio.
+_sal_progress "selezione log..."
 if [[ -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]]; then
     _multi_node=1
     _scope_label="${ACTIVE_ENV} (tutti i nodi)"
     ENV_NAME="$ACTIVE_ENV" APP="${ACTIVE_APP:-}"
     while IFS= read -r _node_dir; do
         _nnum=$(node_num_from_dir "$_node_dir")
+        _sal_progress "selezione log: nodo ${_nnum}..."
         _app_dir="${_node_dir}/$(eval echo "$APP_SUBPATH")"
         [[ -d "$_app_dir" ]] || continue
         _sal_add "$_app_dir" "$ACCESS_LOG_BASE" "$_nnum"
@@ -124,6 +144,7 @@ else
     _sal_add "${GUIDEWIRE_LOG_DIR:-}" "" "${ACTIVE_NODE:-}"
 fi
 
+_sal_progress_clear
 total_files="${#all_paths[@]}"
 if [[ "$total_files" -eq 0 ]]; then
     echo "Nessun log disponibile da cercare."
@@ -141,6 +162,7 @@ printf "\n${_B}Ricerca:${_X} ${_Y}%s${_X}  ${_D}%s%s  (%d file, %d worker)${_X}\
 # Ogni subshell scrive "label|hits|first_ts|last_ts|node" in $tmp_dir/NNNNN
 pids=()
 for (( i=0; i<total_files; i++ )); do
+    _sal_progress "ricerca: ${all_labels[$i]} ($(( i + 1 ))/${total_files})"
     (
         lbl="${all_labels[$i]}"
         pth="${all_paths[$i]}"
@@ -182,6 +204,7 @@ for (( i=0; i<total_files; i++ )); do
     fi
 done
 for _p in "${pids[@]}"; do wait "$_p" 2>/dev/null || true; done
+_sal_progress_clear
 
 # ── Raccoglie e analizza risultati ────────────────────────────────────────────
 res_labels=() res_hits=() res_ts=() res_last=() res_nodes=()

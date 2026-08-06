@@ -5,7 +5,9 @@
 # Uso:
 #   bash tests/run-tests.sh [--level1] [--level2 --env <env> --node <node>] [--profile <dir>]
 #
-# --level1          esegue solo i test di intent (locale, nessun log)
+# --level1          esegue solo i test di intent (locale, nessun log) e le unit
+#                    test con fixture locali (utils-logfiles, param-extract,
+#                    search_all_logs)
 # --level2          esegue anche i test di output (richiede --env e --node)
 # --env <env>       ambiente target per level2 (es: prod, coll)
 # --node <node>     nodo target per level2 (es: 5, 12)
@@ -251,6 +253,22 @@ run_intent_tests() {
     done
 }
 
+# ─── Unit test con fixture locali (delegati, nessun log reale richiesto) ──────
+# Prima (fino al 2026-08-06) nessun runner aggregato li invocava: erano
+# eseguiti solo a mano, quindi senza rete di regressione automatica.
+run_unit_tests() {
+    print_header "UNIT — utils-logfiles.sh, param-extract.sh, search_all_logs.sh"
+    for _t in test-utils-logfiles.sh test-param-extract.sh test-search-all-logs.sh; do
+        if bash "$SCRIPT_DIR/$_t"; then
+            pass=$(( pass + 1 ))
+            printf "  ${GREEN}PASS${RESET}  %s\n" "$_t"
+        else
+            fail=$(( fail + 1 ))
+            printf "  ${RED}${BOLD}FAIL${RESET}  %s — vedi output sopra\n" "$_t"
+        fi
+    done
+}
+
 # ─── LEVEL 2: output test ─────────────────────────────────────────────────────
 # Formato: "expected_tool|query"
 # SKIP_OK = se dispatch stampa [SKIP] è accettabile (log non disponibile per quel nodo)
@@ -322,6 +340,7 @@ run_output_tests() {
 printf "${BOLD}Neural Log Analyzer — Test Suite${RESET}  profilo: $(basename "$PROFILE_DIR")\n"
 
 [[ "$RUN_L1" -eq 1 ]] && run_intent_tests
+[[ "$RUN_L1" -eq 1 ]] && run_unit_tests
 [[ "$RUN_L2" -eq 1 ]] && run_output_tests
 
 if [[ "$RUN_PARITY" -eq 1 ]]; then
