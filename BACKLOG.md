@@ -8,10 +8,13 @@ Aggiornato: 2026-08-06
 
 | # | Voce | Sezione | Nota |
 |---|------|---------|------|
-| 1 | **OBS-3** — verificare la copertura del logging su tutti i 14 tool | OBS | Richiesta utente. Veloce, e sblocca misure affidabili per tutto il resto |
-| 2 | **UI-11** — revisione dei colori nell'output | UI | Richiesta utente. Serve chiarire l'ambito prima di procedere |
-| 3 | **SRCH-1** — ricerca testuale in un log nominato | SRCH | L'unica voce che aggiunge *funzionalità* e non velocità. Aperta dal 2026-08-05 |
-| 4 | **P7** — `grep_named_log` (3390ms di mediana, mai analizzato) | P | Candidato performance residuo più promettente |
+| 1 | **SRCH-1** — ricerca testuale in un log nominato | SRCH | L'unica voce che aggiunge *funzionalità* e non velocità. Aperta dal 2026-08-05 |
+| 2 | **P7** — `grep_named_log` (3390ms di mediana, mai analizzato) | P | Candidato performance residuo più promettente |
+| 3 | **UI-12** — migrare i 13 tool ai nomi semantici dei colori | UI | Incrementale; corregge anche `RED` usato per "soglia" invece di "errore" |
+| 4 | **UI-13** — soglie in `domain.conf` | UI | `SLOW_MS` definito due volte con valori diversi; le rende tarabili per ambiente |
+
+**Chiusi il 2026-08-06**: OBS-3 (copertura logging sui 14 tool), UI-11 (sistema di temi
+colore, default `mono` a zero ANSI).
 
 **Non si fa ora**: `PERF-NNET` (overhead fisso della pipeline di inferenza) — l'utente ha in
 mente una modifica major su quella parte, vedi sezione P.
@@ -254,7 +257,9 @@ cui questo lavoro è stato rinviato a dopo NLOG (test di parità prima, refactor
 | UI-8 | **Periodo temporale in tutti i tool** — funzione `_print_time_window()` in `dispatch.sh`; rimosso blocco duplicato da `count_status.awk`. Colori: DIM grigio etichetta, `\033[97m` bianco puro per i valori. | **Fatto** (2026-07-31) |
 | UI-10 | **`search_all_logs`: righe alternate bianco/grigio per nodo** — nella tabella risultati, alternare DIM/normale tra i nodi per migliorare la leggibilità quando ci sono molte righe. | **Fatto** (2026-07-31) |
 | UI-9 | **`search_all_logs`: ricerca su tutti i nodi** — se la query non specifica un nodo, il tool oggi cerca solo sul nodo attivo in sessione. Aggiungere un'iterazione su tutti i nodi dell'ambiente (da `NODE_NAME_TEMPLATE` + lista nodi in `system.conf`) e aggregare i risultati raggruppati per nodo. Rimuovere anche il suggerimento "→ Per dettaglio: …" che produce output errato (nome file invece di nome log leggibile). | **Fatto** (2026-07-31) |
-| UI-11 | **Revisione dei colori nell'output** (richiesta utente 2026-08-06) — da chiarire con l'utente l'ambito preciso prima di procedere: leggibilità, coerenza fra tool, contrasto su terminali con sfondo chiaro/scuro, semantica dei colori per severità. Oggi ogni tool sceglie i propri (`utils-colors.awk` definisce le costanti ma non una convenzione d'uso), quindi lo stesso concetto può avere colori diversi fra tool. | **Alta — richiesta utente** |
+| UI-11 | **Sistema di temi colore** — `themes/*.conf` letti da bash e awk, `lib/utils-theme.sh`, 7 ruoli semantici (`C_CRIT`/`C_WARN`/`C_OK`/`C_VAL`/`C_LBL`/`C_ACCENT`/`C_ROW_ALT`), 9 temi, `--theme`/`--list-themes`/`BOT_THEME`/`NO_COLOR`, `theme-preview.sh`. **Default `mono`: zero ANSI**, per servizi e redirect su file. Risolti i 132 ANSI hardcoded nei 6 file bash che sfuggivano a `utils-colors.awk`. | **Fatto** (2026-08-06) |
+| UI-12 | **Migrare i 13 tool ai nomi semantici** — oggi usano ancora le costanti storiche (`RED`, `YELLOW`…) mappate sui ruoli in `utils-colors.awk`. La migrazione rende esplicito *perché* un elemento è colorato e corregge i casi dove `RED` significa "soglia superata" invece di "errore" (`slow_requests`, `service_times`, `gc_stats`, `correlate_gc_slow`). Incrementale, un tool per volta. | Media |
+| UI-13 | **Soglie in `domain.conf`** — `SLOW_MS` è definito **due volte con valori diversi** (200 in `gc_stats.awk:7`, 2000 in `service_times.awk:12`): corretto nel merito, ma il nome identico suggerisce una costante condivisa che non esiste. Altre soglie inline e senza nome: `>=1000` (`filter_ip`), `>=5000` (`slow_requests`), `>=85`/`>=70` (`gc_stats`), `>=30`/`>=10` (`correlate_gc_slow`). Portarle in `domain.conf` con nomi espliciti (`GC_PAUSE_WARN_MS`, `SVC_TIME_WARN_MS`…) le rende anche tarabili per ambiente senza editare gli `.awk`. | Media |
 
 ---
 
