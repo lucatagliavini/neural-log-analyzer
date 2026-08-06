@@ -12,29 +12,38 @@ BEGIN {
 }
 
 {
-    if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
+    # Ordine dei filtri: `index()` sull'IP prima di parse_access(). index() è
+    # una ricerca di sottostringa senza regex — molto più economica di mktime()
+    # — e in modalità IP singolo scarta la grande maggioranza delle righe.
+    # In modalità top-clients (ip_filter vuoto) l'ordine è irrilevante: servono
+    # tutte le righe.
     if (ip_filter != "" && index($0, ip_filter) == 0) next
+    if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
 
     ip = $1
 
+    # UNA sola estrazione di status e tempo per riga, riusata da entrambi i
+    # rami. Prima la regex dello status girava fino a 3 volte sulla stessa riga
+    # (una per scegliere il printf — con risultato mai usato, vedi sotto — una
+    # per status_count, una per ip_status) e quella del tempo 2 volte.
+    # Nel ramo di stampa il match serviva a calcolare `st` e `color`, che poi
+    # NON venivano usati: i due printf stampavano entrambi `$0` invariato. Il
+    # commento diceva "sostituisce il codice status con versione colorata" ma
+    # la sostituzione non c'era — codice morto rimosso (2026-08-06).
+    has_st = match($0, /" ([0-9]{3}) /, _a)
+    st = has_st ? _a[1] : ""
+    has_ms = match($0, /" [0-9]+ [0-9-]+ ([0-9]+)/, _b)
+    ms = has_ms ? _b[1]+0 : 0
+
     if (ip_filter != "") {
         count++
-        if (count <= max_rows) {
-            if (match($0, /" ([0-9]{3}) /, sc)) {
-                st = sc[1]
-                color = (substr(st,1,1)=="5") ? RED : (substr(st,1,1)=="4") ? YELLOW : DIM
-                # Sostituisce il codice status nella riga con versione colorata
-                printf "%s\n", $0
-            } else {
-                print $0
-            }
-        }
-        if (match($0, /" ([0-9]{3}) /, a)) status_count[a[1]]++
-        if (match($0, /" [0-9]+ [0-9-]+ ([0-9]+)/, b)) total_ms += b[1]+0
+        if (count <= max_rows) print $0
+        if (has_st) status_count[st]++
+        if (has_ms) total_ms += ms
     } else {
         ip_count[ip]++
-        if (match($0, /" ([0-9]{3}) /, a)) ip_status[ip, a[1]]++
-        if (match($0, /" [0-9]+ [0-9-]+ ([0-9]+)/, b)) ip_ms[ip] += b[1]+0
+        if (has_st) ip_status[ip, st]++
+        if (has_ms) ip_ms[ip] += ms
     }
 }
 
