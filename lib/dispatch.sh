@@ -478,7 +478,18 @@ _dispatch_tool_run() {
     if declare -F theme_awk_args >/dev/null 2>&1; then
         theme_v="$(theme_awk_args)"
     fi
-    local tw_args="$common_f $theme_v -v time_from='${TIME_FROM:-}' -v time_to='${TIME_TO:-}'"
+    # Soglie di severità per la colorazione (UI-13): da domain.conf, non più
+    # hardcoded negli .awk — così tararle su un ambiente non richiede di
+    # editare il codice. Una variabile sola invece di ripetere i -v in ogni
+    # ramo del case (principio 2), come per $theme_v.
+    # Ogni tool ha un fallback identico nel proprio BEGIN: se una soglia non
+    # arriva (invocazione diretta, test), il comportamento non cambia.
+    local thr_v="-v gc_pause_warn_ms='${GC_PAUSE_WARN_MS:-}' -v gc_pause_crit_ms='${GC_PAUSE_CRIT_MS:-}'"
+    thr_v+=" -v svc_time_warn_ms='${SVC_TIME_WARN_MS:-}' -v svc_time_crit_ms='${SVC_TIME_CRIT_MS:-}'"
+    thr_v+=" -v req_time_warn_ms='${REQ_TIME_WARN_MS:-}' -v req_time_crit_ms='${REQ_TIME_CRIT_MS:-}'"
+    thr_v+=" -v heap_warn_pct='${HEAP_USED_WARN_PCT:-}' -v heap_crit_pct='${HEAP_USED_CRIT_PCT:-}'"
+    thr_v+=" -v gc_corr_warn_pct='${GC_CORR_WARN_PCT:-}' -v gc_corr_crit_pct='${GC_CORR_CRIT_PCT:-}'"
+    local tw_args="$common_f $theme_v $thr_v -v time_from='${TIME_FROM:-}' -v time_to='${TIME_TO:-}'"
 
     case "$tool" in
         count_status)

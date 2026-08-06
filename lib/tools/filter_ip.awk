@@ -9,6 +9,9 @@ BEGIN {
     FS = " "
     if (top_n == "") top_n = 10
     max_rows = 50
+    # Soglie da domain.conf via dispatch.sh (UI-13), fallback ai valori storici.
+    REQ_WARN = (req_time_warn_ms != "") ? req_time_warn_ms+0 : 1000
+    REQ_CRIT = (req_time_crit_ms != "") ? req_time_crit_ms+0 : 2000
 }
 
 {
@@ -35,15 +38,28 @@ BEGIN {
     has_ms = match($0, /" [0-9]+ [0-9-]+ ([0-9]+)/, _b)
     ms = has_ms ? _b[1]+0 : 0
 
+    # O6: `count`/`ip_count` contano le RICHIESTE, `ms_count`/`ip_ms_count`
+    # solo quelle di cui si è potuto MISURARE il tempo. La media va divisa per
+    # il secondo, non per il primo: una riga senza campo tempo estraibile
+    # contribuisce 0 al numeratore, e usarla nel denominatore sottostima il
+    # risultato (100ms su 2 richieste, una malformata, dava 50ms invece di 100).
+    #
+    # Questo tool è l'unico dei sei esaminati ad avere il difetto, e la ragione
+    # è strutturale: conta le righe con `index()` sull'IP, che non garantisce
+    # nulla sul formato del resto della riga. slow_requests, service_times e
+    # gc_stats arrivano al contatore solo dopo `match(...) || next`, quindi ogni
+    # riga contata è già validata. In count_status e correlate_gc_slow il
+    # denominatore su TUTTE le righe è invece VOLUTO (tasso di errore sul
+    # traffico totale): correggerli sarebbe un bug, non un fix.
     if (ip_filter != "") {
         count++
         if (count <= max_rows) print $0
         if (has_st) status_count[st]++
-        if (has_ms) total_ms += ms
+        if (has_ms) { total_ms += ms; ms_count++ }
     } else {
         ip_count[ip]++
         if (has_st) ip_status[ip, st]++
-        if (has_ms) ip_ms[ip] += ms
+        if (has_ms) { ip_ms[ip] += ms; ip_ms_count[ip]++ }
     }
 }
 
@@ -56,7 +72,13 @@ END {
         if (count > max_rows) printf "... (mostrate %d di %d)\n\n", max_rows, count
         printf "%s── Statistiche per IP %s ──%s\n", BOLD, ip_filter, RESET
         printf "Totale richieste: %d\n", count
-        printf "Latenza media:    %.0f ms\n", (count > 0 ? total_ms/count : 0)
+        printf "Latenza media:    %.0f ms\n", (ms_count > 0 ? total_ms/ms_count : 0)
+        # Trasparenza: se alcune righe non avevano un tempo misurabile, dirlo —
+        # altrimenti una media calcolata su un sottoinsieme sembra calcolata su
+        # tutto, ed è indistinguibile da un dato completo.
+        if (ms_count < count)
+            printf "%s  (media su %d richieste con tempo misurabile, %d senza)%s\n", \
+                DIM, ms_count, count - ms_count, RESET
         printf "Distribuzione status:\n"
         for (s in status_count) {
             color = (substr(s,1,1)=="5") ? RED : (substr(s,1,1)=="4") ? YELLOW : ""
@@ -86,8 +108,8 @@ END {
         limit = (n < top_n ? n : top_n)
         for (i = 1; i <= limit; i++) {
             ip  = sorted_ip[i]
-            avg = (ip_count[ip] > 0 ? ip_ms[ip]/ip_count[ip] : 0)
-            col_avg = (avg >= 2000) ? RED : (avg >= 1000) ? YELLOW : WHT
+            avg = (ip_ms_count[ip] > 0 ? ip_ms[ip]/ip_ms_count[ip] : 0)
+            col_avg = (avg >= REQ_CRIT) ? RED : (avg >= REQ_WARN) ? YELLOW : WHT
             printf "%-18s  %s%9d%s  %s%8.2f%s\n", ip, WHT, ip_count[ip], RESET, col_avg, avg, RESET
         }
         printf "\nTop %d di %d IP distinti\n", limit, n

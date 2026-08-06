@@ -13,6 +13,12 @@ BEGIN {
     FS = " "
     if (threshold_ms == "") threshold_ms = 500
     gc_margin_s = 2
+    # Soglie da domain.conf via dispatch.sh (UI-13), fallback ai valori storici.
+    # Le percentuali determinano anche il VERDETTO mostrato all'utente, non solo
+    # il colore: alzarle rende il bot più prudente nell'attribuire la colpa al GC.
+    CORR_WARN = (gc_corr_warn_pct != "") ? gc_corr_warn_pct+0 : 10
+    CORR_CRIT = (gc_corr_crit_pct != "") ? gc_corr_crit_pct+0 : 30
+    REQ_CRIT  = (req_time_crit_ms != "") ? req_time_crit_ms+0 : 5000
     gc_n = 0
 }
 
@@ -78,7 +84,7 @@ BEGIN {
         if (match($0, /"([A-Z]+) ([^ ]+) HTTP/, c)) {
             method = c[1]
             method_color = (method == "GET") ? GREEN : (method == "POST") ? CYAN : ""
-            color = (resp_ms >= 5000) ? RED : YELLOW
+            color = (resp_ms >= REQ_CRIT) ? RED : YELLOW
             printf "%sCORRELATA%s  %s%d ms%s  %s%s%s %s\n", \
                 color, RESET, color, resp_ms, RESET, method_color, method, RESET, c[2]
         }
@@ -87,11 +93,11 @@ BEGIN {
 
 END {
     pct_corr = total_slow > 0 ? correlated_count*100/total_slow : 0
-    col_pct  = (pct_corr >= 30) ? RED : (pct_corr >= 10) ? YELLOW : ""
+    col_pct  = (pct_corr >= CORR_CRIT) ? RED : (pct_corr >= CORR_WARN) ? YELLOW : ""
 
-    if (pct_corr >= 30)
+    if (pct_corr >= CORR_CRIT)
         verdetto = "GC E' PROBABILE CAUSA della lentezza"
-    else if (pct_corr >= 10)
+    else if (pct_corr >= CORR_WARN)
         verdetto = "GC CONTRIBUISCE alla lentezza"
     else
         verdetto = "GC NON e' la causa principale"

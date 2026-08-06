@@ -9,7 +9,10 @@ BEGIN {
     FS = " "
     max_rows = 30
     if (threshold_ms == "") threshold_ms = 0
-    SLOW_MS = 2000; VERYSLOW_MS = 5000
+    # Soglie da domain.conf (UI-13), fallback ai valori storici. Sono molto più
+    # alte di quelle del GC: 200ms per una chiamata a servizio è normale.
+    SLOW_MS     = (svc_time_warn_ms != "") ? svc_time_warn_ms+0 : 2000
+    VERYSLOW_MS = (svc_time_crit_ms != "") ? svc_time_crit_ms+0 : 5000
 }
 
 {

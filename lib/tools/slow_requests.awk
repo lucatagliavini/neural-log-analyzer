@@ -8,6 +8,9 @@ BEGIN {
     FS = " "
     if (threshold_ms == "") threshold_ms = 1000
     count = 0; buf_n = 0; max_rows = 30
+    # Nessuna soglia di severità da domain.conf (UI-13): questo tool colora in
+    # base allo STATUS HTTP (5xx rosso, resto giallo), non a una soglia di tempo
+    # — la soglia `threshold_ms` decide cosa È lento, non come colorarlo.
 }
 
 {

@@ -8,13 +8,25 @@ Aggiornato: 2026-08-06
 
 | # | Voce | Sezione | Nota |
 |---|------|---------|------|
-| 1 | **SRCH-1** — ricerca testuale in un log nominato | SRCH | L'unica voce che aggiunge *funzionalità* e non velocità. Aperta dal 2026-08-05 |
-| 2 | **O6** — `filter_ip`: la latenza media è sottostimata con righe malformate | O | O6: difetto preesistente trovato il 2026-08-06, documentato in `tests/test-filter-ip.sh` |
-| 3 | **UI-13** — soglie dei colori in `domain.conf` | UI | Difetto reale: oggi per cambiare quando una pausa GC è "grave" si edita un `.awk` |
-| 4 | **UI-12** — nomi semantici dei colori nei tool | UI | Cosmetico, nessun difetto visibile — vedi nota in sezione UI |
+| 1 | **UI-12** — nomi semantici dei colori nei tool | UI | Cosmetico: nessun difetto visibile, solo leggibilità del codice |
 
-**Chiusi il 2026-08-06**: OBS-3 (copertura logging sui 14 tool), UI-11 (sistema di temi
-colore, default `mono` a zero ANSI).
+**Chiusi il 2026-08-06**: OBS-3 (copertura logging), OBS-5 (feedback progressivo nei 3 tool
+mancanti), UI-11 (sistema di temi colore, default `mono` a zero ANSI), SRCH-1 (ricerca
+testuale in un log nominato), P3/P4/P5/P6/P8 (performance applicate), P7 e P9 (chiusi: nessuna
+ottimizzazione applicabile / peggiorativa), O6 (medie sulle righe misurabili), UI-13 (soglie
+dei colori configurabili).
+
+**La performance non è più un tema aperto.** Tutti i tool sopra il secondo sono stati
+analizzati; di quelli restanti si sa *perché* costano — 77% del tempo è parsing AWK
+proporzionale al volume, throughput 15.4 MB/s su 57 MB medi per query. Nessun difetto
+strutturale residuo, solo lavoro irriducibile. Il logging (`OBS-1`) continua ad accumulare
+dati: se un tool risalisse in classifica con più campioni, si riapre allora — con la
+metodologia di `OBS-4` (snapshot statico, round interlacciati, mediana su ≥5 campioni).
+
+**NON si fa qui**: `MIGR` — migrazione dell'orchestrazione a Python. **Un agent separato ci
+sta già lavorando** (2026-08-06) in `../neural-log-lanalyzer`. Non aprire lavoro di
+migrazione in questo repository: qui si continua a correggere e migliorare il comportamento,
+che è il riferimento da cui quel progetto parte.
 
 **Non si fa ora**: `PERF-NNET` (overhead fisso della pipeline di inferenza) — l'utente ha in
 mente una modifica major su quella parte, vedi sezione P.
@@ -35,11 +47,16 @@ Oggi ci sono due metà di funzionalità che non si toccano:
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
-| SRCH-1 | Colmare il gap: o (a) `grep_named_log` accetta un pattern testuale oltre al livello, o (b) `search_all_logs` restringe la ricerca a `NAMED_LOG` quando la query lo specifica. Decidere l'approccio con l'utente prima di implementare (impatto su vocabolario/dataset da valutare: nuova combinazione di parametri, non necessariamente nuova classe) | **Alta** |
+| SRCH-1 | Scelta la via (a): `grep_named_log` riceve `SEARCH_PATTERN` da `dispatch.sh`. Si è rivelato **molto più piccolo del previsto** — il canale esisteva già ai due estremi ma non era collegato: il tool AWK accettava già `-v pattern` (sua riga 5), `param-extract.sh` estraeva già `SEARCH_PATTERN`, il classificatore instradava già al 96.7%, e `TOOL_DESC` diceva già "o pattern testuale". **Nessun retrain, nessuna nuova classe.** Semantica: pattern senza livello nominato → `level=ALL` (l'intento è trovare quel testo); livello nominato → vince quello. Ha richiesto `LEVEL_EXPLICIT` in `param-extract.sh` per distinguere "livello chiesto" da "default applicato" — stesso pattern di `TIME_EXPLICIT`/`LOG_EXPLICIT`. 15 test in `tests/test-srch-named-log.sh` | **Fatto** (2026-08-06) |
 
 ---
 
 ## MIGR — Migrazione a Python (nuovo progetto)
+
+> **NON è lavoro di questo backlog.** Un agent separato sta procedendo in
+> `../neural-log-lanalyzer` (dal 2026-08-06). Questa sezione resta solo come contesto: la
+> regola è che fix e feature continuano QUI, così quel progetto parte da un comportamento
+> verificato e non da difetti noti da correggere due volte.
 
 Valutata la conversione dell'orchestrazione (chatbot.sh, dispatch.sh, normalize-query.sh,
 param-extract.sh, query-to-features.sh — NON i 14 tool AWK, che restano tali) verso Python,
@@ -85,7 +102,7 @@ Aggiungere una nuova applicazione richiede solo una riga in `entities.conf`, non
 | P4 | **Pre-gate `grep -qiF` + `pigz` + `gated=1`** in `search_all_logs` — vedi PERF-SAL nel session log 2026-08-06. Query reale 144s → 83s (-42%) | ~40 righe | **Fatto** (2026-08-06) |
 | P5 | **Indice per secondo in `correlate_gc_slow`** — il loop scandiva tutte le pause GC per ogni richiesta lenta (18665 × 543 ≈ 10M iterazioni). Mediana 8.37s → 5.68s | ~15 righe | **Fatto** (2026-08-06) |
 | P6 | **Memoizzazione `parse_access()` + inversione filtri `slow_requests`** — 18.4 righe per secondo distinto, cache evita ~95% delle `mktime()`. `count_status` 3.64s → 1.23s, `slow_requests` 6.78s → 4.00s | ~20 righe | **Fatto** (2026-08-06) |
-| P7 | **`grep_named_log`** — mediana reale **1317ms** (il 3390 in backlog era il p95 su 3 sole misure). Ha due leve non sfruttate: la regex `GW_RE` con 3 gruppi gira su ogni riga prima del filtro livello, e usa `mktime()` a mano invece della `parse_access()` memoizzata. Il meno urgente dei tool lenti | ? | Bassa |
+| P7 | **`grep_named_log`** — mediana reale **1317ms** (il 3390 in backlog era il p95 su 3 sole misure), il più veloce dei tool lenti. Entrambe le leve ipotizzate si sono rivelate problematiche, vedi nota | ? | **Chiuso: nessuna ottimizzazione applicabile** (2026-08-06) |
 | P8 | **`filter_ip`: estrazione unica di status/tempo + codice morto rimosso** — la regex dello status girava 3× per riga, quella del tempo 2×, e un blocco calcolava colori mai usati. Mediana 7.50s → 5.90s su 326k righe (vince 9 round su 11; media peggiore per outlier del server — misura non pulita, ma la modifica è difendibile per natura) | ~20 righe | **Fatto** (2026-08-06) |
 | P9 | **Inversione filtri in `distribute_status`, `service_times`, `traffic_volume`** — tentata e **ANNULLATA**: 4-6× più LENTA. Vedi nota sotto, è la lezione più utile di questo giro | — | **Chiuso: non si fa** (2026-08-06) |
 
@@ -124,6 +141,35 @@ perché dipendono da un'assunzione sui dati che cambia con la rotazione dei log.
 quelle che **eliminano lavoro** in ogni scenario (P8: una regex invece di tre) o che
 cambiano la **struttura dati** (P5: indice per secondo invece di scansione lineare).
 | PERF-NNET | **Overhead fisso per query (~574ms)**: classificazione neurale (`infer.sh`) + `normalize-query.sh` + `param-extract.sh` + fork di `resolve-logs.sh`. Vedi sotto | — | **Non si fa ora — l'utente ha in mente una modifica major** |
+
+### P7 — chiuso: nessuna ottimizzazione applicabile
+
+**Decisione (utente, 2026-08-06):** non si fa. Preferibile testare più estesamente con l'uso
+reale che applicare un'ottimizzazione dal margine incerto. Se i dati accumulati in `logs/`
+rimettessero `grep_named_log` in cima alla classifica, si riapre — la sezione resta come
+analisi già fatta, da cui ripartire invece di rifarla.
+
+**Perché le due leve ipotizzate non convincono**
+
+Verificato il codice il 2026-08-06 (P7 **non** è stato toccato dagli interventi di quel giorno
+su `grep_named_log`, che erano di osservabilità (OBS-3), usabilità (OBS-5) e funzionalità
+(SRCH-1) — non di performance):
+
+**Leva 1 — spostare il filtro sul livello prima della regex.** È esattamente l'inversione
+annullata in P9 su altri tre tool, dove era 4-6× più lenta. Qui in più non è nemmeno
+direttamente applicabile: `GW_RE` estrae timestamp, livello e messaggio in un solo `match()`,
+quindi il livello non è disponibile *prima* di quella regex. Si potrebbe anticipare un test
+economico (`index($0, " ERROR ")`) ma sarebbe fragile e legato al formato esatto — e il
+formato Guidewire ha già mostrato varianti (spaziatura del livello, millisecondi).
+
+**Leva 2 — usare `parse_access()` memoizzata invece di `mktime()` a mano.** Non applicabile:
+`parse_access()` parsa il formato access log (`[06/Aug/2026:10:00:00`), mentre qui il timestamp
+è ISO Guidewire (`2026-08-06T10:00:00,443`). Servirebbe una memoizzazione separata per il
+formato ISO — fattibile, ma il beneficio è limitato dal fatto che `mktime` viene chiamato
+**solo** sulle righe che hanno già superato il filtro livello, quindi su una minoranza.
+
+**Conclusione:** il margine reale è piccolo e il rischio di regressione non trascurabile. Da
+riconsiderare solo se `grep_named_log` risalisse nella classifica con più dati accumulati.
 
 ### PERF-NNET — overhead fisso della pipeline di inferenza
 
@@ -277,7 +323,7 @@ cui questo lavoro è stato rinviato a dopo NLOG (test di parità prima, refactor
 | O3 | `grep_named_log`: dedup + sort rarest-first + footer distinti | **Fatto** |
 | O4 | `service_times`: rewrite su access log (formato `RETURN(service)` non presente) | **Fatto** |
 | O5 | `filter_ip`: separatore AVG MS allineato (8 char) | **Fatto** |
-| O6 | **`filter_ip`: latenza media sottostimata con righe malformate** — divide il tempo totale per il numero di RICHIESTE, non per quelle di cui si è potuto misurare il tempo. Su una riga senza campo tempo estraibile il contributo è 0 ma il denominatore cresce comunque: es. 100ms su 2 richieste (una malformata) dà 50ms invece di 100ms. Difetto **preesistente**, trovato il 2026-08-06 scrivendo `tests/test-filter-ip.sh` (dove il comportamento attuale è documentato in un assert, non nascosto). Verificato identico prima dell'ottimizzazione P8, quindi non introdotto da essa. Fix: contare separatamente le righe con tempo misurabile. Da valutare se lo stesso schema esiste in altri tool che calcolano medie | Bassa |
+| O6 | **RISOLTO** — `filter_ip`: latenza media sottostimata con righe malformate — divide il tempo totale per il numero di RICHIESTE, non per quelle di cui si è potuto misurare il tempo. Su una riga senza campo tempo estraibile il contributo è 0 ma il denominatore cresce comunque: es. 100ms su 2 richieste (una malformata) dà 50ms invece di 100ms. Difetto **preesistente**, trovato il 2026-08-06 scrivendo `tests/test-filter-ip.sh` (dove il comportamento attuale è documentato in un assert, non nascosto). Verificato identico prima dell'ottimizzazione P8, quindi non introdotto da essa. Fix: contare separatamente le righe con tempo misurabile. **Verificati tutti i 6 tool che calcolano medie: `filter_ip` era l'unico col difetto.** `slow_requests`, `service_times` e `gc_stats` arrivano al contatore solo dopo `match(...) || next`, quindi ogni riga contata è già validata (in `gc_stats` la protezione viene dal pattern di riga: verificato su 17.296 righe reali, 0 casi). In `count_status` e `correlate_gc_slow` il denominatore su TUTTE le righe è **voluto** — è il tasso sul traffico totale, correggerlo sarebbe un bug. Il tool ora dichiara anche quante righe erano senza tempo misurabile, invece di presentare una media parziale come completa | **Fatto** (2026-08-06) |
 
 ---
 
@@ -297,7 +343,7 @@ cui questo lavoro è stato rinviato a dopo NLOG (test di parità prima, refactor
 | UI-9 | **`search_all_logs`: ricerca su tutti i nodi** — se la query non specifica un nodo, il tool oggi cerca solo sul nodo attivo in sessione. Aggiungere un'iterazione su tutti i nodi dell'ambiente (da `NODE_NAME_TEMPLATE` + lista nodi in `system.conf`) e aggregare i risultati raggruppati per nodo. Rimuovere anche il suggerimento "→ Per dettaglio: …" che produce output errato (nome file invece di nome log leggibile). | **Fatto** (2026-07-31) |
 | UI-11 | **Sistema di temi colore** — `themes/*.conf` letti da bash e awk, `lib/utils-theme.sh`, 7 ruoli semantici (`C_CRIT`/`C_WARN`/`C_OK`/`C_VAL`/`C_LBL`/`C_ACCENT`/`C_ROW_ALT`), 9 temi, `--theme`/`--list-themes`/`BOT_THEME`/`NO_COLOR`, `theme-preview.sh`. **Default `mono`: zero ANSI**, per servizi e redirect su file. Risolti i 132 ANSI hardcoded nei 6 file bash che sfuggivano a `utils-colors.awk`. | **Fatto** (2026-08-06) |
 | UI-12 | **Migrare i 13 tool ai nomi semantici** — oggi usano le costanti storiche (`RED`, `YELLOW`…) mappate sui ruoli in `utils-colors.awk`. **Nessun difetto visibile da correggere** (vedi nota sotto): è solo leggibilità del codice, `C_CRIT` dice più di `RED` a chi legge. Incrementale, un tool per volta, zero urgenza. | **Bassa — cosmetico** |
-| UI-13 | **Soglie in `domain.conf`** — `SLOW_MS` è definito **due volte con valori diversi** (200 in `gc_stats.awk:7`, 2000 in `service_times.awk:12`): corretto nel merito, ma il nome identico suggerisce una costante condivisa che non esiste. Altre soglie inline e senza nome: `>=1000` (`filter_ip`), `>=5000` (`slow_requests`), `>=85`/`>=70` (`gc_stats`), `>=30`/`>=10` (`correlate_gc_slow`). Portarle in `domain.conf` con nomi espliciti (`GC_PAUSE_WARN_MS`, `SVC_TIME_WARN_MS`…) le rende anche tarabili per ambiente senza editare gli `.awk`. | Media |
+| UI-13 | **RISOLTO** — soglie in `domain.conf` — `SLOW_MS` è definito **due volte con valori diversi** (200 in `gc_stats.awk:7`, 2000 in `service_times.awk:12`): corretto nel merito, ma il nome identico suggerisce una costante condivisa che non esiste. Altre soglie inline e senza nome: `>=1000` (`filter_ip`), `>=5000` (`slow_requests`), `>=85`/`>=70` (`gc_stats`), `>=30`/`>=10` (`correlate_gc_slow`). Portate in `domain.conf` con nomi espliciti (`GC_PAUSE_WARN_MS`, `SVC_TIME_WARN_MS`, `REQ_TIME_*`, `HEAP_USED_*`, `GC_CORR_*`), passate ai tool con `-v` da `dispatch.sh` in una variabile riusabile (`thr_v`, come `theme_v`). Ogni tool ha un fallback identico nel `BEGIN`, quindi un'invocazione diretta si comporta come prima. Usano `${VAR:-default}` come il resto del progetto, così l'ambiente le sovrascrive — con l'assegnazione secca della prima stesura non erano configurabili, ed è un test a rilevarlo. `slow_requests` non ne ha: colora per status HTTP, non per soglia di tempo | **Fatto** (2026-08-06) |
 
 
 ### UI-12 — rettifica: la semantica dei colori è già corretta
@@ -324,7 +370,8 @@ codice ma non corregge nulla di visibile all'utente — priorità abbassata a co
 |----|-------------|-------|
 | OBS-1 | **Log di query e performance** — `log_query()` in `chatbot.sh` scrive 13 colonne TSV (query, tool, tempi per fase, volumi, worker) in `QUERY_LOG_DIR`, default `<dir chatbot.sh>/logs`. `perf-report.sh` aggrega per tool (mediana/p95), scompone le fasi, elenca le query più lente, mostra il tempo per MB. | **Fatto** (2026-08-06) |
 | OBS-2 | **Metriche di fase per tutti i tool** — `dispatch_tool` è un wrapper che misura e delega a `_dispatch_tool_run`; `open_logs_for` emette le proprie metriche via file (gira in subshell). | **Fatto** (2026-08-06) |
-| OBS-3 | **Verificare la copertura effettiva su tutti i 14 tool** (richiesta utente 2026-08-06) — alcuni rami del `case` in `dispatch.sh` non passano da `open_logs_for`: `tail_named_log`/`grep_named_log` nel ramo `find` diretto (`:442-452`, `:492-502`), `show_help`, `list_logs`. Potrebbero riportare `PERF_SELECT_MS=0` o metriche assenti, rendendo la scomposizione muta proprio dove servirebbe. Verifica tool per tool, poi fix se necessario. | **Alta — richiesta utente** |
+| OBS-3 | **Copertura verificata su tutti i tool** — confermati i 3 percorsi che riportavano metriche a 0 pur leggendo file reali (`open_current_log_for` per `tail_log` a riposo, la catena `find` di `tail_named_log`/`grep_named_log`, `open_glob_logs`). Corretti; `show_help`/`list_logs` restano a 0 ed è corretto (non leggono log). Effetto collaterale: la catena `find` era **duplicata identica** nei due rami named-log, centralizzata in `resolve_named_log_path()`. 10 test in `tests/test-dispatch-perf.sh` | **Fatto** (2026-08-06) |
+| OBS-5 | **Feedback progressivo mancante in 3 tool** (segnalato dall'utente) — `tail_log`, `tail_named_log`, `grep_named_log` bypassavano `select_log_files_grouped`, dove vive `progress_show`. Stesso difetto strutturale di OBS-3, sintomo diverso. `grep_named_log` arriva a 3.7s, quindi non era cosmetico. 7 test con TTY simulato in `tests/test-theme.sh` | **Fatto** (2026-08-06) |
 | OBS-4 | **Metodologia di misura sul server** — il nodo di produzione ha varianza **4×** sulla stessa operazione (5s→20s, load average 3-8 variabile). Ogni misura richiede: snapshot statico dei log (sono in scrittura attiva), round **interlacciati** A/B/A/B, mediana su ≥5 campioni. Round singoli hanno prodotto conclusioni **invertite** 3 volte il 2026-08-06. | Nota permanente |
 
 ---

@@ -123,15 +123,16 @@ righe senza formato riconoscibile
 10.0.0.1 [06/Aug/2026:10:01:00 +0200] malformata senza status
 EOF
 _out_bad=$(gawk $_UTILS -f "$_TOOL" -v ip_filter=10.0.0.1 "$_FIX/bad.log" 2>/dev/null | _strip)
-# Comportamento documentato, NON desiderabile: la media divide il tempo totale
-# per il numero di RICHIESTE, non per quelle di cui si è potuto misurare il
-# tempo — con righe malformate viene sottostimata (qui 100ms/2 = 50 invece di
-# 100). Difetto PREESISTENTE, verificato identico nella versione pre-2026-08-06:
-# non introdotto dall'ottimizzazione. Annotato in BACKLOG.md (O-x) invece di
-# correggerlo qui, per non mescolare un fix di correttezza in un commit di
-# performance — se qualcosa andasse storto, bisecare diventerebbe impossibile.
-assert_eq "righe malformate: media sottostimata (difetto noto, invariato)" "Latenza media:    50 ms" \
+# O6 CORRETTO (2026-08-06): la media divide per le richieste di cui si è potuto
+# MISURARE il tempo, non per tutte. Qui una sola riga ha un tempo estraibile
+# (100ms), quindi la media è 100 — prima era 50 (100/2), che sottostimava
+# perché la riga malformata entrava nel denominatore con contributo 0.
+assert_eq "righe malformate: media sulle sole righe misurabili (O6)" "Latenza media:    100 ms" \
     "$(grep -E '^Latenza media' <<< "$_out_bad")"
+# E lo dichiara, invece di presentare una media parziale come completa: senza
+# questa riga il numero è indistinguibile da uno calcolato su tutte le richieste.
+assert_eq "e dichiara quante righe erano senza tempo misurabile" "1" \
+    "$([[ "$_out_bad" == *"1 richieste con tempo misurabile, 1 senza"* ]] && echo 1 || echo 0)"
 
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""

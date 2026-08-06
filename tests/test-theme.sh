@@ -192,6 +192,62 @@ assert_true "almeno 8 temi disponibili (trovati: $_n_themes)" \
 _mono_nonempty=$(grep -E '^C_[A-Z_]+="..' "$ROOT_DIR/themes/mono.conf" | wc -l)
 assert_eq "mono: tutte le variabili vuote" "0" "$_mono_nonempty"
 
+# ─── UI-13: soglie di severità configurabili ───────────────────────────────────
+section "Soglie di severità da domain.conf (UI-13)"
+
+# Le soglie che decidono quando un valore diventa giallo o rosso erano hardcoded
+# negli .awk: tararle su un ambiente richiedeva di editare il codice. Ora sono in
+# domain.conf e arrivano ai tool con -v da dispatch.sh.
+#
+# Il test verifica la PROPRIETÀ (alzando le soglie, i colori di severità
+# scompaiono) e non valori specifici: legarlo a "250ms è giallo" lo renderebbe
+# fragile a un cambio dei default, che è proprio ciò che UI-13 rende facile.
+_GCFIX="$(mktemp -d)"
+_gn="$_GCFIX/prod/lxprjbliq04"
+mkdir -p "$_gn/prod/ClaimCenter" "$_gn/ClaimCenter/Guidewire"
+echo "2026-08-06 10:00:00,000 ERROR x" > "$_gn/prod/ClaimCenter/server.log"
+echo '10.0.0.1 [06/Aug/2026:10:00:00 +0200] "GET /a HTTP/1.1" 200 100 100 - UA' \
+    > "$_gn/prod/ClaimCenter/undertow_access_log.log"
+# Due pause: 250ms (oltre GC_PAUSE_WARN_MS=200) e 600ms (oltre CRIT=500)
+cat > "$_gn/prod/ClaimCenter/gc.log" <<'GCEOF'
+[2026-08-06T10:00:00.000+0200] GC(1) Pause Young (Normal) 120M->40M(512M) 250.500ms
+[2026-08-06T10:01:00.000+0200] GC(2) Pause Young (Normal) 130M->50M(512M) 600.100ms
+GCEOF
+
+# _sev [ENV_ASSIGNMENTS] → quanti colori di severità (giallo 33 / rosso 31) usati
+_sev() {
+    env "$@" QUERY_LOG_DIR= bash "$ROOT_DIR/chatbot.sh" --profile "$ROOT_DIR/profiles/liquido" \
+        --base-dir "$_GCFIX" --env prod --node 4 --theme dark --query 'statistiche GC' 2>&1 |
+        grep -oE $'\033\[3[13]m' | wc -l
+}
+
+_n_default=$(_sev)
+assert_true "con le soglie di default i valori oltre soglia sono colorati (trovati: $_n_default)" \
+    "$([[ "$_n_default" -gt 0 ]] && echo 1 || echo 0)"
+
+_n_alte=$(_sev GC_PAUSE_WARN_MS=9000 GC_PAUSE_CRIT_MS=9999)
+assert_eq "alzando le soglie oltre i valori reali: nessun colore di severità" "0" "$_n_alte"
+
+_n_basse=$(_sev GC_PAUSE_WARN_MS=1 GC_PAUSE_CRIT_MS=2)
+assert_true "abbassandole a 1ms: tutto colorato (trovati: $_n_basse)" \
+    "$([[ "$_n_basse" -ge "$_n_default" ]] && echo 1 || echo 0)"
+
+# Le soglie devono rispettare l'ambiente: domain.conf usa ${VAR:-default}, come
+# il resto del progetto. Un'assegnazione secca le sovrascriverebbe, rendendo
+# UI-13 inutile — ed è l'errore commesso alla prima stesura.
+_secche=$(grep -cE '^(GC_PAUSE|SVC_TIME|REQ_TIME|HEAP_USED|GC_CORR)[A-Z_]*=[0-9]' \
+    "$ROOT_DIR/profiles/liquido/domain.conf" || true)
+assert_eq "domain.conf: nessuna soglia con assegnazione secca" "0" "$_secche"
+
+# Il contenuto non cambia: le soglie governano la resa, non cosa il tool trova
+_txt_def=$(env QUERY_LOG_DIR= bash "$ROOT_DIR/chatbot.sh" --profile "$ROOT_DIR/profiles/liquido" \
+    --base-dir "$_GCFIX" --env prod --node 4 --query 'statistiche GC' 2>&1)
+_txt_alt=$(env GC_PAUSE_WARN_MS=9000 GC_PAUSE_CRIT_MS=9999 QUERY_LOG_DIR= \
+    bash "$ROOT_DIR/chatbot.sh" --profile "$ROOT_DIR/profiles/liquido" \
+    --base-dir "$_GCFIX" --env prod --node 4 --query 'statistiche GC' 2>&1)
+assert_eq "cambiare le soglie non cambia i dati riportati (solo la resa)" "$_txt_def" "$_txt_alt"
+rm -rf "$_GCFIX"
+
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"

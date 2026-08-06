@@ -4,7 +4,12 @@
 
 BEGIN {
     gc_count = 0
-    SLOW_MS = 200; VERYSLOW_MS = 500
+    # Soglie da domain.conf via dispatch.sh (UI-13). Il fallback è il valore
+    # storico: un'invocazione diretta (test, debug) si comporta come prima.
+    SLOW_MS     = (gc_pause_warn_ms != "") ? gc_pause_warn_ms+0 : 200
+    VERYSLOW_MS = (gc_pause_crit_ms != "") ? gc_pause_crit_ms+0 : 500
+    HEAP_WARN   = (heap_warn_pct    != "") ? heap_warn_pct+0    : 70
+    HEAP_CRIT   = (heap_crit_pct    != "") ? heap_crit_pct+0    : 85
 
     # Granularità timeline adattiva in base alla finestra temporale richiesta.
     # Obiettivo: produrre sempre un numero di bucket utile alla lettura (10-50).
@@ -216,7 +221,7 @@ END {
             bar_len = (heap_cap_last > 0) ? int(h * BAR_W / heap_cap_last) : 0
             bar = ""; for (k = 1; k <= bar_len; k++) bar = bar "▪"
             heap_pct = (heap_cap_last > 0) ? int(h * 100 / heap_cap_last) : 0
-            hc = (heap_pct >= 85) ? RED : (heap_pct >= 70) ? YELLOW : ""
+            hc = (heap_pct >= HEAP_CRIT) ? RED : (heap_pct >= HEAP_WARN) ? YELLOW : ""
             bc = (bavg >= VERYSLOW_MS) ? RED : (bavg >= SLOW_MS) ? YELLOW : WHT
             pc = (bpct >= 5) ? RED : (bpct >= 2) ? YELLOW : WHT
             printf "  %s  %s%5dM%s  %s%5d%s  %s%6.1f%s  %s%6.1f%%%s  %s%s%s\n", \
