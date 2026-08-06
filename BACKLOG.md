@@ -10,8 +10,8 @@ Aggiornato: 2026-08-06
 |---|------|---------|------|
 | 1 | **SRCH-1** — ricerca testuale in un log nominato | SRCH | L'unica voce che aggiunge *funzionalità* e non velocità. Aperta dal 2026-08-05 |
 | 2 | **P7** — `grep_named_log` (3390ms di mediana, mai analizzato) | P | Candidato performance residuo più promettente |
-| 3 | **UI-12** — migrare i 13 tool ai nomi semantici dei colori | UI | Incrementale; corregge anche `RED` usato per "soglia" invece di "errore" |
-| 4 | **UI-13** — soglie in `domain.conf` | UI | `SLOW_MS` definito due volte con valori diversi; le rende tarabili per ambiente |
+| 3 | **UI-13** — soglie dei colori in `domain.conf` | UI | Difetto reale: oggi per cambiare quando una pausa GC è "grave" si edita un `.awk` |
+| 4 | **UI-12** — nomi semantici dei colori nei tool | UI | Cosmetico, nessun difetto visibile — vedi nota in sezione UI |
 
 **Chiusi il 2026-08-06**: OBS-3 (copertura logging sui 14 tool), UI-11 (sistema di temi
 colore, default `mono` a zero ANSI).
@@ -258,9 +258,26 @@ cui questo lavoro è stato rinviato a dopo NLOG (test di parità prima, refactor
 | UI-10 | **`search_all_logs`: righe alternate bianco/grigio per nodo** — nella tabella risultati, alternare DIM/normale tra i nodi per migliorare la leggibilità quando ci sono molte righe. | **Fatto** (2026-07-31) |
 | UI-9 | **`search_all_logs`: ricerca su tutti i nodi** — se la query non specifica un nodo, il tool oggi cerca solo sul nodo attivo in sessione. Aggiungere un'iterazione su tutti i nodi dell'ambiente (da `NODE_NAME_TEMPLATE` + lista nodi in `system.conf`) e aggregare i risultati raggruppati per nodo. Rimuovere anche il suggerimento "→ Per dettaglio: …" che produce output errato (nome file invece di nome log leggibile). | **Fatto** (2026-07-31) |
 | UI-11 | **Sistema di temi colore** — `themes/*.conf` letti da bash e awk, `lib/utils-theme.sh`, 7 ruoli semantici (`C_CRIT`/`C_WARN`/`C_OK`/`C_VAL`/`C_LBL`/`C_ACCENT`/`C_ROW_ALT`), 9 temi, `--theme`/`--list-themes`/`BOT_THEME`/`NO_COLOR`, `theme-preview.sh`. **Default `mono`: zero ANSI**, per servizi e redirect su file. Risolti i 132 ANSI hardcoded nei 6 file bash che sfuggivano a `utils-colors.awk`. | **Fatto** (2026-08-06) |
-| UI-12 | **Migrare i 13 tool ai nomi semantici** — oggi usano ancora le costanti storiche (`RED`, `YELLOW`…) mappate sui ruoli in `utils-colors.awk`. La migrazione rende esplicito *perché* un elemento è colorato e corregge i casi dove `RED` significa "soglia superata" invece di "errore" (`slow_requests`, `service_times`, `gc_stats`, `correlate_gc_slow`). Incrementale, un tool per volta. | Media |
+| UI-12 | **Migrare i 13 tool ai nomi semantici** — oggi usano le costanti storiche (`RED`, `YELLOW`…) mappate sui ruoli in `utils-colors.awk`. **Nessun difetto visibile da correggere** (vedi nota sotto): è solo leggibilità del codice, `C_CRIT` dice più di `RED` a chi legge. Incrementale, un tool per volta, zero urgenza. | **Bassa — cosmetico** |
 | UI-13 | **Soglie in `domain.conf`** — `SLOW_MS` è definito **due volte con valori diversi** (200 in `gc_stats.awk:7`, 2000 in `service_times.awk:12`): corretto nel merito, ma il nome identico suggerisce una costante condivisa che non esiste. Altre soglie inline e senza nome: `>=1000` (`filter_ip`), `>=5000` (`slow_requests`), `>=85`/`>=70` (`gc_stats`), `>=30`/`>=10` (`correlate_gc_slow`). Portarle in `domain.conf` con nomi espliciti (`GC_PAUSE_WARN_MS`, `SVC_TIME_WARN_MS`…) le rende anche tarabili per ambiente senza editare gli `.awk`. | Media |
 
+
+### UI-12 — rettifica: la semantica dei colori è già corretta
+
+La descrizione iniziale (2026-08-06) diceva che `RED` significava "soglia superata" in alcuni
+tool e "errore" in altri, dedotto **contando gli usi** per tool senza leggere le condizioni.
+Verificato il codice, il pattern reale è sempre una scala di gravità a due livelli:
+
+```awk
+(valore >= VERYSLOW_MS) ? RED : (valore >= SLOW_MS) ? YELLOW : ""   # gc_stats, service_times
+(pct_corr >= 30)        ? RED : (pct_corr >= 10)    ? YELLOW : ""   # correlate_gc_slow
+(substr(status,1,1) == "5") ? RED : YELLOW                          # slow_requests, count_status
+```
+
+Rosso = livello più grave, giallo = attenzione: mappa esattamente su `C_CRIT`/`C_WARN`. La
+differenza fra "status 5xx" e "tempo oltre soglia" è nel **dominio** del dato, non nella
+semantica del colore. Quindi la migrazione ai nomi semantici migliora la leggibilità del
+codice ma non corregge nulla di visibile all'utente — priorità abbassata a cosmetica.
 ---
 
 ## OBS — Osservabilità (logging di performance, 2026-08-06)
