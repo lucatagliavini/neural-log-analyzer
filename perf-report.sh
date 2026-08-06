@@ -38,17 +38,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$LOG_DIR" ]]; then
+    # Stessa catena di risoluzione di chatbot.sh (system.conf →
+    # system.local.conf → default <dir script>/logs): se divergesse, il report
+    # cercherebbe i dati dove il bot non li scrive.
     [[ -f "$PROFILE_DIR/system.conf" ]] && source "$PROFILE_DIR/system.conf"
-    LOG_DIR="${QUERY_LOG_DIR:-}"
+    [[ -f "$PROFILE_DIR/system.local.conf" ]] && source "$PROFILE_DIR/system.local.conf"
+    LOG_DIR="${QUERY_LOG_DIR:-$SCRIPT_DIR/logs}"
 fi
 
-if [[ -z "$LOG_DIR" ]]; then
-    echo "[ERROR] QUERY_LOG_DIR non impostato in $PROFILE_DIR/system.conf" >&2
-    echo "        Impostalo (es. QUERY_LOG_DIR=/product/lana-bot/logs) o usa --log-dir." >&2
-    exit 1
-fi
 if [[ ! -d "$LOG_DIR" ]]; then
     echo "[ERROR] directory log non trovata: $LOG_DIR" >&2
+    echo "        Il logging si attiva alla prima query eseguita da chatbot.sh." >&2
+    echo "        Usa --log-dir <dir> per indicarne un'altra." >&2
     exit 1
 fi
 

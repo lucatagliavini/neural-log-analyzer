@@ -83,6 +83,17 @@ source "$PROFILE_DIR/domain.conf"
 # Allinea TZ di sistema con quella dei log del server (tutti i sottoprocessi la ereditano)
 [[ -n "${LOG_TZ:-}" ]] && export TZ="$LOG_TZ"
 
+# QUERY_LOG_DIR: default a <dir di chatbot.sh>/logs se il profilo non lo
+# imposta. Il default vive QUI e non in system.conf perché SCRIPT_DIR non è
+# ancora noto quando quel file viene sourciato — e un path relativo funziona
+# in qualsiasi installazione senza configurazione per-host (in produzione:
+# /product/lana-bot/neural-log-analyzer/logs).
+# `logs/` è escluso da deploy.sh e da .gitignore, quindi i log accumulati non
+# vengono né sovrascritti dai deploy né committati.
+# Resta sovrascrivibile da system.conf, system.local.conf o dall'ambiente:
+# `QUERY_LOG_DIR= ./chatbot.sh ...` (vuoto) disattiva il logging.
+QUERY_LOG_DIR="${QUERY_LOG_DIR:-$SCRIPT_DIR/logs}"
+
 # Override base dir se passato esplicitamente
 [[ -n "$BASE_DIR_OVERRIDE" ]] && LOG_BASE_DIR="$BASE_DIR_OVERRIDE"
 

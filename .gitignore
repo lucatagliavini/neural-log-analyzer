@@ -3,5 +3,9 @@ __pycache__/
 profiles/*/models/*.backup/
 profiles/*/models/*.backup2/
 tmp/
+# Log di utilizzo e performance (chatbot-YYYY-MM-DD.log): dati di runtime,
+# specifici dell'installazione. Anche escluso da deploy.sh, così i log
+# accumulati in produzione non vengono sovrascritti dai deploy.
+logs/
 # Contiene host e path dell'ambiente di produzione: resta locale per scelta.
 deploy.sh
