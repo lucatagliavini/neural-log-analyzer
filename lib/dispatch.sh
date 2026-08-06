@@ -31,18 +31,36 @@ open_log() {
 # Uso: eval gawk ... $(open_logs_for DIR BASE)
 open_logs_for() {
     local dir="$1" base="$2"
+    local _t0 _t1
+    _t0=$(date +%s%3N 2>/dev/null || echo 0)
     local list
     list=$(select_log_files "$dir" "$base" "${TIME_FROM:-}" "${TIME_TO:-}")
-    local out=""
+    local out="" _nf=0 _nb=0
     IFS='|' read -ra _files <<< "$list"
     for f in "${_files[@]}"; do
         [[ -z "$f" ]] && continue
         out+=" $(open_log "$f")"
+        _nf=$(( _nf + 1 ))
+        _nb=$(( _nb + $(stat -c %s "$f" 2>/dev/null || echo 0) ))
     done
     # fallback se select_log_files non trova nulla (es. range fuori range disponibile)
     if [[ -z "$out" ]]; then
         local fallback="${dir}/${base}.log"
-        [[ -f "$fallback" ]] && out=" $(open_log "$fallback")"
+        if [[ -f "$fallback" ]]; then
+            out=" $(open_log "$fallback")"
+            _nf=1
+            _nb=$(stat -c %s "$fallback" 2>/dev/null || echo 0)
+        fi
+    fi
+    _t1=$(date +%s%3N 2>/dev/null || echo 0)
+    # Metriche di fase per il log di performance. Questa funzione è invocata in
+    # `$(...)`, quindi gira in una SUBSHELL: le variabili non risalgono al
+    # chiamante e vanno passate via file (_PERF_SELECT_FILE, creato da
+    # dispatch_tool). Senza questo passaggio le metriche di selezione
+    # risulterebbero sempre 0 per i tool che passano da qui — cioè tutti
+    # tranne search_all_logs.
+    if [[ -n "${_PERF_SELECT_FILE:-}" ]]; then
+        printf '%s %s %s\n' "$(( _t1 - _t0 ))" "$_nf" "$_nb" >> "$_PERF_SELECT_FILE" 2>/dev/null || true
     fi
     echo "$out"
 }
@@ -290,7 +308,66 @@ print_help() {
     printf "  ${DIM}Digita ${RESET}${BOLD}aiuto${RESET}${DIM} in qualsiasi momento per rivedere questa lista.${RESET}\n\n"
 }
 
+# dispatch_tool TOOL — wrapper che misura le fasi e scrive le metriche su
+# BOT_PERF_FILE, poi delega a _dispatch_tool_run per l'esecuzione vera.
+#
+# Vive QUI e non nei 13 rami del case: la selezione file e l'analisi AWK sono
+# le stesse due fasi per ogni tool, quindi strumentarle una volta nel punto
+# comune evita 13 copie della stessa logica (principio 2 di CLAUDE.md).
+# search_all_logs si strumenta da sé — è uno script separato con un pool di
+# worker e fasi proprie — e sovrascrive queste metriche con le sue, più
+# dettagliate.
+#
+# La scomposizione è per differenza: `select_ms` è il tempo speso dentro
+# open_logs/open_server_logs/open_gc_logs (accumulato dai wrapper in
+# _PERF_SELECT_ACC), `search_ms` è tutto il resto dell'esecuzione del tool.
+# Non serve strumentare ogni singolo .awk: la domanda a cui rispondere è
+# "il tempo va nella scelta dei file o nell'analisi?".
 dispatch_tool() {
+    local tool="$1"
+    local _t0 _t1 _rc
+    _t0=$(date +%s%3N 2>/dev/null || echo 0)
+
+    # File di raccolta per le metriche emesse dalle subshell di open_logs_for.
+    # Solo se il logging è attivo: senza BOT_PERF_FILE non c'è destinazione e
+    # non vale un mktemp per query.
+    _PERF_SELECT_FILE=""
+    if [[ -n "${BOT_PERF_FILE:-}" && "$tool" != "search_all_logs" ]]; then
+        _PERF_SELECT_FILE=$(mktemp 2>/dev/null) || _PERF_SELECT_FILE=""
+    fi
+
+    _dispatch_tool_run "$@"
+    _rc=$?
+
+    _t1=$(date +%s%3N 2>/dev/null || echo 0)
+    # search_all_logs scrive le proprie metriche (più dettagliate, con il
+    # conteggio dei match e i worker): non sovrascriverle con queste.
+    if [[ -n "$_PERF_SELECT_FILE" ]]; then
+        local _sel=0 _nf=0 _nb=0
+        if [[ -s "$_PERF_SELECT_FILE" ]]; then
+            read -r _sel _nf _nb < <(awk '{s+=$1; f+=$2; b+=$3} END{print s+0, f+0, b+0}' "$_PERF_SELECT_FILE")
+        fi
+        local _tot=$(( _t1 - _t0 ))
+        local _sea=$(( _tot - _sel ))
+        [[ "$_sea" -lt 0 ]] && _sea=0
+        {
+            echo "PERF_TOOL=$tool"
+            echo "PERF_SELECT_MS=${_sel:-0}"
+            echo "PERF_SEARCH_MS=$_sea"
+            echo "PERF_FILES=${_nf:-0}"
+            echo "PERF_FILES_MATCHED=0"
+            echo "PERF_BYTES=${_nb:-0}"
+            echo "PERF_JOBS=1"
+            echo "PERF_HITS=0"
+        } > "$BOT_PERF_FILE" 2>/dev/null || true
+        log_debug "dispatch_tool $tool: totale=${_tot}ms select=${_sel}ms analisi=${_sea}ms file=${_nf}"
+        rm -f "$_PERF_SELECT_FILE"
+    fi
+    _PERF_SELECT_FILE=""
+    return "$_rc"
+}
+
+_dispatch_tool_run() {
     local tool="$1"
     local access="$ACCESS_LOG"
     local server="${SERVER_LOG:-}"

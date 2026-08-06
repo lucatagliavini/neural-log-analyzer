@@ -100,8 +100,12 @@ awk -F'\t' '
         }
     }' <<< "$_rows" | sort -k4 -rn
 
-# ─── Scomposizione per fase (solo righe che hanno le metriche di fase) ────────
-printf "\n${_B}Scomposizione fasi${_X}  ${_D}(solo query con metriche di fase, es. search_all_logs)${_X}\n"
+# ─── Scomposizione per fase ───────────────────────────────────────────────────
+# "overhead fisso" = totale - selezione - analisi: è tutto ciò che avviene
+# fuori dall'esecuzione del tool (classificazione neurale in infer.sh,
+# normalize-query, param-extract, il fork di resolve-logs, il rendering).
+# Su query piccole è la voce DOMINANTE — invisibile prima di misurarla.
+printf "\n${_B}Scomposizione fasi${_X}\n"
 awk -F'\t' '
     ($8 + $9) > 0 {
         n++
@@ -109,15 +113,32 @@ awk -F'\t' '
         files += $10; matched += $11; bytes += $12
     }
     END {
-        if (n == 0) { print "  (nessuna)"; exit }
+        if (n == 0) { print "  (nessuna query con metriche di fase)"; exit }
         other = tot - sel - sea
-        printf "  query con metriche di fase: %d\n", n
-        printf "  selezione log:   %7dms medi  (%4.1f%% del totale)\n", sel/n, 100*sel/tot
-        printf "  ricerca/analisi: %7dms medi  (%4.1f%% del totale)\n", sea/n, 100*sea/tot
-        printf "  altro (nnet, setup, render): %dms medi  (%4.1f%%)\n", other/n, 100*other/tot
-        printf "  volume medio: %d file (%d con match), %.1f MB\n", files/n, matched/n, bytes/n/1048576
-        if (bytes > 0) printf "  throughput: %.1f MB/s nella fase di ricerca\n", (bytes/1048576)/(sea/1000)
+        if (other < 0) other = 0
+        printf "  query misurate: %d\n", n
+        printf "  selezione log:    %7dms medi  (%4.1f%%)\n", sel/n, 100*sel/tot
+        printf "  analisi (awk):    %7dms medi  (%4.1f%%)\n", sea/n, 100*sea/tot
+        printf "  overhead fisso:   %7dms medi  (%4.1f%%)  ", other/n, 100*other/tot
+        printf "%s\n", (100*other/tot > 50 ? "← voce dominante" : "")
+        printf "  volume medio: %d file, %.1f MB\n", files/n, bytes/n/1048576
+        if (bytes > 0 && sea > 0) printf "  throughput analisi: %.1f MB/s\n", (bytes/1048576)/(sea/1000)
     }' <<< "$_rows"
+
+# ─── Overhead fisso per tool: quanto costa una query "a vuoto" ────────────────
+printf "\n${_B}Overhead fisso per tool${_X}  ${_D}(totale meno selezione e analisi — nnet, setup, render)${_X}\n"
+printf "${_D}%-22s %6s %10s %10s${_X}\n" "TOOL" "QUERY" "OVERHEAD" "% del tot"
+printf "${_D}%s${_X}\n" "$(printf '─%.0s' $(seq 1 52))"
+awk -F'\t' '
+    ($8 + $9) > 0 {
+        split($5, a, ","); split(a[1], b, ":")
+        o = $7 - $8 - $9; if (o < 0) o = 0
+        ov[b[1]] += o; tt[b[1]] += $7; n[b[1]]++
+    }
+    END {
+        for (t in ov)
+            printf "%-22s %6d %8dms %9.1f%%\n", t, n[t], ov[t]/n[t], 100*ov[t]/tt[t]
+    }' <<< "$_rows" | sort -k3 -rn
 
 # ─── Query più lente ──────────────────────────────────────────────────────────
 printf "\n${_B}Le %s query più lente${_X}\n" "$SLOWEST"
