@@ -150,15 +150,31 @@ _init_query_log() {
     _QUERY_LOG_FILE="${QUERY_LOG_DIR}/chatbot-$(date +%Y-%m-%d).log"
 }
 
+# log_query QUERY TOOLS [TOTAL_MS]
+#
+# Colonne TSV (l'ordine è un contratto: gli script di analisi offline usano
+# $N, aggiungere solo IN CODA):
+#   1 timestamp  2 env  3 node  4 query  5 tools  6 profilo
+#   7 durata totale ms  8 fase selezione ms  9 fase ricerca/analisi ms
+#   10 file selezionati  11 file con match  12 byte processati  13 worker
+#
+# Le colonne 8-13 arrivano dal tool via BOT_PERF_FILE (sourcato in
+# run_query): un tool che non le produce lascia 0, così una riga resta
+# sempre confrontabile con le altre — nessun campo mancante da gestire in
+# analisi. Con `awk -F'\t'` si aggregano per tool, per ora, per volume.
 log_query() {
     [[ -z "$_QUERY_LOG_FILE" ]] && return
-    local query="$1" tools="$2"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+    local query="$1" tools="$2" total_ms="${3:-0}"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$(date '+%Y-%m-%dT%H:%M:%S')" \
         "${ACTIVE_ENV:-?}" "${ACTIVE_NODE:-?}" \
         "$query" \
         "$tools" \
         "${profile_name:-}" \
+        "$total_ms" \
+        "${PERF_SELECT_MS:-0}" "${PERF_SEARCH_MS:-0}" \
+        "${PERF_FILES:-0}" "${PERF_FILES_MATCHED:-0}" \
+        "${PERF_BYTES:-0}" "${PERF_JOBS:-0}" \
         >> "$_QUERY_LOG_FILE" 2>/dev/null || true
 }
 
@@ -174,6 +190,13 @@ trap '_rotate_query_logs' EXIT
 # ─── Esecuzione query ────────────────────────────────────────────────────────
 run_query() {
     local query="$1"
+    local _t_query_start
+    _t_query_start=$(date +%s%3N 2>/dev/null || echo 0)
+    # Azzerate ad ogni query: sono popolate dal tool via BOT_PERF_FILE e, se
+    # restassero dal giro precedente, una query senza metriche erediterebbe
+    # quelle della precedente falsando l'analisi offline.
+    PERF_SELECT_MS=0 PERF_SEARCH_MS=0 PERF_FILES=0
+    PERF_FILES_MATCHED=0 PERF_BYTES=0 PERF_JOBS=0
 
     # Normalizza la query ed estrai entità (APP, ENV, NODE) — unica fonte di verità
     source <("$LIB_DIR/normalize-query.sh" "$query")
@@ -301,16 +324,18 @@ run_query() {
     tools=$("$LIB_DIR/infer.sh" "$query" 2>/dev/null)
 
     if [[ -z "$tools" ]]; then
-        log_query "$query" "none"
+        log_query "$query" "none" \
+            "$(( $(date +%s%3N 2>/dev/null || echo 0) - _t_query_start ))"
         printf "\033[1m└─\033[0m \033[2m[INFO] Nessun tool attivato con confidenza >= %s\033[0m\n" "$TOOL_THRESHOLD"
         printf "   Prova a riformulare la query. Digita \033[1maiuto\033[0m per vedere cosa so fare.\n"
         return
     fi
 
-    # Loga: tool attivati come "tool1:pct,tool2:pct"
+    # Tool attivati come "tool1:pct,tool2:pct". Il log vero e proprio avviene
+    # DOPO l'esecuzione (in fondo a questa funzione): solo lì si conosce la
+    # durata, che è il dato per cui esiste il log di performance.
     local tools_log
     tools_log=$(awk '{printf "%s:%d%%,", $1, $2*100}' <<< "$tools" | sed 's/,$//')
-    log_query "$query" "$tools_log"
 
     printf "\033[1m│\033[0m  Tool attivati:\n"
     while IFS=' ' read -r tool prob; do
@@ -348,6 +373,15 @@ run_query() {
 
     printf "\033[1m│\033[0m\n"
 
+    # BOT_PERF_FILE: canale con cui i tool (processi figli) restituiscono le
+    # proprie metriche di fase. Creato solo se il query log è attivo — senza
+    # di esso le metriche non avrebbero destinazione.
+    local _perf_file=""
+    if [[ -n "$_QUERY_LOG_FILE" ]]; then
+        _perf_file=$(mktemp 2>/dev/null) || _perf_file=""
+        export BOT_PERF_FILE="$_perf_file"
+    fi
+
     while IFS=' ' read -r tool _prob; do
         printf "\033[1m├─── %s\033[0m ─────────────────────────────\n" "$tool"
         if [[ "$tool" == "search_all_logs" && -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]]; then
@@ -358,7 +392,19 @@ run_query() {
         echo ""
         dispatch_tool "$tool" || true
         echo ""
+        # Raccoglie le metriche di questo tool (se le ha prodotte) prima del
+        # tool successivo, che sovrascriverebbe il file.
+        if [[ -n "$_perf_file" && -s "$_perf_file" ]]; then
+            source "$_perf_file" 2>/dev/null || true
+            : > "$_perf_file"
+        fi
     done <<< "$tools"
+
+    [[ -n "$_perf_file" ]] && rm -f "$_perf_file"
+    unset BOT_PERF_FILE
+
+    log_query "$query" "$tools_log" \
+        "$(( $(date +%s%3N 2>/dev/null || echo 0) - _t_query_start ))"
 
     printf "\033[1m└──────────────────────────────────────────\033[0m\n"
 }

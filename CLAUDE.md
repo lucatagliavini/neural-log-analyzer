@@ -63,6 +63,10 @@ bash tests/run-tests.sh
 # Report gap nel vocabolario/dataset per classe
 ./gap-report.sh --profile profiles/liquido
 
+# Analisi offline dei tempi di risposta (richiede QUERY_LOG_DIR impostato)
+./perf-report.sh --profile profiles/liquido
+./perf-report.sh --tool search_all_logs --slowest 20
+
 # Deploy
 ./deploy.sh
 ```

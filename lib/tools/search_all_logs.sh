@@ -105,6 +105,11 @@ _sal_add() {
 # (2026-08-05) — in nodo singolo $_n è SEMPRE popolato (ACTIVE_NODE ha default
 # "01" in chatbot.sh), quindi le righe mostravano comunque "nodo NN  " mentre
 # l'header, guardando DETECTED_NODE, non riservava quello spazio.
+# Timing delle due fasi, per il log di performance (vedi log_query in
+# chatbot.sh): la selezione e la ricerca hanno costi di natura diversa
+# (I/O sui primi byte di molti file vs CPU su pochi file grandi) e vanno
+# misurate separatamente, altrimenti un rallentamento non è attribuibile.
+_t_select_start=$(date +%s%3N 2>/dev/null || echo 0)
 progress_show "selezione log..."
 if [[ -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]]; then
     _multi_node=1
@@ -135,6 +140,7 @@ else
 fi
 
 progress_clear
+_t_select_ms=$(( $(date +%s%3N 2>/dev/null || echo 0) - _t_select_start ))
 total_files="${#all_paths[@]}"
 if [[ "$total_files" -eq 0 ]]; then
     echo "Nessun log disponibile da cercare."
@@ -150,7 +156,8 @@ printf "\n${_B}Ricerca:${_X} ${_Y}%s${_X}  ${_D}%s%s  (%d file, %d worker)${_X}\
 
 # ── Ricerca parallela con pool di $jobs worker ────────────────────────────────
 # Ogni subshell scrive "label|hits|first_ts|last_ts|node" in $tmp_dir/NNNNN
-pids=()
+_running=0
+_t_search_start=$(date +%s%3N 2>/dev/null || echo 0)
 for (( i=0; i<total_files; i++ )); do
     progress_show "ricerca: ${all_labels[$i]} ($(( i + 1 ))/${total_files})"
     (
@@ -187,14 +194,22 @@ for (( i=0; i<total_files; i++ )); do
         printf "%s|%s|%s|%s|%s\n" "$lbl" "${hits:-0}" "${first_ts:-}" "${last_ts:-}" "${nod:-}" \
             > "$tmp_dir/$(printf '%05d' "$i")"
     ) &
-    pids+=($!)
-    if [[ "${#pids[@]}" -ge "$jobs" ]]; then
-        wait "${pids[0]}" 2>/dev/null || true
-        pids=("${pids[@]:1}")
+    _running=$(( _running + 1 ))
+    # `wait -n` attende il PRIMO worker che finisce, quale che sia. Prima era
+    # `wait "${pids[0]}"`, che attendeva il worker più VECCHIO: con file di
+    # dimensioni molto diverse (su un nodo reale: 77 vuoti, 65 <100KB, 111
+    # <5MB, 36 >5MB) uno slot restava bloccato dietro a un file grande mentre
+    # decine di file vuoti aspettavano il loro turno — head-of-line blocking.
+    # Misurato su 120 file reali di produzione, a parità di 4 worker:
+    # 104.2s → 39.7s (2.6×). Richiede bash ≥ 4.3 (il server ha 5.1).
+    if [[ "$_running" -ge "$jobs" ]]; then
+        wait -n 2>/dev/null || true
+        _running=$(( _running - 1 ))
     fi
 done
-for _p in "${pids[@]}"; do wait "$_p" 2>/dev/null || true; done
+wait
 progress_clear
+_t_search_ms=$(( $(date +%s%3N 2>/dev/null || echo 0) - _t_search_start ))
 
 # ── Raccoglie e analizza risultati ────────────────────────────────────────────
 res_labels=() res_hits=() res_ts=() res_last=() res_nodes=()
@@ -217,6 +232,28 @@ for (( i=0; i<total_files; i++ )); do
     total_hits=$(( total_hits + ${rh:-0} ))
     [[ "${rh:-0}" -gt 0 ]] && matched_files=$(( matched_files + 1 ))
 done
+
+# Metriche di performance per l'analisi offline. Scritte su BOT_PERF_FILE (un
+# path che chatbot.sh passa via env) perché questo tool gira in un processo
+# figlio: le variabili non risalgono al padre. Formato `chiave=valore` per
+# riga, così il padre lo sourcia senza parsing.
+_perf_bytes=0
+for _p in "${all_paths[@]}"; do
+    _perf_bytes=$(( _perf_bytes + $(stat -c %s "$_p" 2>/dev/null || echo 0) ))
+done
+if [[ -n "${BOT_PERF_FILE:-}" ]]; then
+    {
+        echo "PERF_TOOL=search_all_logs"
+        echo "PERF_SELECT_MS=${_t_select_ms:-0}"
+        echo "PERF_SEARCH_MS=${_t_search_ms:-0}"
+        echo "PERF_FILES=${total_files}"
+        echo "PERF_FILES_MATCHED=${matched_files}"
+        echo "PERF_BYTES=${_perf_bytes}"
+        echo "PERF_JOBS=${jobs}"
+        echo "PERF_HITS=${total_hits}"
+    } > "$BOT_PERF_FILE" 2>/dev/null || true
+fi
+log_debug "perf: select=${_t_select_ms}ms search=${_t_search_ms}ms files=${total_files} matched=${matched_files} bytes=${_perf_bytes} jobs=${jobs}"
 
 if [[ "$matched_files" -eq 0 ]]; then
     printf "${_D}Nessuna occorrenza di ${_X}${_B}%s${_X}${_D} trovata in %d log (%s).${_X}\n\n" \

@@ -253,6 +253,53 @@ _gzrot_total=$(echo "$_out_gzrot" | grep -oE 'Totale:\s+[0-9]+' | grep -oE '[0-9
 assert_true "rotazione .gz: il match nella rotazione storica è trovato (totale: ${_gzrot_total:-?})" \
     "$([[ "${_gzrot_total:-0}" -eq 1 ]] && echo 1 || echo 0)"
 
+# ─── Metriche di performance: contratto BOT_PERF_FILE ─────────────────────────
+section "Metriche di performance (BOT_PERF_FILE)"
+
+# Il tool scrive le proprie metriche di fase su BOT_PERF_FILE, che chatbot.sh
+# sourcia per comporre le colonne 8-13 del query log. È un contratto fra due
+# processi: se il tool smette di emettere una chiave, chatbot.sh logga 0 e
+# l'analisi offline (perf-report.sh) mostra dati muti senza errori — un
+# fallimento silenzioso, quindi va asserito.
+_FIX5="$(mktemp -d)"
+_node5_dir="$_FIX5/prod/lxprjbliq04"
+mkdir -p "$_node5_dir/prod/ClaimCenter" "$_node5_dir/ClaimCenter/Guidewire"
+echo "2026-08-06T10:00:00,000 INFO searchHub presente" > "$_node5_dir/ClaimCenter/Guidewire/cc.log"
+
+export LOG_BASE_DIR="$_FIX5"
+export DETECTED_NODE="04" ACTIVE_NODE="04"
+export SERVER_LOG_DIR="" SERVER_LOG="" ACCESS_LOG_DIR="" ACCESS_LOG=""
+export GC_LOG_DIR="" GC_LOG=""
+export GUIDEWIRE_LOG_DIR="$_node5_dir/ClaimCenter/Guidewire"
+export SEARCH_PATTERN="searchHub"
+_PERF_OUT="$(mktemp)"
+export BOT_PERF_FILE="$_PERF_OUT"
+
+bash "$ROOT_DIR/lib/tools/search_all_logs.sh" > /dev/null 2>&1
+_perf_content=$(cat "$_PERF_OUT" 2>/dev/null)
+unset BOT_PERF_FILE
+rm -rf "$_FIX5"
+
+for _k in PERF_TOOL PERF_SELECT_MS PERF_SEARCH_MS PERF_FILES PERF_FILES_MATCHED PERF_BYTES PERF_JOBS PERF_HITS; do
+    assert_true "BOT_PERF_FILE contiene $_k" \
+        "$([[ "$_perf_content" == *"${_k}="* ]] && echo 1 || echo 0)"
+done
+
+# I valori devono essere sensati, non solo presenti: un file con 1 match.
+( eval "$_perf_content" 2>/dev/null
+  [[ "${PERF_FILES:-0}" -ge 1 && "${PERF_HITS:-0}" -ge 1 && "${PERF_BYTES:-0}" -gt 0 ]] ) \
+    && _perf_sane=1 || _perf_sane=0
+assert_true "le metriche riportano valori plausibili (file>=1, hits>=1, bytes>0)" "$_perf_sane"
+
+# Il file di metriche non deve MAI inquinare stdout (il tool ci scrive la tabella).
+_perf_stdout=$(
+    export LOG_BASE_DIR="$_FIX5" BOT_PERF_FILE="$_PERF_OUT"
+    bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>/dev/null
+)
+assert_true "nessuna riga PERF_* finisce su stdout" \
+    "$([[ "$_perf_stdout" != *"PERF_"* ]] && echo 1 || echo 0)"
+rm -f "$_PERF_OUT"
+
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"
