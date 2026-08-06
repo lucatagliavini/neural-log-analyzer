@@ -1,10 +1,22 @@
 # Backlog — neural-log-analyzer
 
-Aggiornato: 2026-08-05
+Aggiornato: 2026-08-06
 
 ---
 
-## ⏭ PRIMO PUNTO SESSIONE SUCCESSIVA — SRCH-1
+## ⏭ APERTI, in ordine di priorità
+
+| # | Voce | Sezione | Nota |
+|---|------|---------|------|
+| 1 | **OBS-3** — verificare la copertura del logging su tutti i 14 tool | OBS | Richiesta utente. Veloce, e sblocca misure affidabili per tutto il resto |
+| 2 | **UI-11** — revisione dei colori nell'output | UI | Richiesta utente. Serve chiarire l'ambito prima di procedere |
+| 3 | **SRCH-1** — ricerca testuale in un log nominato | SRCH | L'unica voce che aggiunge *funzionalità* e non velocità. Aperta dal 2026-08-05 |
+| 4 | **P7** — `grep_named_log` (3390ms di mediana, mai analizzato) | P | Candidato performance residuo più promettente |
+
+**Non si fa ora**: `PERF-NNET` (overhead fisso della pipeline di inferenza) — l'utente ha in
+mente una modifica major su quella parte, vedi sezione P.
+
+---
 
 ## SRCH — Ricerca testuale in un log nominato (gap trovato in validazione produzione 2026-08-05)
 
@@ -20,7 +32,7 @@ Oggi ci sono due metà di funzionalità che non si toccano:
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
-| SRCH-1 | Colmare il gap: o (a) `grep_named_log` accetta un pattern testuale oltre al livello, o (b) `search_all_logs` restringe la ricerca a `NAMED_LOG` quando la query lo specifica. Decidere l'approccio con l'utente prima di implementare (impatto su vocabolario/dataset da valutare: nuova combinazione di parametri, non necessariamente nuova classe) | **Alta — primo task della prossima sessione** |
+| SRCH-1 | Colmare il gap: o (a) `grep_named_log` accetta un pattern testuale oltre al livello, o (b) `search_all_logs` restringe la ricerca a `NAMED_LOG` quando la query lo specifica. Decidere l'approccio con l'utente prima di implementare (impatto su vocabolario/dataset da valutare: nuova combinazione di parametri, non necessariamente nuova classe) | **Alta** |
 
 ---
 
@@ -66,6 +78,35 @@ Aggiungere una nuova applicazione richiede solo una riga in `entities.conf`, non
 | P1 | **`search_all_logs` parallelo** — ogni `_search_one` con `&` + tmpfile + `wait` + stampa ordinata in `dispatch.sh`. Speedup stimato 5-6× su nodi con molti log Guidewire (I/O-bound) | ~15 righe | **Fatto** |
 | P2 | **`query-to-features.sh`: da `echo \| grep -qE` a `[[ =~ ]]` nativo** — vedi analisi sotto | ~10 righe | **Fatto** (2026-08-04) |
 | P2-bis | **Stesso refactoring in `param-extract.sh` e `normalize-query.sh`** — valutato e scartato, vedi sotto | ~30 righe | **Chiuso: non si fa** (2026-08-04) |
+| P3 | **`wait -n` nel pool di `search_all_logs`** — `wait "${pids[0]}"` attendeva il worker più vecchio (head-of-line blocking). Misurato 104.2s → 39.7s a parità di worker | 3 righe | **Fatto** (2026-08-06) |
+| P4 | **Pre-gate `grep -qiF` + `pigz` + `gated=1`** in `search_all_logs` — vedi PERF-SAL nel session log 2026-08-06. Query reale 144s → 83s (-42%) | ~40 righe | **Fatto** (2026-08-06) |
+| P5 | **Indice per secondo in `correlate_gc_slow`** — il loop scandiva tutte le pause GC per ogni richiesta lenta (18665 × 543 ≈ 10M iterazioni). Mediana 8.37s → 5.68s | ~15 righe | **Fatto** (2026-08-06) |
+| P6 | **Memoizzazione `parse_access()` + inversione filtri `slow_requests`** — 18.4 righe per secondo distinto, cache evita ~95% delle `mktime()`. `count_status` 3.64s → 1.23s, `slow_requests` 6.78s → 4.00s | ~20 righe | **Fatto** (2026-08-06) |
+| P7 | **`grep_named_log`** — emerso a 3390ms di mediana nel log di performance, mai analizzato. Candidato residuo più promettente | ? | Media |
+| PERF-NNET | **Overhead fisso per query (~574ms)**: classificazione neurale (`infer.sh`) + `normalize-query.sh` + `param-extract.sh` + fork di `resolve-logs.sh`. Vedi sotto | — | **Non si fa ora — l'utente ha in mente una modifica major** |
+
+### PERF-NNET — overhead fisso della pipeline di inferenza
+
+Misurato col log di performance (2026-08-06): **~574ms costanti per query**, indipendenti dal
+volume dei log. Composizione da scomporre (non ancora fatto): `infer.sh` (rete neurale),
+`normalize-query.sh`, `param-extract.sh`, il fork di `resolve-logs.sh`, il rendering.
+
+**Peso reale, e perché non è la priorità:** dipende interamente dalla scala della query, e le
+due misure sembrano contraddirsi solo se si ignora questo:
+
+| fase | fixture locali (KB) | produzione (34 MB/query) |
+|---|---|---|
+| analisi AWK | 12ms (4.1%) | **3498ms (82.6%)** |
+| overhead fisso | 261ms (**84.7%**) | 574ms (13.6%) |
+
+L'overhead è **costante**, l'analisi è **proporzionale**. Su query piccole domina l'overhead,
+su query reali domina l'analisi — quindi ottimizzarlo migliorerebbe le query che già rispondono
+in 300ms, lasciando intatte quelle da 8 secondi. Stesso ragionamento che chiuse P2-bis.
+
+**Decisione (utente, 2026-08-06): non si tocca ora.** L'utente ha in mente una **modifica
+major** su questa parte (inferenza), quindi qualsiasi micro-ottimizzazione qui rischia di
+essere lavoro buttato. Da riprendere solo dopo che quella modifica è definita — e in quel
+momento questi numeri sono la baseline di confronto.
 
 ### P2-bis — perché non si fa
 
@@ -213,6 +254,18 @@ cui questo lavoro è stato rinviato a dopo NLOG (test di parità prima, refactor
 | UI-8 | **Periodo temporale in tutti i tool** — funzione `_print_time_window()` in `dispatch.sh`; rimosso blocco duplicato da `count_status.awk`. Colori: DIM grigio etichetta, `\033[97m` bianco puro per i valori. | **Fatto** (2026-07-31) |
 | UI-10 | **`search_all_logs`: righe alternate bianco/grigio per nodo** — nella tabella risultati, alternare DIM/normale tra i nodi per migliorare la leggibilità quando ci sono molte righe. | **Fatto** (2026-07-31) |
 | UI-9 | **`search_all_logs`: ricerca su tutti i nodi** — se la query non specifica un nodo, il tool oggi cerca solo sul nodo attivo in sessione. Aggiungere un'iterazione su tutti i nodi dell'ambiente (da `NODE_NAME_TEMPLATE` + lista nodi in `system.conf`) e aggregare i risultati raggruppati per nodo. Rimuovere anche il suggerimento "→ Per dettaglio: …" che produce output errato (nome file invece di nome log leggibile). | **Fatto** (2026-07-31) |
+| UI-11 | **Revisione dei colori nell'output** (richiesta utente 2026-08-06) — da chiarire con l'utente l'ambito preciso prima di procedere: leggibilità, coerenza fra tool, contrasto su terminali con sfondo chiaro/scuro, semantica dei colori per severità. Oggi ogni tool sceglie i propri (`utils-colors.awk` definisce le costanti ma non una convenzione d'uso), quindi lo stesso concetto può avere colori diversi fra tool. | **Alta — richiesta utente** |
+
+---
+
+## OBS — Osservabilità (logging di performance, 2026-08-06)
+
+| ID | Descrizione | Stato |
+|----|-------------|-------|
+| OBS-1 | **Log di query e performance** — `log_query()` in `chatbot.sh` scrive 13 colonne TSV (query, tool, tempi per fase, volumi, worker) in `QUERY_LOG_DIR`, default `<dir chatbot.sh>/logs`. `perf-report.sh` aggrega per tool (mediana/p95), scompone le fasi, elenca le query più lente, mostra il tempo per MB. | **Fatto** (2026-08-06) |
+| OBS-2 | **Metriche di fase per tutti i tool** — `dispatch_tool` è un wrapper che misura e delega a `_dispatch_tool_run`; `open_logs_for` emette le proprie metriche via file (gira in subshell). | **Fatto** (2026-08-06) |
+| OBS-3 | **Verificare la copertura effettiva su tutti i 14 tool** (richiesta utente 2026-08-06) — alcuni rami del `case` in `dispatch.sh` non passano da `open_logs_for`: `tail_named_log`/`grep_named_log` nel ramo `find` diretto (`:442-452`, `:492-502`), `show_help`, `list_logs`. Potrebbero riportare `PERF_SELECT_MS=0` o metriche assenti, rendendo la scomposizione muta proprio dove servirebbe. Verifica tool per tool, poi fix se necessario. | **Alta — richiesta utente** |
+| OBS-4 | **Metodologia di misura sul server** — il nodo di produzione ha varianza **4×** sulla stessa operazione (5s→20s, load average 3-8 variabile). Ogni misura richiede: snapshot statico dei log (sono in scrittura attiva), round **interlacciati** A/B/A/B, mediana su ≥5 campioni. Round singoli hanno prodotto conclusioni **invertite** 3 volte il 2026-08-06. | Nota permanente |
 
 ---
 
