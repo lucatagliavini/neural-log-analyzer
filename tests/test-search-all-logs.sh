@@ -253,6 +253,66 @@ _gzrot_total=$(echo "$_out_gzrot" | grep -oE 'Totale:\s+[0-9]+' | grep -oE '[0-9
 assert_true "rotazione .gz: il match nella rotazione storica è trovato (totale: ${_gzrot_total:-?})" \
     "$([[ "${_gzrot_total:-0}" -eq 1 ]] && echo 1 || echo 0)"
 
+# ─── Pre-gate letterale: non deve perdere match con pattern regex ─────────────
+section "Pre-gate grep -qiF (ottimizzazione I/O, 2026-08-06)"
+
+# Il gate salta l'analisi gawk sui file dove grep -qiF non trova il pattern
+# letterale. È corretto SOLO per pattern letterali: con metacaratteri ERE
+# l'utente intende una regex, e `grep -F` la cercherebbe alla lettera —
+# scartando file che contengono match reali. Il guard deve rilevarli e
+# saltare il gate. Un falso negativo qui è invisibile all'utente (MATCH=0
+# senza errori), quindi va asserito su entrambi i rami.
+_FIX6="$(mktemp -d)"
+_node6_dir="$_FIX6/prod/lxprjbliq04"
+mkdir -p "$_node6_dir/prod/ClaimCenter" "$_node6_dir/ClaimCenter/Guidewire"
+cat > "$_node6_dir/ClaimCenter/Guidewire/app.log" <<'EOF'
+2026-08-06T10:00:00,000 INFO codice ABC123 elaborato
+2026-08-06T10:01:00,000 INFO codice XYZ789 elaborato
+2026-08-06T10:02:00,000 ERROR timeout su servizio
+EOF
+
+export LOG_BASE_DIR="$_FIX6"
+export DETECTED_NODE="04" ACTIVE_NODE="04"
+export SERVER_LOG_DIR="" SERVER_LOG="" ACCESS_LOG_DIR="" ACCESS_LOG=""
+export GC_LOG_DIR="" GC_LOG=""
+export GUIDEWIRE_LOG_DIR="$_node6_dir/ClaimCenter/Guidewire"
+unset TIME_FROM TIME_TO
+
+# (a) pattern letterale presente → gate attivo, match trovato
+SEARCH_PATTERN="ABC123" _out_lit=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+_lit_n=$(echo "$_out_lit" | grep -oE 'Totale:\s+[0-9]+' | grep -oE '[0-9]+' | head -1)
+assert_true "pattern letterale: match trovato con gate attivo (trovati: ${_lit_n:-0})" \
+    "$([[ "${_lit_n:-0}" -eq 1 ]] && echo 1 || echo 0)"
+
+# (b) pattern letterale assente → gate scarta il file, 0 match (nessun falso positivo)
+SEARCH_PATTERN="QQQNONESISTE" _out_none=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+assert_true "pattern letterale assente: nessun match (gate non inventa risultati)" \
+    "$([[ "$_out_none" == *"Nessuna occorrenza"* ]] && echo 1 || echo 0)"
+
+# (c) REGEX con metacaratteri → il gate va SALTATO, i match devono essere trovati.
+# "ABC[0-9]+" come stringa letterale non esiste nel file: se il gate non
+# venisse saltato, grep -F non lo troverebbe e il file sarebbe scartato →
+# 0 match invece di 1. Questo è il test che protegge dal falso negativo.
+SEARCH_PATTERN="ABC[0-9]+" _out_re=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+_re_n=$(echo "$_out_re" | grep -oE 'Totale:\s+[0-9]+' | grep -oE '[0-9]+' | head -1)
+assert_true "pattern regex 'ABC[0-9]+': match trovato (gate saltato correttamente)" \
+    "$([[ "${_re_n:-0}" -eq 1 ]] && echo 1 || echo 0)"
+
+# (d) regex con alternanza: due match su righe diverse
+SEARCH_PATTERN="ABC123|XYZ789" _out_alt=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+_alt_n=$(echo "$_out_alt" | grep -oE 'Totale:\s+[0-9]+' | grep -oE '[0-9]+' | head -1)
+assert_true "pattern regex con alternanza: entrambi i match trovati (trovati: ${_alt_n:-0})" \
+    "$([[ "${_alt_n:-0}" -eq 2 ]] && echo 1 || echo 0)"
+
+# (e) il gate è case-insensitive come gawk (IGNORECASE=1): non deve divergere
+SEARCH_PATTERN="abc123" _out_ci=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+_ci_n=$(echo "$_out_ci" | grep -oE 'Totale:\s+[0-9]+' | grep -oE '[0-9]+' | head -1)
+assert_true "pattern letterale minuscolo su testo maiuscolo: match trovato (gate case-insensitive)" \
+    "$([[ "${_ci_n:-0}" -eq 1 ]] && echo 1 || echo 0)"
+
+rm -rf "$_FIX6"
+export SEARCH_PATTERN="searchHub"
+
 # ─── Metriche di performance: contratto BOT_PERF_FILE ─────────────────────────
 section "Metriche di performance (BOT_PERF_FILE)"
 

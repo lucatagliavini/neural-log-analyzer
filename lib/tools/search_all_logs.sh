@@ -148,6 +148,36 @@ if [[ "$total_files" -eq 0 ]]; then
     exit 0
 fi
 
+# ── Pre-gate letterale ────────────────────────────────────────────────────────
+# `grep -qiF` esce al primo match e tratta il pattern come STRINGA LETTERALE.
+# Misurato su file reali di produzione senza match (il caso dominante: 258 su
+# 319 nella query multi-nodo): plain 62MB 0.47-0.64s → 0.18-0.36s, gz 2MB
+# 0.92-1.39s → 0.58-0.70s, cioè ~2× sulla fase che pesa l'84% del totale.
+#
+# Perché -F e non -E: i dialetti ERE di gawk e grep divergono su casi come
+# `a\.b` o `{brace`, quindi un gate con motore regex diverso da quello di
+# analisi rischia di scartare match REALI — falso negativo silenzioso. Con -F
+# non c'è interpretazione, quindi non c'è divergenza possibile. Ma vale solo
+# se il pattern è davvero letterale: se contiene metacaratteri ERE, l'utente
+# intende una regex e il gate va SALTATO (si va diretti a gawk, come prima).
+# In caso di dubbio si salta: un file letto inutilmente costa tempo, un match
+# perso è un bug.
+_use_gate=0
+if [[ ! "$sp" =~ [][{}()*+?.^\$\\\|] ]]; then
+    _use_gate=1
+fi
+log_debug "pre-gate letterale: $([[ "$_use_gate" -eq 1 ]] && echo attivo || echo "saltato (pattern con metacaratteri ERE)")"
+
+# Decompressore: GZ_CAT viene da utils-log.sh (pigz -dc se disponibile, 3-4×
+# più veloce di gunzip — sui .gz la decompressione è ~90% del costo).
+#
+# Perché non `zgrep` per il pre-gate: è uno script sh che fa esattamente
+# `gzip -cd | grep` (vedi la sua riga 217), con due processi in più — misurato
+# PIÙ LENTO di `gunzip -c | grep` sia con pattern assente (0.94-1.43s vs
+# 0.88-1.06s) sia con early exit (0.12-0.16s vs 0.02-0.05s, dove l'overhead
+# di shell domina il lavoro utile).
+log_debug "decompressore .gz: $GZ_CAT"
+
 tw_label=""
 [[ -n "${TIME_FROM:-}" || -n "${TIME_TO:-}" ]] && \
     tw_label="${TIME_FROM:-*}→${TIME_TO:-*}  "
@@ -159,7 +189,16 @@ printf "\n${_B}Ricerca:${_X} ${_Y}%s${_X}  ${_D}%s%s  (%d file, %d worker)${_X}\
 _running=0
 _t_search_start=$(date +%s%3N 2>/dev/null || echo 0)
 for (( i=0; i<total_files; i++ )); do
-    progress_show "ricerca: ${all_labels[$i]} ($(( i + 1 ))/${total_files})"
+    # Progresso con risultati PARZIALI: conta i file già completati e le
+    # occorrenze trovate fin qui leggendo i file di risultato dei worker.
+    # La tabella finale non può essere stampata incrementalmente (serve
+    # max_hits per scalare le barre e max_lbl per allineare le colonne, noti
+    # solo a fine ricerca), ma l'utente vede che il lavoro procede e con
+    # quanti risultati — su una query da 2 minuti è la differenza fra una
+    # shell che sembra ferma e una che informa.
+    _done=$(find "$tmp_dir" -type f 2>/dev/null | wc -l)
+    _found=$(cat "$tmp_dir"/* 2>/dev/null | awk -F'|' '{s+=$2} END{print s+0}')
+    progress_show "ricerca: ${_done}/${total_files} file · ${_found} occorrenze · ${all_labels[$i]}"
     (
         lbl="${all_labels[$i]}"
         pth="${all_paths[$i]}"
@@ -178,18 +217,32 @@ for (( i=0; i<total_files; i++ )); do
         # incluso se il suo intervallo si sovrappone al range): un log corrente
         # non ruotato copre l'intera giornata, quindi il filtro riga-per-riga
         # qui resta necessario.
-        if [[ "$pth" == *.gz ]]; then
-            # Lo stream .gz non è rigiocabile: due process substitution
-            # indipendenti forniscono due decompressioni distinte. Se la
-            # prima passata non trova candidati, gawk esce prima di leggere
-            # la seconda: il secondo gunzip riceve SIGPIPE e termina subito,
-            # senza completare la decompressione.
-            _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -f "$_AWK_TOOL" \
-                <(gunzip -c "$pth" 2>/dev/null) <(gunzip -c "$pth" 2>/dev/null) 2>/dev/null)
-        else
-            _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -f "$_AWK_TOOL" "$pth" "$pth" 2>/dev/null)
+        # Pre-gate: se il pattern è letterale e grep non lo trova, il file non
+        # può contenere match e si salta l'intera analisi gawk. `grep -qiF`
+        # esce al primo match, quindi sul file CON match costa quasi nulla.
+        _skip=0
+        if [[ "$_use_gate" -eq 1 ]]; then
+            if [[ "$pth" == *.gz ]]; then
+                $GZ_CAT "$pth" 2>/dev/null | grep -qiF -- "$sp" || _skip=1
+            else
+                grep -qiF -- "$sp" "$pth" 2>/dev/null || _skip=1
+            fi
         fi
-        IFS='|' read -r hits first_ts last_ts <<< "$_result"
+
+        if [[ "$_skip" -eq 0 ]]; then
+            if [[ "$pth" == *.gz ]]; then
+                # Lo stream .gz non è rigiocabile: due process substitution
+                # indipendenti forniscono due decompressioni distinte. Se la
+                # prima passata non trova candidati, gawk esce prima di leggere
+                # la seconda: il secondo decompressore riceve SIGPIPE e termina
+                # subito, senza completare la decompressione.
+                _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -f "$_AWK_TOOL" \
+                    <($GZ_CAT "$pth" 2>/dev/null) <($GZ_CAT "$pth" 2>/dev/null) 2>/dev/null)
+            else
+                _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -f "$_AWK_TOOL" "$pth" "$pth" 2>/dev/null)
+            fi
+            IFS='|' read -r hits first_ts last_ts <<< "$_result"
+        fi
 
         printf "%s|%s|%s|%s|%s\n" "$lbl" "${hits:-0}" "${first_ts:-}" "${last_ts:-}" "${nod:-}" \
             > "$tmp_dir/$(printf '%05d' "$i")"

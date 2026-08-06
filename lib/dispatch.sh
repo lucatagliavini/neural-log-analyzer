@@ -17,7 +17,10 @@ open_log() {
     local f="$1"
     [[ -z "$f" ]] && return
     if [[ "$f" == *.gz ]]; then
-        echo "<(gunzip -c '$f')"
+        # GZ_CAT (utils-log.sh): pigz -dc se disponibile, 3-4× più veloce di
+        # gunzip. Questo è il punto a maggior leva del progetto per i .gz —
+        # ci passano TUTTI i tool che leggono log ruotati.
+        echo "<($GZ_CAT '$f')"
     else
         echo "'$f'"
     fi

@@ -51,7 +51,10 @@ _logfiles_read_first_ts() {
     local f="$1"
     local line=""
     if [[ "$f" == *.gz ]]; then
-        line=$(zcat "$f" 2>/dev/null | head -c 4096 | grep -m1 '')
+        # GZ_CAT (utils-log.sh): pigz -dc se disponibile. Qui il guadagno è
+        # minimo — si leggono solo i primi 4KB e il decompressore riceve
+        # SIGPIPE subito — ma resta l'unica fonte di verità sul decompressore.
+        line=$($GZ_CAT "$f" 2>/dev/null | head -c 4096 | grep -m1 '')
     else
         line=$(head -1 "$f" 2>/dev/null)
     fi

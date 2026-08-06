@@ -21,6 +21,26 @@
 
 declare -A _LOG_LEVEL_NUM=([debug]=0 [info]=1 [warn]=2 [error]=3 [off]=4)
 
+# ─── Decompressore per i log .gz ──────────────────────────────────────────────
+# Unica fonte di verità (principio 2): usato da open_log() in dispatch.sh — e
+# quindi da tutti i tool — da search_all_logs.sh e da utils-logfiles.sh.
+#
+# `pigz -dc` sposta CRC e scrittura su thread separati dal decoder e legge in
+# readahead: misurato in produzione (2026-08-06) 3-4× più veloce di gunzip
+# sullo stesso file (0.09-0.17s vs 0.32-0.38s per 2.1MB → 60MB). Conta perché
+# sui .gz la decompressione è ~90% del costo totale della ricerca.
+# NON parallelizza la decodifica dello stream: quella è sequenziale per
+# costruzione del formato gzip (ogni blocco dipende dal dizionario
+# precedente), quindi `-p` alto non aggiunge nulla.
+#
+# Fallback su gunzip: pigz è drop-in compatible in lettura, l'output è
+# identico byte per byte, quindi la sostituzione è sicura in entrambi i versi.
+if command -v pigz >/dev/null 2>&1; then
+    GZ_CAT="pigz -dc"
+else
+    GZ_CAT="gunzip -c"
+fi
+
 _log_write() {
     local level="$1" num="$2" msg="$3"
     # Letto ad ogni chiamata (non cachato al source): BOT_LOG_LEVEL può
