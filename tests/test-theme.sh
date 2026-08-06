@@ -108,6 +108,47 @@ _out_nc=$(NO_COLOR=1 QUERY_LOG_DIR= bash "$ROOT_DIR/chatbot.sh" \
     --theme dark --query 'quanti errori 500 oggi' 2>&1)
 assert_eq "NO_COLOR=1 con --theme dark: nessuna sequenza ANSI" "0" "$(_esc "$_out_nc")"
 
+# ─── Feedback progressivo: copertura su TUTTI i tool ──────────────────────────
+section "Feedback progressivo (⋯) presente in ogni tool che legge log"
+
+# Il marcatore ⋯ compare solo con stderr su TTY (per design: sotto `$(...)` e in
+# --query resta silenzioso), quindi serve `script` per simulare un terminale.
+#
+# Perché questo test esiste: la copertura del progresso si è rotta DUE VOLTE
+# per la stessa ragione — progress_show vive nel motore
+# select_log_files_grouped, e i percorsi che lo bypassano
+# (open_current_log_for per tail_log a riposo, resolve_named_log_path per
+# tail_named_log/grep_named_log) non lo chiamavano. Un percorso nuovo
+# ripeterebbe l'omissione senza alcun segnale: il progresso mancante non è un
+# errore, è solo assenza.
+if command -v script >/dev/null 2>&1; then
+    _has_progress() {
+        local q="$1" out
+        out=$(script -qec "QUERY_LOG_DIR= bash '$ROOT_DIR/chatbot.sh' --profile '$ROOT_DIR/profiles/liquido' --base-dir '$_FIX' --env prod --node 4 --query '$q'" /dev/null 2>&1)
+        grep -q '⋯' <<< "$out" && echo 1 || echo 0
+    }
+    # Una query per ciascun percorso di risoluzione file:
+    #   motore (select_log_files_grouped) · open_current_log_for ·
+    #   resolve_named_log_path · pool di search_all_logs
+    assert_eq "count_status (motore di selezione)"            "1" "$(_has_progress 'quanti errori 500 oggi')"
+    assert_eq "filter_errors (motore, server.log)"            "1" "$(_has_progress 'errori nel server log')"
+    assert_eq "tail_log (open_current_log_for)"               "1" "$(_has_progress 'ultime righe del log')"
+    assert_eq "tail_named_log (resolve_named_log_path)"       "1" "$(_has_progress 'ultime righe del cc.log')"
+    assert_eq "grep_named_log (resolve_named_log_path)"       "1" "$(_has_progress 'errori nel cc.log')"
+    assert_eq "search_all_logs (pool di worker)"              "1" "$(_has_progress 'cerca \"errore\" nel nodo 4')"
+
+    # Il progresso non deve lasciare residui: ogni riga emessa va cancellata
+    # con \r\033[K prima dell'output vero, altrimenti si attacca ad esso (la
+    # riga di progresso non ha newline).
+    _out_tty=$(script -qec "QUERY_LOG_DIR= bash '$ROOT_DIR/chatbot.sh' --profile '$ROOT_DIR/profiles/liquido' --base-dir '$_FIX' --env prod --node 4 --query 'errori nel cc.log'" /dev/null 2>&1)
+    _n_show=$(grep -o '⋯' <<< "$_out_tty" | wc -l)
+    _n_clear=$(grep -oP '\r\x1b\[K' <<< "$_out_tty" | wc -l)
+    assert_true "ogni riga di progresso è seguita da una pulizia (show=$_n_show clear=$_n_clear)" \
+        "$([[ "$_n_clear" -ge "$_n_show" ]] && echo 1 || echo 0)"
+else
+    printf "  ${DIM}SKIP  copertura progresso: 'script' non disponibile${RESET}\n"
+fi
+
 # ─── Precedenza e robustezza della selezione ──────────────────────────────────
 section "Selezione del tema: precedenza e fallback"
 

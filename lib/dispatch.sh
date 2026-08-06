@@ -82,6 +82,10 @@ open_current_log_for() {
     local dir="$1" base="$2"
     local f="${dir}/${base}.log"
     local out=""
+    # Feedback progressivo anche qui: questo percorso bypassa
+    # select_log_files_grouped (che chiama progress_show), quindi tail_log a
+    # riposo non mostrava nulla mentre gawk leggeva il file.
+    [[ -f "$f" ]] && progress_show "lettura $(basename "$f")..."
     [[ -f "$f" ]] && out=$(open_log "$f")
     if [[ -n "${_PERF_SELECT_FILE:-}" ]]; then
         local _nf=0 _nb=0
@@ -91,6 +95,9 @@ open_current_log_for() {
         fi
         printf '%s %s %s\n' 0 "$_nf" "$_nb" >> "$_PERF_SELECT_FILE" 2>/dev/null || true
     fi
+    # Pulisce la riga di progresso prima che il tool stampi su stdout: la riga
+    # non ha newline (usa \r), quindi l'output si attaccherebbe ad essa.
+    progress_clear
     echo "$out"
 }
 open_current_logs()        { open_current_log_for "${ACCESS_LOG_DIR:-$(dirname "$ACCESS_LOG")}" "$ACCESS_LOG_BASE"; }
@@ -164,6 +171,12 @@ resolve_named_log_path() {
     local _t0 _t1
     _t0=$(date +%s%3N 2>/dev/null || echo 0)
     local log_path=""
+    # Feedback progressivo: come open_current_log_for, questo percorso bypassa
+    # select_log_files_grouped (dove vive la chiamata a progress_show), quindi
+    # tail_named_log e grep_named_log non mostravano nulla. Conta: dal log di
+    # performance in produzione grep_named_log arriva a 3.7s, abbastanza da far
+    # sembrare la shell ferma.
+    progress_show "ricerca log ${named_log}..."
     if [[ -n "$gw_dir" ]]; then
         log_path=$(find "$gw_dir" -maxdepth 1 -name "*-${named_log}.log" 2>/dev/null | head -1)
         if [[ -z "$log_path" ]]; then
@@ -186,6 +199,7 @@ resolve_named_log_path() {
         fi
         printf '%s %s %s\n' "$(( _t1 - _t0 ))" "$_nf" "$_nb" >> "$_PERF_SELECT_FILE" 2>/dev/null || true
     fi
+    progress_clear
     echo "$log_path"
 }
 
