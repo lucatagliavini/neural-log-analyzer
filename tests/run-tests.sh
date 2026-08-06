@@ -257,8 +257,9 @@ run_intent_tests() {
 # Prima (fino al 2026-08-06) nessun runner aggregato li invocava: erano
 # eseguiti solo a mano, quindi senza rete di regressione automatica.
 run_unit_tests() {
-    print_header "UNIT — utils-logfiles.sh, param-extract.sh, search_all_logs.sh"
-    for _t in test-utils-logfiles.sh test-param-extract.sh test-search-all-logs.sh; do
+    print_header "UNIT — utils-logfiles, param-extract, search_all_logs, correlate_gc_slow"
+    for _t in test-utils-logfiles.sh test-param-extract.sh test-search-all-logs.sh \
+              test-correlate-gc-slow.sh; do
         if bash "$SCRIPT_DIR/$_t"; then
             pass=$(( pass + 1 ))
             printf "  ${GREEN}PASS${RESET}  %s\n" "$_t"

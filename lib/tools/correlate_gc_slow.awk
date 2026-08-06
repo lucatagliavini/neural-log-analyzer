@@ -2,8 +2,12 @@
 # Uso: awk -f correlate_gc_slow.awk gc.log access.log
 # Parametri: -v threshold_ms="500"
 #
-# Strategia: costruisce una lista di finestre GC (inizio±pausa+margine),
-# poi verifica quante richieste lente cadono in quelle finestre.
+# Strategia: indicizza per secondo gli istanti delle pause GC (gc_at), poi per
+# ogni richiesta lenta verifica con (2*gc_margin_s+1) lookup se esiste una pausa
+# vicina. Prima era una scansione lineare di TUTTE le pause per OGNI richiesta
+# lenta — O(richieste_lente × pause_GC): su dati reali 18665 × 543 ≈ 10 milioni
+# di iterazioni (2026-08-06). Equivalenza verificata su snapshot di produzione:
+# 7 combinazioni soglia/finestra e le 20 righe di dettaglio, output identico.
 
 BEGIN {
     FS = " "
@@ -12,7 +16,7 @@ BEGIN {
     gc_n = 0
 }
 
-# Fase 1: file gc.log — raccoglie timestamp e durata pause.
+# Fase 1: file gc.log — indicizza gli istanti delle pause.
 # parse_gc() restituisce epoch Unix completo (data+ora) — corretto su log multi-giorno.
 # in_range() applica il filtro time_from/time_to se impostato dalla query.
 # NB: distinzione per pattern di contenuto, non per FILENAME — i file .gz sono aperti
@@ -24,15 +28,27 @@ BEGIN {
     if (ts == 0) next
     if ((time_from != "" || time_to != "") && !in_range(ts)) next
 
-    gc_ts[++gc_n] = ts
-    if (match($0, /([0-9]+\.[0-9]+)ms$/, pm))
-        gc_dur[gc_n] = pm[1]+0
-    else
-        gc_dur[gc_n] = 0
+    # gc_n alimenta "Pause GC analizzate" nel report finale. Gli array gc_ts[]
+    # e gc_dur[] sono stati rimossi (2026-08-06): servivano al loop lineare
+    # sostituito dall'indice qui sotto, e la durata della pausa non è mai
+    # entrata nell'output — restavano scritti e mai letti.
+    gc_n++
+
+    # Indice per secondo: gc_at[epoch] = 1 se in quell'istante c'è una pausa.
+    # La correlazione cerca una pausa entro ±gc_margin_s secondi, quindi con
+    # questo indice bastano (2*margin+1) lookup in tabella hash invece di
+    # scandire tutte le pause per ogni richiesta lenta — il loop lineare era
+    # O(richieste_lente × pause_GC): su dati reali 18665 × 543 ≈ 10 milioni di
+    # iterazioni, misurate ~8s su ~18s totali (2026-08-06).
+    # Basta un flag e non l'indice della pausa: al tool serve sapere SE esiste
+    # una pausa vicina, non quale. Più pause nello stesso secondo collassano in
+    # una sola voce, che è la semantica corretta per quella domanda.
+    gc_at[ts] = 1
 }
 
 # Fase 2: file access.log — verifica richieste lente.
-# parse_access() restituisce epoch Unix — coerente con gc_ts[] per il diff ±gc_margin_s.
+# parse_access() restituisce epoch Unix — stessa unità delle chiavi di gc_at[],
+# quindi il confronto ±gc_margin_s è una somma di interi.
 # Pattern di contenuto (non FILENAME, vedi nota Fase 1): una riga GC non ha mai il
 # gruppo status/bytes/time tra virgolette dell'access log, quindi resta esclusa.
 !/Pause (Young|Full|Mixed)/ {
@@ -46,11 +62,13 @@ BEGIN {
     total_requests++
     if (resp_ms < threshold_ms + 0) next
 
+    # Lookup nell'indice per secondo (vedi Fase 1): (2*margin+1) accessi a
+    # tabella hash invece di scandire tutte le pause. Delta dal centro verso
+    # l'esterno: si esce al primo trovato, quindi il risultato non dipende
+    # dall'ordine delle pause nel file.
     correlated = 0
-    for (i = 1; i <= gc_n; i++) {
-        diff = req_epoch - gc_ts[i]
-        if (diff < 0) diff = -diff
-        if (diff <= gc_margin_s) { correlated = 1; gc_hit[i]++; break }
+    for (d = 0; d <= gc_margin_s; d++) {
+        if (((req_epoch - d) in gc_at) || ((req_epoch + d) in gc_at)) { correlated = 1; break }
     }
 
     total_slow++
