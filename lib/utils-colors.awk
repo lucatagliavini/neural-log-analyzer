@@ -57,3 +57,30 @@ BEGIN {
     BOLD   = C_BOLD
     RESET  = C_RESET
 }
+
+# bar_color(v, max) — colore della barra per il valore v su un massimo max.
+# Unica fonte di verità per tutti i tool che disegnano barre (principio 2):
+# prima search_all_logs usava verde/giallo/rosso per intensità e count_status
+# nessun colore.
+#
+# La scala è SEQUENZIALE (cinque livelli della stessa tonalità) e non
+# divergente (verde/giallo/rosso): una barra rappresenta una QUANTITÀ, e la
+# quantità non è un giudizio — 400 occorrenze possono essere gravi o normali
+# secondo il contesto. Il giudizio resta sul colore dello status, così i due
+# piani non competono per lo stesso significato.
+#
+# La TONALITÀ la scegli il tema (C_BAR_1..5), perché deve accordarsi con la sua
+# palette: rossi nei temi caldi, ciano in dark-cool (che evita rosso/verde per
+# la discromatopsia), colori base a piena intensità in high-contrast.
+#
+# Soglie ai quinti del massimo. Se il tema non definisce la scala tutti i
+# livelli sono vuoti e la barra esce nel colore di default, come prima.
+function bar_color(v, max,    r) {
+    if (max <= 0) return C_BAR_1
+    r = v / max
+    if (r >= 0.8) return C_BAR_5
+    if (r >= 0.6) return C_BAR_4
+    if (r >= 0.4) return C_BAR_3
+    if (r >= 0.2) return C_BAR_2
+    return C_BAR_1
+}

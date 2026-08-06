@@ -35,6 +35,18 @@
 #   C_TAG     codifica per CATEGORIA, non gravità — metodo HTTP, contatori
 #   C_ROW_ALT sfondo per righe alternate — raggruppamento per nodo
 #   C_ROW_ALT_FG colore del TESTO quando c'è lo sfondo alternato
+#   C_BAR_1..C_BAR_5  gradiente per le barre: 1 = valore basso, 5 = alto
+#
+# Le barre rappresentano una QUANTITÀ, non un giudizio: 400 occorrenze possono
+# essere gravi o normali secondo il contesto. Per questo usano un gradiente di
+# intensità dello stesso colore (scala sequenziale) e non rosso/giallo/verde,
+# che è una scala divergente — adatta a "sotto/nella norma/sopra" attorno a un
+# valore atteso, che per un conteggio non esiste. Così la barra dice "quanto" e
+# il colore dello status dice "quanto grave", senza competere per lo stesso
+# significato.
+# La TONALITÀ è scelta dal tema, perché deve accordarsi con la sua palette
+# (richiesta dell'utente, 2026-08-06): rossi nei temi caldi, blu in quelli
+# freddi, grigi in high-contrast.
 #
 # Perché C_ROW_ALT_FG è un ruolo a sé: `C_LBL` è dim, e dim su uno sfondo
 # colorato avvicina il testo al fondo — per costruzione, non per scelta di
@@ -86,6 +98,7 @@ theme_load() {
     # e mostrerebbe colori che il tema non ha — e un test potrebbe passare per la
     # ragione sbagliata. Bug trovato migrando i tool a C_INFO/C_TAG (UI-12).
     unset C_CRIT C_WARN C_OK C_VAL C_LBL C_ACCENT C_INFO C_TAG C_ROW_ALT C_ROW_ALT_FG C_BOLD C_RESET
+    unset C_BAR_1 C_BAR_2 C_BAR_3 C_BAR_4 C_BAR_5
 
     if [[ -f "$f" ]]; then
         # shellcheck source=/dev/null
@@ -105,6 +118,9 @@ theme_load() {
     # mantiene i colori che il tool userebbe comunque (comportamento
     # pre-2026-08-06). Un tema con sfondo alternato dovrebbe definirlo.
     : "${C_ROW_ALT_FG:=}"
+    # Gradiente barre: se il tema non lo definisce, tutti i livelli restano
+    # vuoti — la barra esce nel colore di default, come prima del 2026-08-06.
+    : "${C_BAR_1:=}" "${C_BAR_2:=}" "${C_BAR_3:=}" "${C_BAR_4:=}" "${C_BAR_5:=}"
 
     # I .conf scrivono le sequenze come "\033[31m" — leggibili e diffabili.
     # Qui vengono convertite nel carattere ESC reale, una volta sola.
@@ -117,12 +133,14 @@ theme_load() {
     # stringa letterale `\033[31m`. Convertire qui rende le variabili corrette
     # in entrambi gli usi, invece di lasciare una trappola a chi le userà.
     local _v
-    for _v in C_CRIT C_WARN C_OK C_VAL C_LBL C_ACCENT C_INFO C_TAG C_ROW_ALT C_ROW_ALT_FG C_BOLD C_RESET; do
+    for _v in C_CRIT C_WARN C_OK C_VAL C_LBL C_ACCENT C_INFO C_TAG C_ROW_ALT C_ROW_ALT_FG C_BOLD C_RESET \
+              C_BAR_1 C_BAR_2 C_BAR_3 C_BAR_4 C_BAR_5; do
         printf -v "$_v" '%b' "${!_v}"
     done
 
     BOT_THEME_ACTIVE="$name"
     export C_CRIT C_WARN C_OK C_VAL C_LBL C_ACCENT C_INFO C_TAG C_ROW_ALT C_ROW_ALT_FG C_BOLD C_RESET
+    export C_BAR_1 C_BAR_2 C_BAR_3 C_BAR_4 C_BAR_5
     export BOT_THEME_ACTIVE
 }
 
@@ -130,6 +148,7 @@ theme_load() {
 # I tool AWK non leggono il file .conf: riceverebbero due fonti di verità e
 # potrebbero divergere dal lato bash. Qui la palette è già risolta.
 theme_awk_args() {
-    printf -- "-v C_CRIT='%s' -v C_WARN='%s' -v C_OK='%s' -v C_VAL='%s' -v C_LBL='%s' -v C_ACCENT='%s' -v C_INFO='%s' -v C_TAG='%s' -v C_ROW_ALT='%s' -v C_ROW_ALT_FG='%s' -v C_BOLD='%s' -v C_RESET='%s'" \
-        "$C_CRIT" "$C_WARN" "$C_OK" "$C_VAL" "$C_LBL" "$C_ACCENT" "$C_INFO" "$C_TAG" "$C_ROW_ALT" "$C_ROW_ALT_FG" "$C_BOLD" "$C_RESET"
+    printf -- "-v C_CRIT='%s' -v C_WARN='%s' -v C_OK='%s' -v C_VAL='%s' -v C_LBL='%s' -v C_ACCENT='%s' -v C_INFO='%s' -v C_TAG='%s' -v C_ROW_ALT='%s' -v C_ROW_ALT_FG='%s' -v C_BOLD='%s' -v C_RESET='%s' -v C_BAR_1='%s' -v C_BAR_2='%s' -v C_BAR_3='%s' -v C_BAR_4='%s' -v C_BAR_5='%s'" \
+        "$C_CRIT" "$C_WARN" "$C_OK" "$C_VAL" "$C_LBL" "$C_ACCENT" "$C_INFO" "$C_TAG" "$C_ROW_ALT" "$C_ROW_ALT_FG" "$C_BOLD" "$C_RESET" \
+        "$C_BAR_1" "$C_BAR_2" "$C_BAR_3" "$C_BAR_4" "$C_BAR_5"
 }

@@ -414,9 +414,19 @@ for (( i=0; i<total_files; i++ )); do
     bar_pad=""
     for (( b=bar_len; b<bar_max; b++ )); do bar_pad+=" "; done
 
-    bc="$_G"
-    [[ "$_h" -gt $(( max_hits / 3 ))     ]] && bc="$_Y"
-    [[ "$_h" -gt $(( max_hits * 2 / 3 )) ]] && bc="$_R"
+    # Gradiente del tema (C_BAR_1..5) invece di verde/giallo/rosso: la barra
+    # rappresenta una QUANTITÀ, e verde/giallo/rosso è una scala di giudizio —
+    # qui le occorrenze sono di solito errori, quindi "poche" non significa
+    # "va bene". Stesse soglie ai quinti di bar_color() in utils-colors.awk,
+    # replicate qui perché questo tool è bash e non passa dagli .awk condivisi.
+    # Se il tema non definisce la scala, bc resta vuoto: colore di default.
+    if   [[ "$max_hits" -le 0 ]];                       then bc="${C_BAR_1:-}"
+    elif [[ $(( _h * 100 / max_hits )) -ge 80 ]];        then bc="${C_BAR_5:-}"
+    elif [[ $(( _h * 100 / max_hits )) -ge 60 ]];        then bc="${C_BAR_4:-}"
+    elif [[ $(( _h * 100 / max_hits )) -ge 40 ]];        then bc="${C_BAR_3:-}"
+    elif [[ $(( _h * 100 / max_hits )) -ge 20 ]];        then bc="${C_BAR_2:-}"
+    else                                                     bc="${C_BAR_1:-}"
+    fi
 
     # "nodo" in DIM, numero sempre bold+white, filename nella tonalità della riga.
     # Il numero è pad-dato a _node_w cifre così la colonna resta allineata

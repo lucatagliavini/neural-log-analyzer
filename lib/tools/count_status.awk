@@ -79,7 +79,11 @@ END {
         else                           color = ""
         reset = (color != "") ? C_RESET : ""
 
-        printf "%s%-10s%s  %9d  %6.1f%%  %s\n", color, s, reset, count[s], pct, bar
+        # La barra usa bar_color() (gradiente del tema), non il colore dello
+        # status: lo status dice "quanto grave", la barra "quanto" (2026-08-06).
+        bcol = bar_color(count[s], max_count)
+        printf "%s%-10s%s  %9d  %6.1f%%  %s%s%s\n", color, s, reset, count[s], pct, \
+            bcol, bar, (bcol != "") ? C_RESET : ""
     }
 
     printf "%-10s  %9s  %7s\n", "──────────", "─────────", "───────"

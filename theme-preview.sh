@@ -47,15 +47,19 @@ _sample() {
     printf "  %s│%s  %s[prod · nodo 04 · ClaimCenter · 2026-08-06 12:00→14:00]%s\n" \
         "$C_BOLD" "$C_RESET" "$C_LBL" "$C_RESET"
     printf "  %s│%s\n" "$C_BOLD" "$C_RESET"
-    printf "  %sSTATUS      COUNT        %%  BAR%s\n" "$C_LBL" "$C_RESET"
-    printf "  %s──────────  ─────────  ─────  ────────────────%s\n" "$C_LBL" "$C_RESET"
-    printf "  %s200%s         %s174382%s  %s94.2%%%s  ████████████████\n" \
-        "$C_OK" "$C_RESET" "$C_VAL" "$C_RESET" "$C_LBL" "$C_RESET"
-    printf "  %s404%s         %s   971%s  %s 0.5%%%s  ██\n" \
-        "$C_WARN" "$C_RESET" "$C_VAL" "$C_RESET" "$C_LBL" "$C_RESET"
-    printf "  %s500%s         %s   120%s  %s 0.1%%%s  █\n" \
-        "$C_CRIT" "$C_RESET" "$C_VAL" "$C_RESET" "$C_LBL" "$C_RESET"
-    printf "  %s──────────  ─────────%s\n" "$C_LBL" "$C_RESET"
+    # Allineato come count_status.awk: %-10s  %9s  %6.1f%%  barra
+    printf "  %s%-10s  %9s  %7s  %s%s\n" "$C_LBL" "STATUS" "COUNT" "%" "BAR" "$C_RESET"
+    printf "  %s%-10s  %9s  %7s  %s%s\n" "$C_LBL" "──────────" "─────────" "───────" "────────────────" "$C_RESET"
+    printf "  %s%-10s%s  %s%9d%s  %s%6.1f%%%s  %s████████████████%s\n" \
+        "$C_OK" "200" "$C_RESET" "$C_VAL" 174382 "$C_RESET" "$C_LBL" 94.2 "$C_RESET" \
+        "${C_BAR_5}" "$C_RESET"
+    printf "  %s%-10s%s  %s%9d%s  %s%6.1f%%%s  %s██%s\n" \
+        "$C_WARN" "404" "$C_RESET" "$C_VAL" 971 "$C_RESET" "$C_LBL" 0.5 "$C_RESET" \
+        "${C_BAR_2}" "$C_RESET"
+    printf "  %s%-10s%s  %s%9d%s  %s%6.1f%%%s  %s█%s\n" \
+        "$C_CRIT" "500" "$C_RESET" "$C_VAL" 120 "$C_RESET" "$C_LBL" 0.1 "$C_RESET" \
+        "${C_BAR_1}" "$C_RESET"
+    printf "  %s%-10s  %9s%s\n" "$C_LBL" "──────────" "─────────" "$C_RESET"
     printf "  Tasso errore: %s2.31%%%s   soglia %s1.00%%%s superata\n" \
         "$C_CRIT" "$C_RESET" "$C_LBL" "$C_RESET"
     printf "  %s⚠ [SKIP] gc.log non disponibile per gc_stats%s\n" "$C_WARN" "$C_RESET"
