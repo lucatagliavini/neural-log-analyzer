@@ -78,16 +78,15 @@ open_glob_logs() {
     local base
     base=$(logfile_logical_name "$chosen")
 
-    # select_log_files cerca con `-name "BASE*"`, quindi il basename logico da solo
-    # non basta: "prod1nsse-cc" matcherebbe anche "prod1nsse-ccCanaliz.log".
-    # Si filtrano i candidati per nome logico ESATTO, tenendo solo le rotazioni
-    # dello stesso log.
+    # select_log_files (select_log_files_grouped) raggruppa per nome logico
+    # ESATTO dentro il motore: "prod1nsse-cc" non tira più dentro
+    # "prod1nsse-ccCanaliz.log". Prima questo era un post-filtro qui
+    # (rimosso 2026-08-06, ridondante col motore generalizzato).
     local list expr="" f
     list=$(select_log_files "$dir" "$base" "${TIME_FROM:-}" "${TIME_TO:-}")
     IFS='|' read -ra _cand <<< "$list"
     for f in "${_cand[@]}"; do
         [[ -z "$f" ]] && continue
-        [[ "$(logfile_logical_name "$f")" == "$base" ]] || continue
         expr+=" $(open_log "$f")"
     done
 

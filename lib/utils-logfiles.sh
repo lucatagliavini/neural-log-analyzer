@@ -2,22 +2,40 @@
 #
 # utils-logfiles.sh — selezione file di log per range temporale.
 #
-# Funzione principale:
+# Funzioni principali:
 #   select_log_files DIR BASENAME [TIME_FROM] [TIME_TO]
+#       Wrapper storico: BASENAME è il nome logico esatto da selezionare
+#       (es. "undertow_access_log", "gc") — non un prefisso.
+#   select_log_files_grouped DIR [TIME_FROM] [TIME_TO] [LOGICAL_NAME]
+#       Motore generalizzato: LOGICAL_NAME vuoto seleziona TUTTI i nomi
+#       logici trovati in DIR (caso Guidewire — cartella flat senza
+#       basename uniforme), raggruppando ogni log e le sue rotazioni.
 #
 #   DIR      : directory dove cercare i file
-#   BASENAME : nome base del log (es: "undertow_access_log", "gc")
 #   TIME_FROM: "YYYY-MM-DDTHH:MM" (vuoto = nessun limite inferiore)
 #   TIME_TO  : "YYYY-MM-DDTHH:MM" (vuoto = nessun limite superiore)
 #
-# Restituisce (stdout) la lista |-separata di file candidati, ordinata
-# cronologicamente, che si sovrappongono al range [TIME_FROM, TIME_TO].
+# Restituisce (stdout) la lista |-separata di file candidati, ordinata per
+# ts_start crescente, che si sovrappongono al range [TIME_FROM, TIME_TO].
 #
-# Strategia per ogni file candidato:
-#   - ts_end   = mtime del file (accurato per file ruotati/chiusi)
-#   - ts_start = primo timestamp leggibile nella prima riga del file
-#               (zcat|head -c4096 per gz: legge solo il primo blocco)
-#   - include se l'intervallo [ts_start, ts_end] si sovrappone a [tf, tt]
+# Strategia (walk backward con arresto anticipato, 2026-08-06): per ogni
+# gruppo (stesso nome logico) si parte dal file più RECENTE — nell'ordine
+# dato dal NOME, non da mtime: i log sono copiati/sincronizzati, quindi
+# mtime non riflette l'ultima scrittura reale (confermato dall'utente) — e
+# si scende alle rotazioni più vecchie SOLO se la finestra richiesta non è
+# ancora coperta. Le rotazioni di uno stesso log sono contigue nel tempo,
+# quindi il ts_end di un file è ≈ ts_start del successivo: non va MAI letto.
+# Ci si ferma al primo file con ts_start <= TIME_FROM (la finestra è
+# coperta, tutto ciò che è più vecchio non serve). Per una finestra breve
+# ("ultime 2 ore") si legge solo la prima riga del file corrente e si
+# ferma: zero letture sulle rotazioni.
+#
+# Conservativo per costruzione: un file con ts_start non riconoscibile non
+# ferma mai il walk ed è SEMPRE incluso (non si esclude per ignoranza). Un
+# file con ts_start più recente di TIME_TO viene escluso (è interamente
+# dopo la finestra) ma il walk continua sui più vecchi — un falso negativo
+# nel pruning sarebbe un bug di correttezza, un falso positivo è solo
+# lentezza.
 #
 # Gestisce qualsiasi naming di rotazione:
 #   - BASENAME.log           (log corrente)
@@ -92,50 +110,127 @@ _logfiles_read_first_ts() {
     echo "${ts:-0}"
 }
 
-select_log_files() {
-    local dir="$1"
-    local base="$2"
-    local tf_raw="${3:-}"
-    local tt_raw="${4:-}"
+# Chiave di ordinamento "più recente per primo" per il walk backward, DERIVATA
+# DAL NOME del file — mai da mtime, che è inaffidabile per log copiati/
+# sincronizzati (confermato dall'utente, 2026-08-06). Fasce numeriche distinte
+# per non far collidere schemi di rotazione diversi all'interno dello stesso
+# confronto (un gruppo usa in pratica uno schema solo, ma le fasce restano
+# comunque ordinate correttamente se mai si mescolassero):
+#   corrente (nessun suffisso di rotazione)  -> sentinella massima
+#   rotazione numerata .log.N(.gz)           -> fascia alta, N piccolo = più
+#                                                recente (.1 è più nuovo di .2:
+#                                                l'ordinale è INVERTITO — un
+#                                                `sort` lessicografico su .1,
+#                                                .10, .11, .2 sbaglierebbe)
+#   rotazione con epoch nel nome              -> l'epoch stesso (fascia
+#                                                "naturale", è già l'istante
+#                                                di rotazione = ts_end del file)
+#   pattern non riconosciuto                  -> mtime come ultima risorsa
+_logfiles_sort_key() {
+    local f="$1" logical="$2"
+    local base="${f##*/}"
+    local rest="${base#"$logical"}"
+    rest="${rest%.gz}"
+    if [[ "$rest" == ".log" || -z "$rest" ]]; then
+        echo 9999999999
+        return
+    fi
+    if [[ "$rest" =~ \.log-[0-9]{4}-[0-9]{2}-[0-9]{2}-([0-9]+)$ ]]; then
+        echo "${BASH_REMATCH[1]}"
+        return
+    fi
+    if [[ "$rest" =~ \.log\.([0-9]+)$ ]]; then
+        echo $(( 5000000000 - ${BASH_REMATCH[1]} ))
+        return
+    fi
+    stat -c %Y "$f" 2>/dev/null || echo 0
+}
+
+# select_log_files_grouped DIR [TIME_FROM] [TIME_TO] [NAME_FILTER]
+#
+# Motore generalizzato: NAME_FILTER vuoto seleziona TUTTI i nomi logici
+# trovati in DIR (cartella flat multi-log, es. Guidewire); un NAME_FILTER
+# tipo "${BASE}*" restringe ai file che iniziano per BASE, poi filtra al
+# nome logico ESATTO — quindi "prod1nsse-cc" non si tira dietro
+# "prod1nsse-ccCanaliz" (prima il post-filtro viveva nel chiamante,
+# dispatch.sh:90; qui è nel motore, quindi vale per tutti i chiamanti).
+#
+# Per ogni gruppo (stesso nome logico) cammina dal file più recente al più
+# vecchio (vedi header del file per la strategia) fermandosi non appena la
+# finestra richiesta è coperta. Restituisce (stdout) i file selezionati,
+# `|`-separati, ordinati per ts_start crescente — stesso contratto di
+# select_log_files().
+select_log_files_grouped() {
+    local dir="$1" tf_raw="${2:-}" tt_raw="${3:-}" name_filter="${4:-}"
 
     local tf_epoch=0 tt_epoch=99999999999
     [[ -n "$tf_raw" ]] && tf_epoch=$(date -d "${tf_raw//T/ }" +%s 2>/dev/null || echo 0)
     [[ -n "$tt_raw" ]] && tt_epoch=$(date -d "${tt_raw//T/ }" +%s 2>/dev/null || echo 99999999999)
-
     local do_filter=0
     [[ -n "$tf_raw" || -n "$tt_raw" ]] && do_filter=1
 
-    # Raccogli tutti i candidati: qualsiasi file che inizia con BASENAME
+    # -type f: senza, `find -name "*"` con NAME_FILTER vuoto matcha anche DIR
+    # stessa (bug latente, 2026-08-06 — innocuo finché nessuno passava un
+    # filtro vuoto, ma il caso Guidewire lo richiede esplicitamente).
     local -a candidates=()
     while IFS= read -r f; do
         [[ -s "$f" ]] && candidates+=("$f")
-    done < <(find "$dir" -maxdepth 1 -name "${base}*" 2>/dev/null | sort)
+    done < <(find "$dir" -maxdepth 1 -type f -name "${name_filter:-*}" 2>/dev/null | sort)
+    local wanted="${name_filter%\*}"
 
-    # Per ogni candidato: calcola [ts_start, ts_end] e filtra
+    # Raggruppa per nome logico
+    local -A group_files=()
+    local -a group_order=()
+    local f logical
+    for f in "${candidates[@]}"; do
+        logical=$(logfile_logical_name "$f")
+        [[ -n "$name_filter" && "$logical" != "$wanted" ]] && continue
+        if [[ -z "${group_files[$logical]:-}" ]]; then
+            group_order+=("$logical")
+        fi
+        group_files["$logical"]+="$f"$'\n'
+    done
+
     local -a selected=()
     local -A ts_start_map=()
 
-    for f in "${candidates[@]}"; do
-        local ts_end
-        ts_end=$(stat -c %Y "$f" 2>/dev/null || echo 99999999999)
-        # Il log corrente (non ancora ruotato) ha ts_end = adesso ≈ futuro
-        [[ "$f" == "${dir}/${base}.log" || "$f" == "${dir}/${base}" ]] && ts_end=99999999999
+    for logical in "${group_order[@]}"; do
+        local -a group_arr=()
+        while IFS= read -r f; do [[ -n "$f" ]] && group_arr+=("$f"); done <<< "${group_files[$logical]}"
 
-        local ts_start
-        ts_start=$(_logfiles_read_first_ts "$f")
+        # Ordina il gruppo dal più recente al più vecchio (walk backward)
+        local -a keyed=()
+        for f in "${group_arr[@]}"; do
+            keyed+=("$(_logfiles_sort_key "$f" "$logical")"$'\t'"$f")
+        done
+        local -a ordered=()
+        while IFS=$'\t' read -r _k f; do
+            [[ -n "$f" ]] && ordered+=("$f")
+        done < <(printf '%s\n' "${keyed[@]}" | sort -t$'\t' -k1,1nr)
 
-        if [[ $do_filter -eq 1 ]]; then
-            # Sovrappone se ts_start <= tt_epoch AND ts_end >= tf_epoch
-            if [[ $ts_start -gt $tt_epoch || $ts_end -lt $tf_epoch ]]; then
+        for f in "${ordered[@]}"; do
+            local ts_start
+            ts_start=$(_logfiles_read_first_ts "$f")
+
+            if [[ "$do_filter" -eq 1 && "$ts_start" -gt 0 && "$ts_start" -gt "$tt_epoch" ]]; then
+                # Interamente dopo la finestra: escludi, ma continua a
+                # scendere — un file più vecchio può comunque essere in range.
                 continue
             fi
-        fi
 
-        ts_start_map["$f"]=$ts_start
-        selected+=("$f")
+            ts_start_map["$f"]=$ts_start
+            selected+=("$f")
+
+            [[ "$do_filter" -eq 0 ]] && continue
+            if [[ "$ts_start" -gt 0 && "$ts_start" -le "$tf_epoch" ]]; then
+                # La finestra è coperta: tutto ciò che è più vecchio non serve.
+                break
+            fi
+            # ts_start ignoto (0): conservativo, non si ferma sull'ignoto.
+        done
     done
 
-    # Ordina per ts_start (insertion sort sugli indici)
+    # Ordina TUTTI i selezionati per ts_start crescente (insertion sort)
     local n=${#selected[@]}
     for (( i=1; i<n; i++ )); do
         local key="${selected[$i]}"
@@ -148,12 +243,20 @@ select_log_files() {
         selected[$(( j+1 ))]="$key"
     done
 
-    # Output |-separato
     local out=""
     for f in "${selected[@]}"; do
         out+="${f}|"
     done
     echo "${out%|}"
+}
+
+# select_log_files DIR BASENAME [TIME_FROM] [TIME_TO]
+# Wrapper storico — firma e contratto di output invariati per i chiamanti
+# esistenti (dispatch.sh, search_all_logs.sh). BASENAME è trattato come
+# prefisso ("${BASENAME}*") e poi ristretto al nome logico esatto dal motore.
+select_log_files() {
+    local dir="$1" base="$2" tf_raw="${3:-}" tt_raw="${4:-}"
+    select_log_files_grouped "$dir" "$tf_raw" "$tt_raw" "${base}*"
 }
 
 # Rimuove il suffisso di rotazione dal nome di un file di log, restituendo il

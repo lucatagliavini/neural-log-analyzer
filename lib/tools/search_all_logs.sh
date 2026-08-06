@@ -54,26 +54,29 @@ tf_cmp="" tt_cmp=""
 all_labels=() all_paths=() all_nodes=()
 
 # _sal_add DIR BASE NODE_NUM
-# Aggiunge a all_* i file di log trovati in DIR.
-# BASE non vuoto → select_log_files per quel basename (con filtro temporale).
-# BASE vuoto     → tutti i *.log/*.log.gz della directory (es. log Guidewire
-#                  in una cartella flat senza basename uniforme).
+# Aggiunge a all_* i file di log trovati in DIR, con pre-selezione per
+# range temporale via select_log_files_grouped (walk backward, motore
+# generalizzato in utils-logfiles.sh).
+# BASE non vuoto → select_log_files_grouped ristretto a quel nome logico.
+# BASE vuoto     → select_log_files_grouped su TUTTI i nomi logici trovati
+#                  in DIR (es. log Guidewire in una cartella flat senza
+#                  basename uniforme) — prima (2026-08-05) un find diretto
+#                  con `grep -v "[0-9]\{10\}"` escludeva ogni rotazione con
+#                  epoch nel nome, quindi una ricerca "ieri" non poteva mai
+#                  vedere lo storico: bug di correttezza silenzioso, non un
+#                  problema di performance.
 _sal_add() {
     local dir="$1" base="$2" node_num="${3:-}"
     [[ -z "$dir" || ! -d "$dir" ]] && return
-    local -a _flist=()
+    local list
     if [[ -n "$base" ]]; then
-        local list
-        list=$(select_log_files "$dir" "$base" "${TIME_FROM:-}" "${TIME_TO:-}")
-        [[ -z "$list" ]] && return
-        IFS='|' read -ra _flist <<< "$list"
+        list=$(select_log_files_grouped "$dir" "${TIME_FROM:-}" "${TIME_TO:-}" "${base}*")
     else
-        while IFS= read -r _f; do
-            _flist+=("$_f")
-        done < <(find "$dir" -maxdepth 1 \
-            \( -name "*.log" -o -name "*.log.gz" \) \
-            2>/dev/null | grep -v "[0-9]\{10\}" | sort)
+        list=$(select_log_files_grouped "$dir" "${TIME_FROM:-}" "${TIME_TO:-}" "")
     fi
+    [[ -z "$list" ]] && return
+    local -a _flist=()
+    IFS='|' read -ra _flist <<< "$list"
     for _f in "${_flist[@]}"; do
         [[ -z "$_f" || ! -f "$_f" ]] && continue
         all_labels+=("$(basename "$_f")")

@@ -212,6 +212,47 @@ _has_dash_ts=0
 echo "$_out_stack" | grep -E '^\s*policysearch\.log' | grep -qE '│\s+-\s+│' && _has_dash_ts=1
 assert_true "stack trace: PRIMO/ULTIMO MATCH popolati (non '-')" "$(( 1 - _has_dash_ts ))"
 
+# ─── Rotazioni .gz in directory flat (Guidewire) devono essere raggiungibili ─
+section "Rotazioni .gz nella directory flat (bug: mai lette, 2026-08-06)"
+
+# Bug reale: il ramo BASE="" di _sal_add (usato per Guidewire, directory flat
+# senza basename uniforme) filtra i candidati con `grep -v "[0-9]\{10\}"` per
+# escludere le rotazioni con epoch nel nome (es. tenute fuori dalla lista dei
+# "named log" ambigui) — ma quello stesso filtro scarta ANCHE le rotazioni con
+# epoch usate da search_all_logs per la ricerca storica, quindi "cerca X ieri"
+# non può mai vedere il contenuto delle rotazioni: silenziosamente incompleto,
+# non un errore visibile. Qui: solo la rotazione .gz contiene un match dentro
+# il range richiesto, il file corrente ne è privo.
+_FIX4="$(mktemp -d)"
+_node4_dir="$_FIX4/prod/lxprjbliq04"
+mkdir -p "$_node4_dir/prod/ClaimCenter" "$_node4_dir/ClaimCenter/Guidewire"
+echo "2026-08-05T18:00:00,000 INFO nessun match qui" > "$_node4_dir/ClaimCenter/Guidewire/policysearch.log"
+_gz_src=$(mktemp)
+echo "2026-08-04T12:00:00,000 ERROR searchHub in rotazione storica" > "$_gz_src"
+gzip -c "$_gz_src" > "$_node4_dir/ClaimCenter/Guidewire/policysearch.log-2026-08-04-1785000000.gz"
+rm -f "$_gz_src"
+
+export LOG_BASE_DIR="$_FIX4"
+export DETECTED_NODE="04" ACTIVE_NODE="04"
+export SERVER_LOG_DIR="" SERVER_LOG=""
+export ACCESS_LOG_DIR="" ACCESS_LOG=""
+export GC_LOG_DIR="" GC_LOG=""
+export GUIDEWIRE_LOG_DIR="$_node4_dir/ClaimCenter/Guidewire"
+export SEARCH_PATTERN="searchHub"
+export TIME_FROM="2026-08-04T00:00" TIME_TO="2026-08-04T23:59"
+
+_out_gzrot=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+rm -rf "$_FIX4"
+unset TIME_FROM TIME_TO
+
+_has_gzrot_file=0
+echo "$_out_gzrot" | grep -qE '^\s*policysearch\.log-2026-08-04' && _has_gzrot_file=1
+assert_true "rotazione .gz: il file compare nella tabella dei log cercati" "$_has_gzrot_file"
+
+_gzrot_total=$(echo "$_out_gzrot" | grep -oE 'Totale:\s+[0-9]+' | grep -oE '[0-9]+' | head -1)
+assert_true "rotazione .gz: il match nella rotazione storica è trovato (totale: ${_gzrot_total:-?})" \
+    "$([[ "${_gzrot_total:-0}" -eq 1 ]] && echo 1 || echo 0)"
+
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"
