@@ -4,17 +4,15 @@ Aggiornato: 2026-08-06
 
 ---
 
-## ⏭ APERTI, in ordine di priorità
+## ⏭ APERTI
 
-| # | Voce | Sezione | Nota |
-|---|------|---------|------|
-| 1 | **UI-12** — nomi semantici dei colori nei tool | UI | Cosmetico: nessun difetto visibile, solo leggibilità del codice |
+**Nessuna voce aperta.** Il backlog è esaurito al 2026-08-06.
 
 **Chiusi il 2026-08-06**: OBS-3 (copertura logging), OBS-5 (feedback progressivo nei 3 tool
 mancanti), UI-11 (sistema di temi colore, default `mono` a zero ANSI), SRCH-1 (ricerca
 testuale in un log nominato), P3/P4/P5/P6/P8 (performance applicate), P7 e P9 (chiusi: nessuna
 ottimizzazione applicabile / peggiorativa), O6 (medie sulle righe misurabili), UI-13 (soglie
-dei colori configurabili).
+dei colori configurabili), UI-12 (ruoli semantici nei tool).
 
 **La performance non è più un tema aperto.** Tutti i tool sopra il secondo sono stati
 analizzati; di quelli restanti si sa *perché* costano — 77% del tempo è parsing AWK
@@ -342,7 +340,7 @@ cui questo lavoro è stato rinviato a dopo NLOG (test di parità prima, refactor
 | UI-10 | **`search_all_logs`: righe alternate bianco/grigio per nodo** — nella tabella risultati, alternare DIM/normale tra i nodi per migliorare la leggibilità quando ci sono molte righe. | **Fatto** (2026-07-31) |
 | UI-9 | **`search_all_logs`: ricerca su tutti i nodi** — se la query non specifica un nodo, il tool oggi cerca solo sul nodo attivo in sessione. Aggiungere un'iterazione su tutti i nodi dell'ambiente (da `NODE_NAME_TEMPLATE` + lista nodi in `system.conf`) e aggregare i risultati raggruppati per nodo. Rimuovere anche il suggerimento "→ Per dettaglio: …" che produce output errato (nome file invece di nome log leggibile). | **Fatto** (2026-07-31) |
 | UI-11 | **Sistema di temi colore** — `themes/*.conf` letti da bash e awk, `lib/utils-theme.sh`, 7 ruoli semantici (`C_CRIT`/`C_WARN`/`C_OK`/`C_VAL`/`C_LBL`/`C_ACCENT`/`C_ROW_ALT`), 9 temi, `--theme`/`--list-themes`/`BOT_THEME`/`NO_COLOR`, `theme-preview.sh`. **Default `mono`: zero ANSI**, per servizi e redirect su file. Risolti i 132 ANSI hardcoded nei 6 file bash che sfuggivano a `utils-colors.awk`. | **Fatto** (2026-08-06) |
-| UI-12 | **Migrare i 13 tool ai nomi semantici** — oggi usano le costanti storiche (`RED`, `YELLOW`…) mappate sui ruoli in `utils-colors.awk`. **Nessun difetto visibile da correggere** (vedi nota sotto): è solo leggibilità del codice, `C_CRIT` dice più di `RED` a chi legge. Incrementale, un tool per volta, zero urgenza. | **Bassa — cosmetico** |
+| UI-12 | **RISOLTO** — i 13 tool usano i ruoli semantici (228 sostituzioni). **Non era solo cosmetico**, contro la valutazione iniziale: la migrazione ha scoperto che il metodo HTTP `GET` usava `C_OK`, quindi era colorato come uno status 2xx — in una tabella di richieste LENTE il verde suggeriva "va bene" mentre indicava solo il verbo. Aggiunti due ruoli mancanti: `C_INFO` (livello neutro di una scala — status 3xx) e `C_TAG` (categoria, non gravità — metodo HTTP, contatori), con fallback su `C_ACCENT` per i temi che non li definiscono. Trovato e corretto anche un bug in `theme_load`: non azzerava le variabili, quindi un tema **ereditava** i ruoli non definiti dal tema caricato prima — invisibile nel bot (un solo load per esecuzione) ma `theme-preview.sh` mostrava colori inesistenti. Output verificato identico su 7 tool col tema dark, tranne la correzione voluta su `GET` | **Fatto** (2026-08-06) |
 | UI-13 | **RISOLTO** — soglie in `domain.conf` — `SLOW_MS` è definito **due volte con valori diversi** (200 in `gc_stats.awk:7`, 2000 in `service_times.awk:12`): corretto nel merito, ma il nome identico suggerisce una costante condivisa che non esiste. Altre soglie inline e senza nome: `>=1000` (`filter_ip`), `>=5000` (`slow_requests`), `>=85`/`>=70` (`gc_stats`), `>=30`/`>=10` (`correlate_gc_slow`). Portate in `domain.conf` con nomi espliciti (`GC_PAUSE_WARN_MS`, `SVC_TIME_WARN_MS`, `REQ_TIME_*`, `HEAP_USED_*`, `GC_CORR_*`), passate ai tool con `-v` da `dispatch.sh` in una variabile riusabile (`thr_v`, come `theme_v`). Ogni tool ha un fallback identico nel `BEGIN`, quindi un'invocazione diretta si comporta come prima. Usano `${VAR:-default}` come il resto del progetto, così l'ambiente le sovrascrive — con l'assegnazione secca della prima stesura non erano configurabili, ed è un test a rilevarlo. `slow_requests` non ne ha: colora per status HTTP, non per soglia di tempo | **Fatto** (2026-08-06) |
 
 

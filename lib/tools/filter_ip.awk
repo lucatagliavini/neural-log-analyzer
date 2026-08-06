@@ -70,7 +70,7 @@ END {
             exit
         }
         if (count > max_rows) printf "... (mostrate %d di %d)\n\n", max_rows, count
-        printf "%s── Statistiche per IP %s ──%s\n", BOLD, ip_filter, RESET
+        printf "%s── Statistiche per IP %s ──%s\n", C_BOLD, ip_filter, C_RESET
         printf "Totale richieste: %d\n", count
         printf "Latenza media:    %.0f ms\n", (ms_count > 0 ? total_ms/ms_count : 0)
         # Trasparenza: se alcune righe non avevano un tempo misurabile, dirlo —
@@ -78,11 +78,11 @@ END {
         # tutto, ed è indistinguibile da un dato completo.
         if (ms_count < count)
             printf "%s  (media su %d richieste con tempo misurabile, %d senza)%s\n", \
-                DIM, ms_count, count - ms_count, RESET
+                C_LBL, ms_count, count - ms_count, C_RESET
         printf "Distribuzione status:\n"
         for (s in status_count) {
-            color = (substr(s,1,1)=="5") ? RED : (substr(s,1,1)=="4") ? YELLOW : ""
-            rst   = (color != "") ? RESET : ""
+            color = (substr(s,1,1)=="5") ? C_CRIT : (substr(s,1,1)=="4") ? C_WARN : ""
+            rst   = (color != "") ? C_RESET : ""
             printf "  %s%s%s: %d\n", color, s, rst, status_count[s]
         }
 
@@ -109,8 +109,8 @@ END {
         for (i = 1; i <= limit; i++) {
             ip  = sorted_ip[i]
             avg = (ip_ms_count[ip] > 0 ? ip_ms[ip]/ip_ms_count[ip] : 0)
-            col_avg = (avg >= REQ_CRIT) ? RED : (avg >= REQ_WARN) ? YELLOW : WHT
-            printf "%-18s  %s%9d%s  %s%8.2f%s\n", ip, WHT, ip_count[ip], RESET, col_avg, avg, RESET
+            col_avg = (avg >= REQ_CRIT) ? C_CRIT : (avg >= REQ_WARN) ? C_WARN : C_VAL
+            printf "%-18s  %s%9d%s  %s%8.2f%s\n", ip, C_VAL, ip_count[ip], C_RESET, col_avg, avg, C_RESET
         }
         printf "\nTop %d di %d IP distinti\n", limit, n
     }

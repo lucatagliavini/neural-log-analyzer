@@ -33,7 +33,7 @@ BEGIN {
 }
 
 function sev_color(v) {
-    return (v >= VERYSLOW_MS) ? RED : (v >= SLOW_MS) ? YELLOW : WHT
+    return (v >= VERYSLOW_MS) ? C_CRIT : (v >= SLOW_MS) ? C_WARN : C_VAL
 }
 
 # Calcola p50/p95/p99 per il servizio svc (n = svc_count[svc]) in _p50/_p95/_p99.
@@ -80,9 +80,9 @@ END {
         col_p95 = sev_color(_p95)
         col_p99 = sev_color(_p99)
         printf "%-*s  %s%6d%s  %s%8.0f%s  %s%8d%s  %s%8d%s  %s%8.0f%s  %s%8.0f%s  %s%8.0f%s\n", \
-            col_svc, s, WHT, svc_count[s], RESET, col_avg, avg, RESET, \
-            col_min, svc_min[s], RESET, col_max, svc_max[s], RESET, \
-            col_p50, _p50, RESET, col_p95, _p95, RESET, col_p99, _p99, RESET
+            col_svc, s, C_VAL, svc_count[s], C_RESET, col_avg, avg, C_RESET, \
+            col_min, svc_min[s], C_RESET, col_max, svc_max[s], C_RESET, \
+            col_p50, _p50, C_RESET, col_p95, _p95, C_RESET, col_p99, _p99, C_RESET
     }
     if (n > max_rows) printf "... (mostrati %d di %d servizi)\n", max_rows, n
 }

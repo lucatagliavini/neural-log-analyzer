@@ -83,17 +83,21 @@ BEGIN {
     if (correlated && correlated_count <= 20) {
         if (match($0, /"([A-Z]+) ([^ ]+) HTTP/, c)) {
             method = c[1]
-            method_color = (method == "GET") ? GREEN : (method == "POST") ? CYAN : ""
-            color = (resp_ms >= REQ_CRIT) ? RED : YELLOW
+            # Il metodo HTTP è una CATEGORIA, non una gravità: GET non è più "positivo"
+            # di POST. Usa C_TAG, che un tema può differenziare da C_OK/C_ACCENT —
+            # con C_OK, in un tema dove il verde è "esito positivo", GET sembrerebbe
+            # un successo e POST un'entità (UI-12).
+            method_color = C_TAG
+            color = (resp_ms >= REQ_CRIT) ? C_CRIT : C_WARN
             printf "%sCORRELATA%s  %s%d ms%s  %s%s%s %s\n", \
-                color, RESET, color, resp_ms, RESET, method_color, method, RESET, c[2]
+                color, C_RESET, color, resp_ms, C_RESET, method_color, method, C_RESET, c[2]
         }
     }
 }
 
 END {
     pct_corr = total_slow > 0 ? correlated_count*100/total_slow : 0
-    col_pct  = (pct_corr >= CORR_CRIT) ? RED : (pct_corr >= CORR_WARN) ? YELLOW : ""
+    col_pct  = (pct_corr >= CORR_CRIT) ? C_CRIT : (pct_corr >= CORR_WARN) ? C_WARN : ""
 
     if (pct_corr >= CORR_CRIT)
         verdetto = "GC E' PROBABILE CAUSA della lentezza"
@@ -103,11 +107,11 @@ END {
         verdetto = "GC NON e' la causa principale"
 
     printf "\n%s%s%s  (%.0f%% correlato su %d richieste lente)\n\n", \
-        (col_pct != "") ? col_pct : BOLD, verdetto, RESET, pct_corr, total_slow+0
+        (col_pct != "") ? col_pct : C_BOLD, verdetto, C_RESET, pct_corr, total_slow+0
 
     printf "Richieste lente (>%d ms): %s%d/%d%s\n", \
-        threshold_ms, WHT, total_slow+0, total_requests+0, RESET
+        threshold_ms, C_VAL, total_slow+0, total_requests+0, C_RESET
     printf "Di cui correlate a pausa GC (±%ds): %s%d (%.0f%%)%s\n", \
-        gc_margin_s, col_pct, correlated_count+0, pct_corr, (col_pct!="") ? RESET : ""
-    printf "%sPause GC analizzate: %d%s\n", DIM, gc_n, RESET
+        gc_margin_s, col_pct, correlated_count+0, pct_corr, (col_pct!="") ? C_RESET : ""
+    printf "%sPause GC analizzate: %d%s\n", C_LBL, gc_n, C_RESET
 }

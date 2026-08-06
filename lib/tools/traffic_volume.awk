@@ -44,9 +44,9 @@ END {
         bk   = keys[i]
         e4   = errors4xx[bk]+0
         e5   = errors5xx[bk]+0
-        col4 = (e4 > 0) ? YELLOW : ""
-        col5 = (e5 > 0) ? RED    : ""
-        rst  = RESET
+        col4 = (e4 > 0) ? C_WARN : ""
+        col5 = (e5 > 0) ? C_CRIT    : ""
+        rst  = C_RESET
 
         # Barra proporzionale al picco
         bar_len = int(volume[bk] * bar_max / max_vol)
@@ -54,10 +54,10 @@ END {
         for (k = 1; k <= bar_len; k++) bar = bar "▪"
 
         printf "%-10s  %s%7d%s  %s%6d%s  %s%6d%s  %s%s%s\n", \
-            bk, WHT, volume[bk], rst, \
+            bk, C_VAL, volume[bk], rst, \
             col4, e4, (col4!="") ? rst : "", \
             col5, e5, (col5!="") ? rst : "", \
-            DIM, bar, rst
+            C_LBL, bar, rst
     }
-    printf "\nTotale richieste: %s%d%s in %s%d%s fasce da 10 minuti\n", WHT, total, rst, WHT, n, rst
+    printf "\nTotale richieste: %s%d%s in %s%d%s fasce da 10 minuti\n", C_VAL, total, rst, C_VAL, n, rst
 }

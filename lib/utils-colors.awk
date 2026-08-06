@@ -15,8 +15,16 @@
 #   C_OK      esito positivo confermato (2xx)
 #   C_VAL     valore numerico su cui deve cadere l'occhio
 #   C_LBL     etichetta di contorno, non il dato
-#   C_ACCENT  riferimento a un'entità (nome di log, path, metodo HTTP)
+#   C_ACCENT  riferimento a un'entità (nome di log, path)
+#   C_INFO    livello NEUTRO di una scala di severità (status 3xx: né ok né errore)
+#   C_TAG     codifica per CATEGORIA, non per gravità (metodo HTTP, contatori)
 #   C_ROW_ALT sfondo per righe alternate
+#
+# La distinzione C_INFO/C_TAG da C_ACCENT è emersa migrando i tool (UI-12): il
+# ciano era usato per tre cose diverse — il nome di un log (accento), lo status
+# 3xx (livello intermedio di una scala), e il metodo POST (categoria). Mapparle
+# tutte su C_ACCENT avrebbe fatto sì che un tema con accento giallo (dark-warm)
+# rendesse POST indistinguibile da un warning.
 #
 # Il default quando i -v non sono passati (es. un tool invocato a mano fuori da
 # dispatch.sh, o dai test) è NESSUN COLORE: coerente col tema mono, che è il
@@ -35,6 +43,11 @@ BEGIN {
     # Nei tool dove RED indicava "soglia superata" anziché "errore" la resa
     # resta identica finché C_CRIT e C_WARN non divergono nel tema: sarà la
     # migrazione ai nomi semantici a correggere anche quella semantica.
+    # Fallback: un tema che non definisce i due ruoli nuovi ricade su C_ACCENT,
+    # cioè il comportamento pre-UI-12 — nessun tema si rompe.
+    if (C_INFO == "") C_INFO = C_ACCENT
+    if (C_TAG  == "") C_TAG  = C_ACCENT
+
     RED    = C_CRIT
     YELLOW = C_WARN
     GREEN  = C_OK

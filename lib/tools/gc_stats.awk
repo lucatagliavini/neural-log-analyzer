@@ -114,10 +114,10 @@ END {
     p99 = sorted_p[int(gc_count * 0.99) + 1]
 
     avg_ms  = total_pause_ms / gc_count
-    col_max = (max_pause_ms >= VERYSLOW_MS) ? RED : (max_pause_ms >= SLOW_MS) ? YELLOW : ""
-    col_avg = (avg_ms       >= VERYSLOW_MS) ? RED : (avg_ms       >= SLOW_MS) ? YELLOW : ""
-    col_p95 = (p95          >= VERYSLOW_MS) ? RED : (p95          >= SLOW_MS) ? YELLOW : ""
-    col_p99 = (p99          >= VERYSLOW_MS) ? RED : (p99          >= SLOW_MS) ? YELLOW : ""
+    col_max = (max_pause_ms >= VERYSLOW_MS) ? C_CRIT : (max_pause_ms >= SLOW_MS) ? C_WARN : ""
+    col_avg = (avg_ms       >= VERYSLOW_MS) ? C_CRIT : (avg_ms       >= SLOW_MS) ? C_WARN : ""
+    col_p95 = (p95          >= VERYSLOW_MS) ? C_CRIT : (p95          >= SLOW_MS) ? C_WARN : ""
+    col_p99 = (p99          >= VERYSLOW_MS) ? C_CRIT : (p99          >= SLOW_MS) ? C_WARN : ""
 
     # ── Heap medio (after) ────────────────────────────────────────────────────
     heap_sum = 0
@@ -138,7 +138,7 @@ END {
 
     # ── Riepilogo ─────────────────────────────────────────────────────────────
     print ""
-    print BOLD "── Riepilogo GC ─────────────────────────────────────────────" RESET
+    print C_BOLD "── Riepilogo GC ─────────────────────────────────────────────" C_RESET
 
     # Mostra il periodo analizzato: se filtrato dalla query usa time_from/to,
     # altrimenti mostra il range effettivo dei dati (primo e ultimo evento nel log).
@@ -147,27 +147,27 @@ END {
         gsub(/T/, " ", _pf); gsub(/T/, " ", _pt)
         if (_pf == "") _pf = "inizio log"
         if (_pt == "") _pt = "fine log"
-        printf "  " DIM "Periodo:" RESET "  " WHT "%s" RESET "  " DIM "→" RESET "  " WHT "%s" RESET "\n\n", _pf, _pt
+        printf "  " C_LBL "Periodo:" C_RESET "  " C_VAL "%s" C_RESET "  " C_LBL "→" C_RESET "  " C_VAL "%s" C_RESET "\n\n", _pf, _pt
     } else {
         # Range effettivo: primo e ultimo timestamp nei dati raccolti
         _first = buf_ts[1]; _last = buf_ts[gc_count]
         gsub(/T/, " ", _first); gsub(/T/, " ", _last)
         if (_first != "" && _last != "")
-            printf "  " DIM "Dati:    " RESET "  " WHT "%s" RESET "  " DIM "→" RESET "  " WHT "%s" RESET "  " DIM "(log completo)" RESET "\n\n", _first, _last
+            printf "  " C_LBL "Dati:    " C_RESET "  " C_VAL "%s" C_RESET "  " C_LBL "→" C_RESET "  " C_VAL "%s" C_RESET "  " C_LBL "(log completo)" C_RESET "\n\n", _first, _last
     }
 
-    printf "  Totale eventi:    %s%d%s\n", WHT, gc_count, RESET
-    printf "  Pausa totale:     %s%.1f ms%s\n", WHT, total_pause_ms, RESET
-    printf "  Pausa media:      %s%.1f ms%s\n",   col_avg, avg_ms,      col_avg != "" ? RESET : ""
+    printf "  Totale eventi:    %s%d%s\n", C_VAL, gc_count, C_RESET
+    printf "  Pausa totale:     %s%.1f ms%s\n", C_VAL, total_pause_ms, C_RESET
+    printf "  Pausa media:      %s%.1f ms%s\n",   col_avg, avg_ms,      col_avg != "" ? C_RESET : ""
     printf "  Pausa massima:    %s%.1f ms%s  %s(%s)%s\n", \
-        col_max, max_pause_ms, col_max != "" ? RESET : "", DIM, max_pause_ts, RESET
+        col_max, max_pause_ms, col_max != "" ? C_RESET : "", C_LBL, max_pause_ts, C_RESET
     printf "  p50 / p95 / p99:  %s%.1f ms%s  /  %s%.1f ms%s  /  %s%.1f ms%s\n", \
-        WHT, p50, RESET, col_p95, p95, col_p95 != "" ? RESET : "", col_p99, p99, col_p99 != "" ? RESET : ""
-    printf "  Memoria liberata: %s%d M%s totale\n", WHT, total_freed, RESET
-    printf "  Heap medio after: %s%.0f M%s  (capacità %d M)\n\n", WHT, heap_avg, RESET, heap_cap_last
+        C_VAL, p50, C_RESET, col_p95, p95, col_p95 != "" ? C_RESET : "", col_p99, p99, col_p99 != "" ? C_RESET : ""
+    printf "  Memoria liberata: %s%d M%s totale\n", C_VAL, total_freed, C_RESET
+    printf "  Heap medio after: %s%.0f M%s  (capacità %d M)\n\n", C_VAL, heap_avg, C_RESET, heap_cap_last
 
     # ── Per tipo pausa ────────────────────────────────────────────────────────
-    print BOLD "── Per tipo di pausa ────────────────────────────────────────" RESET
+    print C_BOLD "── Per tipo di pausa ────────────────────────────────────────" C_RESET
     printf "  %-8s  %5s  %8s  %8s  %8s\n", "TIPO", "N", "AVG", "MAX", "FREED"
     printf "  %-8s  %5s  %8s  %8s  %8s\n", "────────", "─────", "────────", "────────", "────────"
     for (t in type_count) {
@@ -176,23 +176,23 @@ END {
         tfree = type_freed[t]
         for (i = 1; i <= gc_count; i++)
             if (buf_type[i] == t && buf_pause[i] > tmax) tmax = buf_pause[i]
-        tc = (tavg >= VERYSLOW_MS) ? RED : (tavg >= SLOW_MS) ? YELLOW : ""
-        tmc = (tmax >= VERYSLOW_MS) ? RED : (tmax >= SLOW_MS) ? YELLOW : WHT
+        tc = (tavg >= VERYSLOW_MS) ? C_CRIT : (tavg >= SLOW_MS) ? C_WARN : ""
+        tmc = (tmax >= VERYSLOW_MS) ? C_CRIT : (tmax >= SLOW_MS) ? C_WARN : C_VAL
         printf "  %-8s  %s%5d%s  %s%7.1f ms%s  %s%7.1f ms%s  %s%5d M%s\n", \
-            t, WHT, type_count[t], RESET, tc, tavg, tc != "" ? RESET : "", tmc, tmax, RESET, WHT, tfree, RESET
+            t, C_VAL, type_count[t], C_RESET, tc, tavg, tc != "" ? C_RESET : "", tmc, tmax, C_RESET, C_VAL, tfree, C_RESET
     }
 
     # ── Regioni G1 (medie) ────────────────────────────────────────────────────
     if (reg_n > 0) {
         print ""
-        print BOLD "── Regioni G1 (media dopo GC) ───────────────────────────────" RESET
-        printf "  Eden:       %s%4.0f%s regions\n",         WHT, eden_sum / reg_n, RESET
-        printf "  Survivor:   %s%4.0f%s regions\n",         WHT, surv_sum / reg_n, RESET
-        printf "  Old:        %s%4.0f%s regions\n",         WHT, old_sum  / reg_n, RESET
-        printf "  Humongous:  %s%4.0f%s regions\n",         WHT, hum_sum  / reg_n, RESET
+        print C_BOLD "── Regioni G1 (media dopo GC) ───────────────────────────────" C_RESET
+        printf "  Eden:       %s%4.0f%s regions\n",         C_VAL, eden_sum / reg_n, C_RESET
+        printf "  Survivor:   %s%4.0f%s regions\n",         C_VAL, surv_sum / reg_n, C_RESET
+        printf "  Old:        %s%4.0f%s regions\n",         C_VAL, old_sum  / reg_n, C_RESET
+        printf "  Humongous:  %s%4.0f%s regions\n",         C_VAL, hum_sum  / reg_n, C_RESET
         if (meta_sum > 0)
             printf "  Metaspace:  %s%4.0f M%s usati (ultimo: %s%d M%s / %d M)\n", \
-                WHT, meta_sum / reg_n, RESET, WHT, buf_meta[gc_count], RESET, buf_meta_cap[gc_count]
+                C_VAL, meta_sum / reg_n, C_RESET, C_VAL, buf_meta[gc_count], C_RESET, buf_meta_cap[gc_count]
     }
 
     # ── Timeline heap + frequenza GC ─────────────────────────────────────────
@@ -208,7 +208,7 @@ END {
         # scala heap per barra (max heap_cap_last)
         BAR_W = 24
         print ""
-        printf BOLD "── Timeline heap (ogni %d min) ────────────────────────────────\n" RESET, BUCKET_MIN
+        printf C_BOLD "── Timeline heap (ogni %d min) ────────────────────────────────\n" C_RESET, BUCKET_MIN
         printf "  %-5s  %6s  %5s  %6s  %7s  %s\n", "ORA", "HEAP", "GC/p", "AVG ms", "PAUSA %", "HEAP AFTER"
         printf "  %-5s  %6s  %5s  %6s  %7s  %s\n", "─────", "──────", "─────", "──────", "───────", "──────────────────────────"
         window_ms = BUCKET_MIN * 60 * 1000
@@ -221,11 +221,11 @@ END {
             bar_len = (heap_cap_last > 0) ? int(h * BAR_W / heap_cap_last) : 0
             bar = ""; for (k = 1; k <= bar_len; k++) bar = bar "▪"
             heap_pct = (heap_cap_last > 0) ? int(h * 100 / heap_cap_last) : 0
-            hc = (heap_pct >= HEAP_CRIT) ? RED : (heap_pct >= HEAP_WARN) ? YELLOW : ""
-            bc = (bavg >= VERYSLOW_MS) ? RED : (bavg >= SLOW_MS) ? YELLOW : WHT
-            pc = (bpct >= 5) ? RED : (bpct >= 2) ? YELLOW : WHT
+            hc = (heap_pct >= HEAP_CRIT) ? C_CRIT : (heap_pct >= HEAP_WARN) ? C_WARN : ""
+            bc = (bavg >= VERYSLOW_MS) ? C_CRIT : (bavg >= SLOW_MS) ? C_WARN : C_VAL
+            pc = (bpct >= 5) ? C_CRIT : (bpct >= 2) ? C_WARN : C_VAL
             printf "  %s  %s%5dM%s  %s%5d%s  %s%6.1f%s  %s%6.1f%%%s  %s%s%s\n", \
-                bk, hc, h, hc != "" ? RESET : "", WHT, cnt, RESET, bc, bavg, RESET, pc, bpct, RESET, DIM, bar, RESET
+                bk, hc, h, hc != "" ? C_RESET : "", C_VAL, cnt, C_RESET, bc, bavg, C_RESET, pc, bpct, C_RESET, C_LBL, bar, C_RESET
         }
     }
     print ""

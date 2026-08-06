@@ -79,15 +79,17 @@ END {
         dk    = _dup_order[i]
         rl    = _dup_level[dk]
         cnt   = _dup_cnt[dk]
-        color = (rl == "ERROR") ? RED : (rl == "WARN") ? YELLOW : (rl == "INFO") ? WHT : ""
-        rst   = (color != "") ? RESET : ""
-        cnt_str = (cnt > 1) ? sprintf(" %s(×%d)%s", CYAN, cnt, RESET) : ""
+        color = (rl == "ERROR") ? C_CRIT : (rl == "WARN") ? C_WARN : (rl == "INFO") ? C_VAL : ""
+        rst   = (color != "") ? C_RESET : ""
+        # Il contatore di deduplicazione (×N) è un metadato, non un riferimento
+        # a un'entità: C_TAG (UI-12).
+        cnt_str = (cnt > 1) ? sprintf(" %s(×%d)%s", C_TAG, cnt, C_RESET) : ""
         printf "%s%-5s%s  %s%s%s  %s%s\n", \
             color, rl, rst, \
-            DIM, substr(_dup_ts[dk], 1, 19), RESET, \
+            C_LBL, substr(_dup_ts[dk], 1, 19), C_RESET, \
             substr(_dup_msg[dk], 1, 100), cnt_str
         if (_dup_extra[dk] != "")
-            printf "       %s[%s]%s\n", DIM, substr(_dup_extra[dk], 1, 60), RESET
+            printf "       %s[%s]%s\n", C_LBL, substr(_dup_extra[dk], 1, 60), C_RESET
     }
 
     distinct = _dup_n

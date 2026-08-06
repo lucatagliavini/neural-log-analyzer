@@ -24,14 +24,21 @@
 # sequenze ANSI sporcano il contenuto. Chi lavora in interattivo sceglie il
 # proprio tema una volta in system.local.conf o con --theme.
 #
-# I 7 ruoli semantici (un tema li rende come vuole, la semantica non cambia):
+# I ruoli semantici (un tema li rende come vuole, la semantica non cambia):
 #   C_CRIT    la cosa È grave per definizione — 5xx, ERROR, exception
 #   C_WARN    POTREBBE essere un problema — 4xx, WARN, oltre soglia
 #   C_OK      esito positivo confermato — 2xx, "GC non è la causa"
+#   C_INFO    livello NEUTRO di una scala — status 3xx: né ok né errore
 #   C_VAL     valore numerico su cui deve cadere l'occhio — conteggi, medie
 #   C_LBL     etichetta di contorno, non il dato — header, unità, note
-#   C_ACCENT  riferimento a un'entità — nome di log, path, metodo HTTP
+#   C_ACCENT  riferimento a un'entità — nome di log, path
+#   C_TAG     codifica per CATEGORIA, non gravità — metodo HTTP, contatori
 #   C_ROW_ALT sfondo per righe alternate — raggruppamento per nodo
+#
+# C_INFO e C_TAG sono opzionali nei .conf: se assenti ricadono su C_ACCENT (il
+# comportamento pre-UI-12). Un tema li differenzia quando vuole evitare che una
+# categoria (POST) si confonda con una severità — es. dark-warm, che usa il
+# giallo come accento.
 # Più C_BOLD e C_RESET, che ogni tema definisce (mono compreso: la gerarchia
 # resta leggibile anche senza colori).
 
@@ -65,6 +72,13 @@ theme_load() {
         f="$d/mono.conf"
     fi
 
+    # Azzera prima di caricare: senza questo un tema EREDITA i ruoli che non
+    # definisce dal tema caricato in precedenza. Nel bot non si vedrebbe (un solo
+    # theme_load per esecuzione), ma theme-preview.sh ne carica nove in sequenza
+    # e mostrerebbe colori che il tema non ha — e un test potrebbe passare per la
+    # ragione sbagliata. Bug trovato migrando i tool a C_INFO/C_TAG (UI-12).
+    unset C_CRIT C_WARN C_OK C_VAL C_LBL C_ACCENT C_INFO C_TAG C_ROW_ALT C_BOLD C_RESET
+
     if [[ -f "$f" ]]; then
         # shellcheck source=/dev/null
         source "$f"
@@ -75,6 +89,10 @@ theme_load() {
     # nel punto più lontano possibile dalla causa).
     : "${C_CRIT:=}" "${C_WARN:=}" "${C_OK:=}" "${C_VAL:=}"
     : "${C_LBL:=}" "${C_ACCENT:=}" "${C_ROW_ALT:=}" "${C_BOLD:=}" "${C_RESET:=}"
+    # C_INFO (livello neutro di una scala) e C_TAG (categoria, non gravità):
+    # default su C_ACCENT, così i temi che non li definiscono si comportano come
+    # prima di UI-12.
+    : "${C_INFO:=$C_ACCENT}" "${C_TAG:=$C_ACCENT}"
 
     # I .conf scrivono le sequenze come "\033[31m" — leggibili e diffabili.
     # Qui vengono convertite nel carattere ESC reale, una volta sola.
@@ -87,12 +105,12 @@ theme_load() {
     # stringa letterale `\033[31m`. Convertire qui rende le variabili corrette
     # in entrambi gli usi, invece di lasciare una trappola a chi le userà.
     local _v
-    for _v in C_CRIT C_WARN C_OK C_VAL C_LBL C_ACCENT C_ROW_ALT C_BOLD C_RESET; do
+    for _v in C_CRIT C_WARN C_OK C_VAL C_LBL C_ACCENT C_INFO C_TAG C_ROW_ALT C_BOLD C_RESET; do
         printf -v "$_v" '%b' "${!_v}"
     done
 
     BOT_THEME_ACTIVE="$name"
-    export C_CRIT C_WARN C_OK C_VAL C_LBL C_ACCENT C_ROW_ALT C_BOLD C_RESET
+    export C_CRIT C_WARN C_OK C_VAL C_LBL C_ACCENT C_INFO C_TAG C_ROW_ALT C_BOLD C_RESET
     export BOT_THEME_ACTIVE
 }
 
@@ -100,6 +118,6 @@ theme_load() {
 # I tool AWK non leggono il file .conf: riceverebbero due fonti di verità e
 # potrebbero divergere dal lato bash. Qui la palette è già risolta.
 theme_awk_args() {
-    printf -- "-v C_CRIT='%s' -v C_WARN='%s' -v C_OK='%s' -v C_VAL='%s' -v C_LBL='%s' -v C_ACCENT='%s' -v C_ROW_ALT='%s' -v C_BOLD='%s' -v C_RESET='%s'" \
-        "$C_CRIT" "$C_WARN" "$C_OK" "$C_VAL" "$C_LBL" "$C_ACCENT" "$C_ROW_ALT" "$C_BOLD" "$C_RESET"
+    printf -- "-v C_CRIT='%s' -v C_WARN='%s' -v C_OK='%s' -v C_VAL='%s' -v C_LBL='%s' -v C_ACCENT='%s' -v C_INFO='%s' -v C_TAG='%s' -v C_ROW_ALT='%s' -v C_BOLD='%s' -v C_RESET='%s'" \
+        "$C_CRIT" "$C_WARN" "$C_OK" "$C_VAL" "$C_LBL" "$C_ACCENT" "$C_INFO" "$C_TAG" "$C_ROW_ALT" "$C_BOLD" "$C_RESET"
 }

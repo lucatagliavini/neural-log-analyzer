@@ -91,14 +91,18 @@ END {
     printf "%-8s  %-6s  %-*s  %s\n", "────────", "──────", col_url, sep, "──────"
 
     for (i = buf_n; i >= 1; i--) {
-        color = (substr(buf_status[i],1,1) == "5") ? RED : YELLOW
-        method_color = (buf_method[i] == "GET") ? GREEN : (buf_method[i] == "POST") ? CYAN : ""
+        color = (substr(buf_status[i],1,1) == "5") ? C_CRIT : C_WARN
+        # Il metodo HTTP è una CATEGORIA, non una gravità: GET non è più "positivo"
+        # di POST. Usa C_TAG, che un tema può differenziare da C_OK/C_ACCENT —
+        # con C_OK, in un tema dove il verde è "esito positivo", GET sembrerebbe
+        # un successo e POST un'entità (UI-12).
+        method_color = C_TAG
         printf "%s%-8s%s  %s%-6s%s  %-*s  %s%d ms%s\n", \
-            color, buf_status[i], RESET, method_color, buf_method[i], RESET, col_url, buf_url[i], WHT, buf_time[i], RESET
+            color, buf_status[i], C_RESET, method_color, buf_method[i], C_RESET, col_url, buf_url[i], C_VAL, buf_time[i], C_RESET
     }
 
     if (count > max_rows) printf "... (mostrate le %d più lente di %d)\n", max_rows, count
-    printf "\nTotale richieste lente: %s%d%s (soglia: %s%d ms%s)\n", WHT, count, RESET, WHT, threshold_ms, RESET
-    printf "Risposta più lenta: %s%d ms%s → %s\n", WHT, max_time, RESET, max_url
-    printf "Latenza media (lente): %s%.0f ms%s\n", WHT, total_time / count, RESET
+    printf "\nTotale richieste lente: %s%d%s (soglia: %s%d ms%s)\n", C_VAL, count, C_RESET, C_VAL, threshold_ms, C_RESET
+    printf "Risposta più lenta: %s%d ms%s → %s\n", C_VAL, max_time, C_RESET, max_url
+    printf "Latenza media (lente): %s%.0f ms%s\n", C_VAL, total_time / count, C_RESET
 }

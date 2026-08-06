@@ -24,8 +24,8 @@ BEGIN {
 function print_colored(line) {
     if (match(line, /" ([0-9]{3}) /, sc)) {
         pfx = substr(sc[1], 1, 1)
-        if      (pfx == "5") printf "%s%s%s\n", RED,    line, RESET
-        else if (pfx == "4") printf "%s%s%s\n", YELLOW, line, RESET
+        if      (pfx == "5") printf "%s%s%s\n", C_CRIT,    line, C_RESET
+        else if (pfx == "4") printf "%s%s%s\n", C_WARN, line, C_RESET
         else                 print line
     } else {
         print line
@@ -63,14 +63,14 @@ function count_level(line) {
 
 END {
     if (head_mode) {
-        printf "\n%s── Prime %d righe", DIM, count
+        printf "\n%s── Prime %d righe", C_LBL, count
         if (nerror + nwarn + ninfo > 0) {
             printf " —"
-            if (nerror > 0) printf " %s%d ERROR%s", RED,    nerror, RESET DIM
-            if (nwarn  > 0) printf " %s%d WARN%s",  YELLOW, nwarn,  RESET DIM
+            if (nerror > 0) printf " %s%d ERROR%s", C_CRIT,    nerror, C_RESET C_LBL
+            if (nwarn  > 0) printf " %s%d WARN%s",  C_WARN, nwarn,  C_RESET C_LBL
             if (ninfo  > 0) printf " %d INFO", ninfo
         }
-        printf " ──%s\n", RESET
+        printf " ──%s\n", C_RESET
         exit
     }
 
@@ -82,12 +82,12 @@ END {
 
     for (i = start; i < count; i++) print_colored(buf[i % n])
 
-    printf "\n%s── Ultimi %d di %d righe totali", DIM, shown, count
+    printf "\n%s── Ultimi %d di %d righe totali", C_LBL, shown, count
     if (nerror + nwarn + ninfo > 0) {
         printf " —"
-        if (nerror > 0) printf " %s%d ERROR%s", RED,    nerror, RESET DIM
-        if (nwarn  > 0) printf " %s%d WARN%s",  YELLOW, nwarn,  RESET DIM
+        if (nerror > 0) printf " %s%d ERROR%s", C_CRIT,    nerror, C_RESET C_LBL
+        if (nwarn  > 0) printf " %s%d WARN%s",  C_WARN, nwarn,  C_RESET C_LBL
         if (ninfo  > 0) printf " %d INFO", ninfo
     }
-    printf " ──%s\n", RESET
+    printf " ──%s\n", C_RESET
 }

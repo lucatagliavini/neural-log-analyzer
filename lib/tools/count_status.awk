@@ -58,6 +58,9 @@ END {
     printf "%-10s  %9s  %7s  %s\n", "STATUS", "COUNT", "%", "BAR (scala log)"
     printf "%-10s  %9s  %7s  %s\n", "──────────", "─────────", "───────", "────────────────────"
 
+    # Lo status 3xx è il livello NEUTRO della scala di severità (2xx ok, 3xx
+    # neutro, 4xx warn, 5xx crit): C_INFO, non C_ACCENT — un redirect non è un
+    # "riferimento a un'entità" (UI-12).
     for (i = 1; i <= n; i++) {
         s = keys[i]
         pct = count[s] / total * 100
@@ -70,11 +73,11 @@ END {
         bar = ""
         for (b = 1; b <= bar_len; b++) bar = bar "█"
 
-        if      (substr(s,1,1) == "5") color = RED
-        else if (substr(s,1,1) == "4") color = YELLOW
-        else if (substr(s,1,1) == "3") color = CYAN
+        if      (substr(s,1,1) == "5") color = C_CRIT
+        else if (substr(s,1,1) == "4") color = C_WARN
+        else if (substr(s,1,1) == "3") color = C_INFO
         else                           color = ""
-        reset = (color != "") ? RESET : ""
+        reset = (color != "") ? C_RESET : ""
 
         printf "%s%-10s%s  %9d  %6.1f%%  %s\n", color, s, reset, count[s], pct, bar
     }
@@ -100,12 +103,12 @@ END {
 
     w = 9  # larghezza colonna numeri nel summary
     if (status_filter != "")
-        printf DIM "  Traffico totale: %*d richieste nel periodo\n" RESET, w, all_total
+        printf C_LBL "  Traffico totale: %*d richieste nel periodo\n" C_RESET, w, all_total
     printf         "  Successi  2xx:  %*d  (%5.1f%%)\n",           w, s2xx, s2xx/base*100
     if (s3xx > 0)
-        printf CYAN   "  Redirect  3xx:  %*d  (%5.1f%%)\n" RESET,  w, s3xx, s3xx/base*100
-    printf YELLOW "  Errori    4xx:  %*d  (%5.1f%%)\n" RESET,      w, s4xx, s4xx/base*100
-    printf RED    "  Errori    5xx:  %*d  (%5.1f%%)\n" RESET,      w, s5xx, s5xx/base*100
+        printf C_INFO   "  Redirect  3xx:  %*d  (%5.1f%%)\n" C_RESET,  w, s3xx, s3xx/base*100
+    printf C_WARN "  Errori    4xx:  %*d  (%5.1f%%)\n" C_RESET,      w, s4xx, s4xx/base*100
+    printf C_CRIT    "  Errori    5xx:  %*d  (%5.1f%%)\n" C_RESET,      w, s5xx, s5xx/base*100
     printf "  ─────────────────────────────────\n"
     printf "  Tasso errore:   %*s  %5.2f%%\n", w, "", err_rate
 }

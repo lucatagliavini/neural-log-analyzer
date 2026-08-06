@@ -75,8 +75,8 @@ END {
     for (i = 1; i <= n && shown < max_rows; i++) {
         ep = keys[i]
         for (st in endpoint_count[ep]) {
-            color = (substr(st,1,1) == "5") ? RED : YELLOW
-            printf "%-*s  %s%-8s%s  %s%d%s\n", col_ep, ep, color, st, RESET, WHT, endpoint_count[ep][st], RESET
+            color = (substr(st,1,1) == "5") ? C_CRIT : C_WARN
+            printf "%-*s  %s%-8s%s  %s%d%s\n", col_ep, ep, color, st, C_RESET, C_VAL, endpoint_count[ep][st], C_RESET
             shown++
         }
     }

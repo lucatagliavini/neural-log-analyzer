@@ -248,6 +248,52 @@ _txt_alt=$(env GC_PAUSE_WARN_MS=9000 GC_PAUSE_CRIT_MS=9999 QUERY_LOG_DIR= \
 assert_eq "cambiare le soglie non cambia i dati riportati (solo la resa)" "$_txt_def" "$_txt_alt"
 rm -rf "$_GCFIX"
 
+# ─── UI-12: ruoli semantici distinti ──────────────────────────────────────────
+section "Ruoli semantici: categoria ≠ severità (UI-12)"
+
+# I 13 tool usano i ruoli semantici (C_CRIT, C_WARN, C_TAG…) invece delle
+# costanti storiche. La migrazione ha corretto una collisione reale: il metodo
+# HTTP GET usava C_OK, quindi era colorato come uno status 2xx — in una tabella
+# di richieste LENTE il verde suggeriva "va bene", mentre indicava solo il verbo.
+# Ora usa C_TAG, che un tema può distinguere dalle severità.
+_UIFIX="$(mktemp -d)"
+_un="$_UIFIX/prod/lxprjbliq04"
+mkdir -p "$_un/prod/ClaimCenter" "$_un/ClaimCenter/Guidewire"
+echo "2026-08-06 10:00:00,000 ERROR x" > "$_un/prod/ClaimCenter/server.log"
+echo "2026-08-06T10:00:00 INFO gc" > "$_un/prod/ClaimCenter/gc.log"
+# Una richiesta GET lenta con status 200: il metodo e lo status NON devono avere
+# lo stesso colore, altrimenti il verbo HTTP sembra un giudizio sull'esito.
+echo '10.0.0.1 [06/Aug/2026:10:00:00 +0200] "GET /lenta HTTP/1.1" 200 100 9000 - UA' \
+    > "$_un/prod/ClaimCenter/undertow_access_log.log"
+
+# In un tema dove C_TAG e C_OK differiscono (light: magenta vs verde), il metodo
+# non deve usare il colore di "esito positivo".
+_out_ui=$(env QUERY_LOG_DIR= bash "$ROOT_DIR/chatbot.sh" --profile "$ROOT_DIR/profiles/liquido" \
+    --base-dir "$_UIFIX" --env prod --node 4 --theme light --query 'chiamate lente' 2>&1)
+source "$ROOT_DIR/lib/utils-theme.sh"
+theme_load light 2>/dev/null
+# Il tema light ha C_OK verde e C_TAG magenta: distinti per costruzione
+assert_true "il tema light distingue C_TAG da C_OK" \
+    "$([[ "$C_TAG" != "$C_OK" ]] && echo 1 || echo 0)"
+# E il metodo GET nell'output usa C_TAG, non C_OK
+_meth_line=$(grep -E 'GET' <<< "$_out_ui" | head -1)
+assert_true "il metodo GET non usa il colore di esito positivo (C_OK)" \
+    "$([[ -n "$_meth_line" && "$_meth_line" != *"$C_OK"* ]] && echo 1 || echo 0)"
+
+# Nessuna costante storica residua nei tool: se ne ricomparisse una, il tema non
+# la governerebbe attraverso i ruoli e la semantica tornerebbe implicita.
+_hist=$(grep -ohE '\b(RED|YELLOW|GREEN|CYAN|WHT)\b' "$ROOT_DIR"/lib/tools/*.awk 2>/dev/null | wc -l)
+assert_eq "nessuna costante colore storica residua nei tool" "0" "$_hist"
+
+# Ogni tema deve caricare i SUOI valori, senza ereditare dal precedente: bug
+# reale trovato in UI-12 (theme_load non azzerava le variabili, quindi
+# theme-preview.sh mostrava colori che il tema non ha).
+theme_load high-contrast 2>/dev/null; _hc_tag="$C_TAG"
+theme_load light-soft 2>/dev/null;    _ls_tag="$C_TAG"
+assert_true "theme_load non fa ereditare i ruoli dal tema precedente" \
+    "$([[ "$_hc_tag" != "$_ls_tag" ]] && echo 1 || echo 0)"
+rm -rf "$_UIFIX"
+
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"

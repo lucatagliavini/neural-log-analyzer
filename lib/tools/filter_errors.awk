@@ -31,7 +31,7 @@ function flush_exception(    dk, full_msg, f) {
     for (f = 1; f <= exc_frame_n && f <= 3; f++)
         full_msg = full_msg "\n    " exc_frame[f]
     if (exc_omitted > 0)
-        full_msg = full_msg "\n    " DIM "... (" exc_omitted " frame omessi)" RESET
+        full_msg = full_msg "\n    " C_LBL "... (" exc_omitted " frame omessi)" C_RESET
 
     dk = exc_level SUBSEP norm_key(exc_msg)
     dedup_add(dk, exc_level, full_msg, exc_ts, exc_log)
@@ -83,5 +83,5 @@ END {
 
     if (_dup_n > max_rows) printf "... (mostrati %d di %d errori distinti)\n", max_rows, _dup_n
     printf "Totale: %s%d ERROR%s, %s%d WARN%s (%d distinti)\n", \
-        RED, nerror+0, RESET, YELLOW, nwarn+0, RESET, _dup_n
+        C_CRIT, nerror+0, C_RESET, C_WARN, nwarn+0, C_RESET, _dup_n
 }

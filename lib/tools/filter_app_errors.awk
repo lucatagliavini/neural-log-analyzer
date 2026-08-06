@@ -99,11 +99,11 @@ END {
     for (i = _dup_n; i >= 1 && printed < max_print; i--) {
         printed++
         k = _dup_order[i]
-        color = (_dup_level[k] ~ /^HTTP-5/) ? RED : YELLOW
+        color = (_dup_level[k] ~ /^HTTP-5/) ? C_CRIT : C_WARN
         printf "%s%-10s%s  %-*s  %s%5d%s  %-*s\n", \
-            color, _dup_level[k], RESET, \
+            color, _dup_level[k], C_RESET, \
             col_log, _dup_extra[k], \
-            WHT, _dup_cnt[k], RESET, \
+            C_VAL, _dup_cnt[k], C_RESET, \
             col_cau, substr(_dup_msg[k], 1, col_cau)
     }
     if (_dup_n > max_print) printf "... (%d cause distinte aggiuntive)\n", _dup_n - max_print
