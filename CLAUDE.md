@@ -162,10 +162,14 @@ specifico:
    `lib/utils-log.sh`), mai su stdout — che è l'output formattato su cui
    asseriscono i test.
 4. **Feedback progressivo**: durante le fasi che durano più di qualche
-   decimo di secondo, il bot comunica cosa sta facendo (su stderr,
+   decimo di secondo, il bot comunica cosa sta facendo —
+   `progress_show`/`progress_clear` in `lib/utils-log.sh` (su stderr,
    condizionato a `[[ -t 2 ]]`, prefisso `⋯ ` per non collidere con le
-   asserzioni dei test sulla prima colonna). L'utente non deve trovarsi
-   davanti a una shell apparentemente ferma.
+   asserzioni dei test sulla prima colonna, disattivabile con
+   `BOT_PROGRESS=off`). L'utente non deve trovarsi davanti a una shell
+   apparentemente ferma. La fase di selezione file è strumentata nel motore
+   condiviso (`select_log_files_grouped`), quindi vale per **tutti** i tool;
+   solo i messaggi di fasi specifiche di un tool vivono in quel tool.
 5. **Pruning conservativo**: escludere un file per errore è un bug di
    correttezza; includerlo per errore è solo lentezza. In caso di dubbio
    (timestamp non riconoscibile, formato inatteso), includere sempre.

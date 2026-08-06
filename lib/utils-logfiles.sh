@@ -190,6 +190,13 @@ select_log_files_grouped() {
 
         for f in "${ordered[@]}"; do
             local ts_start
+            # Feedback progressivo: la lettura del primo timestamp costa un
+            # head (o una decompressione parziale per i .gz) per file — su una
+            # finestra ampia il walk può scendere su molte rotazioni, e senza
+            # questo l'utente resta davanti a una shell ferma. Vive qui, nel
+            # motore condiviso, così TUTTI i tool ne beneficiano e non solo
+            # search_all_logs (principio 2+4 di CLAUDE.md, 2026-08-06).
+            progress_show "selezione log: $(basename "$f")"
             ts_start=$(_logfiles_read_first_ts "$f")
 
             if [[ "$do_filter" -eq 1 && "$ts_start" -gt 0 && "$ts_start" -gt "$tt_epoch" ]]; then
@@ -212,6 +219,7 @@ select_log_files_grouped() {
             # ts_start ignoto (0): conservativo, non si ferma sull'ignoto.
         done
     done
+    progress_clear
     log_debug "select_log_files_grouped: dir=$dir filtro='${name_filter:-*}' gruppi=${#group_order[@]} selezionati=${#selected[@]}"
 
     # Ordina TUTTI i selezionati per ts_start crescente (insertion sort)

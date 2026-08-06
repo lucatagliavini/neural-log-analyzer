@@ -1,9 +1,14 @@
 #!/bin/bash
 #
-# utils-log.sh — logging DEBUG configurabile per le fasi non visibili
-# all'utente (selezione file, decisioni di pruning). Principio di progetto
-# (CLAUDE.md, "Principi di progettazione"): mai su stdout, che è l'output
-# formattato dei tool e la superficie su cui asseriscono i test.
+# utils-log.sh — logging DEBUG configurabile e feedback progressivo per le
+# fasi non visibili all'utente (selezione file, decisioni di pruning).
+# Principio di progetto (CLAUDE.md, "Principi di progettazione"): mai su
+# stdout, che è l'output formattato dei tool e la superficie su cui
+# asseriscono i test.
+#
+# Due canali distinti, entrambi su stderr:
+#   log_debug/info/warn/error   tracciamento diagnostico, persistente
+#   progress_show/progress_clear  feedback all'utente, transiente (in-place)
 #
 # Configurazione (system.conf):
 #   BOT_LOG_LEVEL  debug|info|warn|error|off (default: warn)
@@ -36,3 +41,27 @@ log_debug() { _log_write debug 0 "$1"; }
 log_info()  { _log_write info  1 "$1"; }
 log_warn()  { _log_write warn  2 "$1"; }
 log_error() { _log_write error 3 "$1"; }
+
+# ─── Feedback progressivo (principio 4 di CLAUDE.md) ──────────────────────────
+# Sovrascrive in place la stessa riga; progress_clear() la rimuove a fine fase,
+# così non resta nulla a schermo. Solo su stderr e solo se stderr è un TTY:
+# sotto `$(...)` (modalità --query, tutti i test) stderr non è un terminale,
+# quindi resta silenzioso senza bisogno di un flag dedicato.
+#
+# Il prefisso "⋯ " è OBBLIGATORIO: le asserzioni dei test leggono la prima
+# colonna dell'output con pattern tipo `grep -E '^\s*server\.log'` — una riga
+# di progresso che inizia a colonna 0 con un nome di log nudo le romperebbe
+# (verificato: un'assert leggeva 99 invece di 2).
+#
+# Disattivabile con BOT_PROGRESS=off, per i casi in cui un tool interattivo
+# scrive esso stesso su stderr e non vuole interferenze.
+progress_show() {
+    [[ -t 2 ]] || return
+    [[ "${BOT_PROGRESS:-on}" == "off" ]] && return
+    printf "\r\033[K  \033[2m⋯ %s\033[0m" "$1" >&2
+}
+progress_clear() {
+    [[ -t 2 ]] || return
+    [[ "${BOT_PROGRESS:-on}" == "off" ]] && return
+    printf "\r\033[K" >&2
+}

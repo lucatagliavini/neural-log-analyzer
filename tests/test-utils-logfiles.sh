@@ -173,6 +173,55 @@ assert_true "ordine di recenza dal NOME (non da mtime falsato): finestra 'oggi' 
     "$([[ "$_sync_count" -eq 1 ]] && echo 1 || echo 0)"
 rm -rf "$_FIX2"
 
+# ─── Feedback progressivo: visibile con TTY, assente senza, mai su stdout ─────
+section "Feedback progressivo (progress_show, utils-log.sh)"
+
+# Questa è la superficie che nessun altro test può vedere: tutte le asserzioni
+# altrove catturano sotto $(...), dove stderr NON è un TTY e progress_show
+# ritorna subito. Qui si simula un terminale con `script -qec` per verificare
+# che il feedback esista davvero quando l'utente è interattivo.
+_PROG_FIX="$(mktemp -d)"
+echo "2026-08-05T10:00:00,000 INFO riga" > "$_PROG_FIX/app.log"
+gzip -c <(echo "2026-08-04T10:00:00,000 INFO rotazione") > "$_PROG_FIX/app.log-2026-08-04-1785800000.gz"
+
+# Senza TTY (cattura normale): nessun carattere di progresso.
+_no_tty=$(select_log_files_grouped "$_PROG_FIX" "" "" "app*" 2>&1 >/dev/null)
+assert_true "senza TTY: nessun output di progresso su stderr" \
+    "$([[ -z "$_no_tty" ]] && echo 1 || echo 0)"
+
+# Con TTY simulato: il marcatore ⋯ deve comparire.
+if command -v script >/dev/null 2>&1; then
+    _tty_out=$(script -qec "bash -c '
+        source \"$ROOT_DIR/lib/utils-logfiles.sh\"
+        select_log_files_grouped \"$_PROG_FIX\" \"\" \"\" \"app*\" > /dev/null
+    '" /dev/null 2>&1)
+    assert_true "con TTY: il marcatore di progresso '⋯' compare" \
+        "$([[ "$_tty_out" == *"⋯"* ]] && echo 1 || echo 0)"
+    assert_true "con TTY: il progresso nomina il file in selezione" \
+        "$([[ "$_tty_out" == *"selezione log"* ]] && echo 1 || echo 0)"
+
+    # Il progresso non deve MAI finire su stdout: è la superficie su cui
+    # asseriscono i test dei tool (principio 3 di CLAUDE.md).
+    _tty_stdout=$(script -qec "bash -c '
+        source \"$ROOT_DIR/lib/utils-logfiles.sh\"
+        select_log_files_grouped \"$_PROG_FIX\" \"\" \"\" \"app*\" 2>/dev/null
+    '" /dev/null)
+    assert_true "con TTY: nessun marcatore di progresso su stdout" \
+        "$([[ "$_tty_stdout" != *"⋯"* ]] && echo 1 || echo 0)"
+
+    # BOT_PROGRESS=off deve silenziare anche con TTY.
+    _tty_off=$(script -qec "bash -c '
+        export BOT_PROGRESS=off
+        source \"$ROOT_DIR/lib/utils-logfiles.sh\"
+        select_log_files_grouped \"$_PROG_FIX\" \"\" \"\" \"app*\" > /dev/null
+    '" /dev/null 2>&1)
+    assert_true "BOT_PROGRESS=off: nessun progresso anche con TTY" \
+        "$([[ "$_tty_off" != *"⋯"* ]] && echo 1 || echo 0)"
+else
+    printf "  ${DIM}SKIP  test con TTY simulato: 'script' non disponibile${RESET}\n"
+fi
+rm -rf "$_PROG_FIX"
+
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"
