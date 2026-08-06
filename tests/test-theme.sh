@@ -294,6 +294,56 @@ assert_true "theme_load non fa ereditare i ruoli dal tema precedente" \
     "$([[ "$_hc_tag" != "$_ls_tag" ]] && echo 1 || echo 0)"
 rm -rf "$_UIFIX"
 
+# ─── Contrasto sulla riga con sfondo alternato ────────────────────────────────
+section "C_ROW_ALT_FG: contrasto garantito sulla riga colorata"
+
+# Problema segnalato dall'utente (2026-08-06) sul tema dark: sulla riga con
+# sfondo alternato il nome del nodo e del log erano poco leggibili. Causa
+# duplice — lo sfondo era `\033[100m` (bright-black, un grigio CHIARO e non
+# standardizzato fra terminali) e sopra ci andavano C_LBL (dim) e C_ACCENT
+# (tinta normale), entrambi a bassa intensità.
+#
+# La correzione strutturale è C_ROW_ALT_FG: dim su uno sfondo colorato avvicina
+# il testo al fondo PER COSTRUZIONE, quindi serve un ruolo dedicato al testo
+# sulla riga colorata — un tema non può altrimenti garantire il contrasto,
+# perché non sa cosa il tool ci scriverà sopra.
+source "$ROOT_DIR/lib/utils-theme.sh"
+
+# INVARIANTE: un tema con sfondo alternato deve definire anche il foreground.
+# Senza questo un tema nuovo ripeterebbe il difetto senza alcun segnale.
+_missing=""
+while IFS= read -r _t; do
+    [[ -z "$_t" ]] && continue
+    theme_load "$_t" 2>/dev/null
+    [[ -n "$C_ROW_ALT" && -z "$C_ROW_ALT_FG" ]] && _missing+="$_t "
+done < <(theme_list)
+assert_eq "ogni tema con C_ROW_ALT definisce anche C_ROW_ALT_FG" "" "$_missing"
+
+# Il foreground non deve essere dim: è esattamente ciò che rendeva illeggibile
+# la riga. `\033[2m` è la sequenza di dim.
+_dim=""
+while IFS= read -r _t; do
+    [[ -z "$_t" ]] && continue
+    theme_load "$_t" 2>/dev/null
+    [[ "$C_ROW_ALT_FG" == *$'\033[2m'* ]] && _dim+="$_t "
+done < <(theme_list)
+assert_eq "nessun tema usa dim come testo sulla riga con sfondo" "" "$_dim"
+
+# Il tema dark non deve più usare \033[100m (bright-black): è il codice la cui
+# resa varia fra terminali e che ha causato la segnalazione.
+# Cerca nella sola ASSEGNAZIONE, non in tutto il file: il commento che spiega
+# perché 100m non si usa più contiene quella stringa, e un grep sul file intero
+# la conterebbe come difetto (falso positivo che questo test ha prodotto alla
+# prima stesura).
+_brightblack=$(grep -cE '^C_ROW_ALT=.*100m' "$ROOT_DIR/themes/dark.conf" || true)
+assert_eq "dark non usa più bright-black (100m) come sfondo" "0" "$_brightblack"
+
+# E il foreground deve DIFFERIRE da C_LBL nei temi con sfondo: se coincidesse,
+# la correzione sarebbe cosmetica e il contrasto resterebbe quello di prima.
+theme_load dark 2>/dev/null
+assert_true "dark: il testo sulla riga con sfondo differisce da C_LBL" \
+    "$([[ "$C_ROW_ALT_FG" != "$C_LBL" ]] && echo 1 || echo 0)"
+
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"

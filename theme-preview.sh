@@ -6,7 +6,7 @@
 # Uso:
 #   ./theme-preview.sh                 tutti i temi
 #   ./theme-preview.sh dark light      solo quelli indicati
-#   ./theme-preview.sh --roles         solo la legenda dei 7 ruoli semantici
+#   ./theme-preview.sh --roles         solo la legenda dei ruoli semantici
 #
 # Non legge log reali: usa un campione fisso, così il confronto è stabile e
 # ripetibile. Per vedere il proprio output reale in un tema:
@@ -38,7 +38,7 @@ fi
 
 [[ "${#WANT[@]}" -eq 0 ]] && while IFS= read -r t; do WANT+=("$t"); done < <(theme_list)
 
-# Campione di output: una riga per ciascuno dei 7 ruoli, con il tipo di dato
+# Campione di output: una riga per ciascun ruolo, con il tipo di dato
 # reale che ognuno rappresenta nei tool. Serve a rispondere alla domanda
 # "questo tema mi fa distinguere le severità e leggere i numeri?".
 _sample() {
@@ -59,12 +59,21 @@ _sample() {
     printf "  Tasso errore: %s2.31%%%s   soglia %s1.00%%%s superata\n" \
         "$C_CRIT" "$C_RESET" "$C_LBL" "$C_RESET"
     printf "  %s⚠ [SKIP] gc.log non disponibile per gc_stats%s\n" "$C_WARN" "$C_RESET"
-    # Riga con sfondo alternato (raggruppamento per nodo in search_all_logs)
-    printf "  %s%snodo 04%s  %sprod1nssd-cc.log%s              %s447%s%s\n" \
-        "$C_ROW_ALT" "$C_LBL" "$C_RESET$C_ROW_ALT" "$C_ACCENT" "$C_RESET$C_ROW_ALT" \
+    # Riga con sfondo alternato (raggruppamento per nodo in search_all_logs).
+    # Il testo usa C_ROW_ALT_FG e non C_LBL/C_ACCENT: dim e le tinte normali su
+    # uno sfondo colorato riducono il contrasto per costruzione — è il difetto
+    # segnalato dall'utente sul tema dark (2026-08-06).
+    _rfg="${C_ROW_ALT_FG:-$C_LBL}"
+    printf "  %s%snodo 04%s  %s%sprod1nssd-cc.log%s              %s447%s%s\n" \
+        "$C_ROW_ALT" "$_rfg" "$C_RESET$C_ROW_ALT" "$_rfg" "" "$C_RESET$C_ROW_ALT" \
         "$C_VAL" "$C_RESET$C_ROW_ALT" "$C_RESET"
     printf "  nodo 12  %sprod1nsse-cc.log%s              %s 16%s\n" \
         "$C_ACCENT" "$C_RESET" "$C_VAL" "$C_RESET"
+    # I metodi HTTP usano C_TAG (categoria), che deve restare distinguibile da
+    # C_OK: con C_OK un GET lento sembrerebbe "andato bene" (UI-12).
+    printf "  %s500%s  %sPOST%s  /api/claims  %s9012 ms%s   %s302%s  %sGET%s   /redirect  %s45 ms%s\n" \
+        "$C_CRIT" "$C_RESET" "$C_TAG" "$C_RESET" "$C_VAL" "$C_RESET" \
+        "$C_INFO" "$C_RESET" "$C_TAG" "$C_RESET" "$C_VAL" "$C_RESET"
     printf "  %s→ Per dettaglio: \"cerca X nel cc.log\"%s\n" "$C_LBL" "$C_RESET"
 }
 
@@ -74,8 +83,12 @@ _roles() {
     printf "    %sC_OK%s      esito positivo confermato (2xx)\n" "$C_OK" "$C_RESET"
     printf "    %sC_VAL%s     valore numerico su cui deve cadere l'occhio\n" "$C_VAL" "$C_RESET"
     printf "    %sC_LBL%s     etichetta di contorno, non il dato\n" "$C_LBL" "$C_RESET"
-    printf "    %sC_ACCENT%s  riferimento a un'entita' (log, path, metodo HTTP)\n" "$C_ACCENT" "$C_RESET"
+    printf "    %sC_ACCENT%s  riferimento a un'entita' (nome di log, path)\n" "$C_ACCENT" "$C_RESET"
+    printf "    %sC_INFO%s    livello NEUTRO di una scala (status 3xx)\n" "$C_INFO" "$C_RESET"
+    printf "    %sC_TAG%s     categoria, non gravita' (metodo HTTP, contatore)\n" "$C_TAG" "$C_RESET"
     printf "    %s C_ROW_ALT %s sfondo righe alternate\n" "$C_ROW_ALT" "$C_RESET"
+    printf "    %s%s C_ROW_ALT_FG %s testo sulla riga con sfondo\n" \
+        "$C_ROW_ALT" "${C_ROW_ALT_FG:-}" "$C_RESET"
 }
 
 for t in "${WANT[@]}"; do

@@ -393,9 +393,18 @@ for (( i=0; i<total_files; i++ )); do
     # entrambi gli sfondi.
     _RL="${C_RESET}"
     _RR="${C_RESET}"
+    # _FG: colore del testo secondario sulla riga. Fuori dallo sfondo è C_LBL
+    # (dim, corretto per un'etichetta); SULLO sfondo alternato dim avvicina il
+    # testo al fondo — per costruzione, non per scelta di palette — quindi si usa
+    # C_ROW_ALT_FG, che ogni tema definisce per garantire il contrasto sulla
+    # propria riga colorata. Segnalato dall'utente sul tema dark (2026-08-06):
+    # il nome del nodo e del log erano poco leggibili.
+    # Fallback su C_LBL se il tema non definisce il ruolo: comportamento di prima.
+    _FG="${_D}"
     if [[ "$_row_dim" -eq 1 ]]; then
         _RL="${C_ROW_ALT}"
         _RR="${C_RESET}${C_ROW_ALT}"
+        [[ -n "${C_ROW_ALT_FG:-}" ]] && _FG="${C_ROW_ALT_FG}"
     fi
 
     bar_len=$(( _h * bar_max / max_hits ))
@@ -415,13 +424,17 @@ for (( i=0; i<total_files; i++ )); do
     # Usa _RR (non _X) per non spegnere il background a metà riga.
     node_col=""
     if [[ "$_multi_node" -eq 1 ]]; then
-        node_col=$(printf "${_D}nodo ${_RR}${C_BOLD}${C_VAL}%${_node_w}s${_RR}  " "$_n")
+        node_col=$(printf "${_FG}nodo ${_RR}${C_BOLD}${C_VAL}%${_node_w}s${_RR}  " "$_n")
     fi
 
-    printf "  ${_RL}${node_col}%-${max_lbl}s${_RR}  ${bc}%s${_RR}%s  %6d" \
+    # Il nome del log usa _FG: sulla riga con sfondo è il foreground del tema,
+    # altrove è vuoto (colore di default del terminale), come prima.
+    _l_fg=""
+    [[ "$_row_dim" -eq 1 && -n "${C_ROW_ALT_FG:-}" ]] && _l_fg="${C_ROW_ALT_FG}"
+    printf "  ${_RL}${node_col}${_l_fg}%-${max_lbl}s${_RR}  ${bc}%s${_RR}%s  %6d" \
         "$_l" "$bar" "$bar_pad" "$_h"
-    printf "  ${_D}│${_RR}  %-19s" "${_t:--}"
-    printf "  ${_D}│${_RR}  %-19s${_X}\n" "${_tlast:--}"
+    printf "  ${_FG}│${_RR}  ${_l_fg}%-19s" "${_t:--}"
+    printf "  ${_FG}│${_RR}  ${_l_fg}%-19s${_X}\n" "${_tlast:--}"
 
     if [[ "$_h" -gt "$best_hits" ]]; then
         best_hits="$_h"; best_node="$_n"
