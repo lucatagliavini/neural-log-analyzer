@@ -9,7 +9,7 @@ Aggiornato: 2026-08-06
 | # | Voce | Sezione | Nota |
 |---|------|---------|------|
 | 1 | **SRCH-1** — ricerca testuale in un log nominato | SRCH | L'unica voce che aggiunge *funzionalità* e non velocità. Aperta dal 2026-08-05 |
-| 2 | **P7** — `grep_named_log` (3390ms di mediana, mai analizzato) | P | Candidato performance residuo più promettente |
+| 2 | **O6** — `filter_ip`: la latenza media è sottostimata con righe malformate | O | O6: difetto preesistente trovato il 2026-08-06, documentato in `tests/test-filter-ip.sh` |
 | 3 | **UI-13** — soglie dei colori in `domain.conf` | UI | Difetto reale: oggi per cambiare quando una pausa GC è "grave" si edita un `.awk` |
 | 4 | **UI-12** — nomi semantici dei colori nei tool | UI | Cosmetico, nessun difetto visibile — vedi nota in sezione UI |
 
@@ -85,7 +85,44 @@ Aggiungere una nuova applicazione richiede solo una riga in `entities.conf`, non
 | P4 | **Pre-gate `grep -qiF` + `pigz` + `gated=1`** in `search_all_logs` — vedi PERF-SAL nel session log 2026-08-06. Query reale 144s → 83s (-42%) | ~40 righe | **Fatto** (2026-08-06) |
 | P5 | **Indice per secondo in `correlate_gc_slow`** — il loop scandiva tutte le pause GC per ogni richiesta lenta (18665 × 543 ≈ 10M iterazioni). Mediana 8.37s → 5.68s | ~15 righe | **Fatto** (2026-08-06) |
 | P6 | **Memoizzazione `parse_access()` + inversione filtri `slow_requests`** — 18.4 righe per secondo distinto, cache evita ~95% delle `mktime()`. `count_status` 3.64s → 1.23s, `slow_requests` 6.78s → 4.00s | ~20 righe | **Fatto** (2026-08-06) |
-| P7 | **`grep_named_log`** — emerso a 3390ms di mediana nel log di performance, mai analizzato. Candidato residuo più promettente | ? | Media |
+| P7 | **`grep_named_log`** — mediana reale **1317ms** (il 3390 in backlog era il p95 su 3 sole misure). Ha due leve non sfruttate: la regex `GW_RE` con 3 gruppi gira su ogni riga prima del filtro livello, e usa `mktime()` a mano invece della `parse_access()` memoizzata. Il meno urgente dei tool lenti | ? | Bassa |
+| P8 | **`filter_ip`: estrazione unica di status/tempo + codice morto rimosso** — la regex dello status girava 3× per riga, quella del tempo 2×, e un blocco calcolava colori mai usati. Mediana 7.50s → 5.90s su 326k righe (vince 9 round su 11; media peggiore per outlier del server — misura non pulita, ma la modifica è difendibile per natura) | ~20 righe | **Fatto** (2026-08-06) |
+| P9 | **Inversione filtri in `distribute_status`, `service_times`, `traffic_volume`** — tentata e **ANNULLATA**: 4-6× più LENTA. Vedi nota sotto, è la lezione più utile di questo giro | — | **Chiuso: non si fa** (2026-08-06) |
+
+### P9 — perché invertire i filtri su questi tool NON funziona
+
+Tentativo del 2026-08-06: spostare il filtro temporale DOPO quelli sul contenuto
+(status, soglia), sul principio "filtro selettivo prima di quello costoso" che aveva
+funzionato su `slow_requests` (P6, -21%). Risultato misurato su 5 round interlacciati:
+
+| tool | prima | dopo | esito |
+|---|---|---|---|
+| `distribute_status` | 0.06s | 0.23s | **4× più lento** |
+| `service_times` | 0.05s | 0.25s | **5× più lento** |
+| `traffic_volume` | 0.05s | 0.31-0.96s | **6× più lento** |
+
+**Causa: l'assunzione sulla selettività era sbagliata.** Misurata su dati reali:
+
+| filtro | scarta |
+|---|---|
+| **temporale** (finestra di 2 ore) | **fino al 100%** |
+| status 4xx/5xx | 99.98% |
+| soglia >= 1000ms | 90.2% |
+
+Il filtro temporale è **il più selettivo**, perché il log corrente contiene solo poche
+ore e la finestra richiesta può caderne fuori del tutto. Era già al posto giusto:
+`parse_access()` è memoizzata (P6) e con 18 righe per secondo distinto costa poco.
+Invertendo si esegue una regex su ogni riga *prima* del filtro che le scarterebbe tutte.
+
+**Perché su `slow_requests` aveva funzionato:** quella misura girava su un file da 200k
+righe **non ruotato**, dove la finestra copriva una porzione ampia. La conclusione
+dipendeva dallo **stato del file**, non dalla struttura del codice — e fu generalizzata
+senza verificarlo.
+
+**Regola che ne deriva:** su questi tool le ottimizzazioni "per riordino" non pagano,
+perché dipendono da un'assunzione sui dati che cambia con la rotazione dei log. Pagano
+quelle che **eliminano lavoro** in ogni scenario (P8: una regex invece di tre) o che
+cambiano la **struttura dati** (P5: indice per secondo invece di scansione lineare).
 | PERF-NNET | **Overhead fisso per query (~574ms)**: classificazione neurale (`infer.sh`) + `normalize-query.sh` + `param-extract.sh` + fork di `resolve-logs.sh`. Vedi sotto | — | **Non si fa ora — l'utente ha in mente una modifica major** |
 
 ### PERF-NNET — overhead fisso della pipeline di inferenza
@@ -240,6 +277,7 @@ cui questo lavoro è stato rinviato a dopo NLOG (test di parità prima, refactor
 | O3 | `grep_named_log`: dedup + sort rarest-first + footer distinti | **Fatto** |
 | O4 | `service_times`: rewrite su access log (formato `RETURN(service)` non presente) | **Fatto** |
 | O5 | `filter_ip`: separatore AVG MS allineato (8 char) | **Fatto** |
+| O6 | **`filter_ip`: latenza media sottostimata con righe malformate** — divide il tempo totale per il numero di RICHIESTE, non per quelle di cui si è potuto misurare il tempo. Su una riga senza campo tempo estraibile il contributo è 0 ma il denominatore cresce comunque: es. 100ms su 2 richieste (una malformata) dà 50ms invece di 100ms. Difetto **preesistente**, trovato il 2026-08-06 scrivendo `tests/test-filter-ip.sh` (dove il comportamento attuale è documentato in un assert, non nascosto). Verificato identico prima dell'ottimizzazione P8, quindi non introdotto da essa. Fix: contare separatamente le righe con tempo misurabile. Da valutare se lo stesso schema esiste in altri tool che calcolano medie | Bassa |
 
 ---
 
