@@ -11,13 +11,25 @@ BEGIN {
 }
 
 {
-    if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
     line = $0
 
+    # Ordine dei filtri: prima la soglia sul tempo di risposta (una regex e un
+    # confronto), poi il filtro temporale — che chiama parse_access() e quindi
+    # mktime(), molto più costoso. La soglia è fortemente selettiva: su dati
+    # reali di produzione solo l'8.1% delle righe supera i 1000ms, quindi
+    # invertendo si evita mktime sul 92% delle righe.
+    # Misurato su snapshot statico, 5 round interlacciati: mediana 3.55s →
+    # 2.81s (-21%), vince 4 round su 5 (2026-08-06).
+    # L'inversione è sicura perché questo tool conta SOLO le richieste lente:
+    # non ha un contatore su tutte le righe in range, a differenza di
+    # count_status, dove all_total serve come denominatore nel summary e
+    # obbliga a filtrare per tempo su ogni riga.
     if (!match(line, /" [0-9]+ [0-9-]+ ([0-9]+) /, a)) next
     resp_time = a[1] + 0
 
     if (resp_time < threshold_ms + 0) next
+
+    if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
 
     if (!match(line, /"([A-Z]+) ([^ ]+) HTTP[^"]*"/, b)) next
     method = b[1]; url = b[2]

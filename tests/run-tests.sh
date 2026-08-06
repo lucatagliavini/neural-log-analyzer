@@ -5,9 +5,9 @@
 # Uso:
 #   bash tests/run-tests.sh [--level1] [--level2 --env <env> --node <node>] [--profile <dir>]
 #
-# --level1          esegue solo i test di intent (locale, nessun log) e le unit
-#                    test con fixture locali (utils-logfiles, param-extract,
-#                    search_all_logs)
+# --level1          esegue i test di intent (locale, nessun log) e le unit test
+#                    con fixture locali: utils-logfiles, param-extract,
+#                    search_all_logs, correlate_gc_slow, slow_requests
 # --level2          esegue anche i test di output (richiede --env e --node)
 # --env <env>       ambiente target per level2 (es: prod, coll)
 # --node <node>     nodo target per level2 (es: 5, 12)
@@ -257,9 +257,9 @@ run_intent_tests() {
 # Prima (fino al 2026-08-06) nessun runner aggregato li invocava: erano
 # eseguiti solo a mano, quindi senza rete di regressione automatica.
 run_unit_tests() {
-    print_header "UNIT — utils-logfiles, param-extract, search_all_logs, correlate_gc_slow"
+    print_header "UNIT — utils-logfiles, param-extract, search_all_logs, correlate_gc_slow, slow_requests"
     for _t in test-utils-logfiles.sh test-param-extract.sh test-search-all-logs.sh \
-              test-correlate-gc-slow.sh; do
+              test-correlate-gc-slow.sh test-slow-requests.sh; do
         if bash "$SCRIPT_DIR/$_t"; then
             pass=$(( pass + 1 ))
             printf "  ${GREEN}PASS${RESET}  %s\n" "$_t"

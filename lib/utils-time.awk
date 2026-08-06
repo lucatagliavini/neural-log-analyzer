@@ -30,12 +30,26 @@ function parse_iso(s,    parts, dp, tp) {
 }
 
 # "[DD/Mon/YYYY:HH:MM:SS" (access log Undertow)
-function parse_access(s,    clean, parts, dp) {
+#
+# Memoizzata su _pa_cache: l'access log ha timestamp al secondo e più richieste
+# cadono nello stesso secondo — misurato su produzione 200986 righe / 10909
+# secondi distinti, cioè 18.4 righe per secondo, quindi la cache evita ~95%
+# delle chiamate a mktime() (che è la parte costosa: una syscall di conversione
+# calendario). La cache è corretta per costruzione — stessa stringa timestamp,
+# stesso epoch — e la sua dimensione è limitata dai secondi distinti nel file,
+# non dalle righe.
+# Aggiunta qui e non nei singoli tool perché parse_access() è usata da 8 tool
+# (count_status, distribute_status, slow_requests, traffic_volume,
+# service_times, filter_ip, correlate_gc_slow, tail_log): principio 2.
+function parse_access(s,    parts, dp, key) {
+    key = s
+    if (key in _pa_cache) return _pa_cache[key]
     gsub(/[\[\]]/, "", s)
     # "27/Jul/2026:09:20:00"
-    if (split(s, parts, ":") < 4) return 0
+    if (split(s, parts, ":") < 4) { _pa_cache[key] = 0; return 0 }
     split(parts[1], dp, "/")
-    return mktime(dp[3] " " MONTHS[dp[2]] " " dp[1]+0 " " parts[2] " " parts[3] " " parts[4]+0)
+    _pa_cache[key] = mktime(dp[3] " " MONTHS[dp[2]] " " dp[1]+0 " " parts[2] " " parts[3] " " parts[4]+0)
+    return _pa_cache[key]
 }
 
 # "YYYY-MM-DD HH:MM:SS,mmm" (server.log)
