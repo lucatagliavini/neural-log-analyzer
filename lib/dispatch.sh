@@ -73,10 +73,25 @@ open_server_logs() { open_logs_for "${SERVER_LOG_DIR:-$(dirname "$SERVER_LOG")}"
 # Apre solo il file di log corrente (non ruotato), ignorando TIME_FROM/TO e
 # senza passare da select_log_files(). Usato da tail_log quando la query
 # non nomina un tempo esplicito — vedi TIME_EXPLICIT in chatbot.sh.
+#
+# Il bypass di select_log_files è intenzionale (non toccarlo, OBS-3): qui si
+# aggiungono SOLO le metriche di volume (file/byte), calcolabili con un
+# singolo stat sul file scelto — senza le quali dispatch_tool riportava
+# PERF_FILES=0/PERF_BYTES=0 per tail_log a riposo, pur leggendo un file reale.
 open_current_log_for() {
     local dir="$1" base="$2"
     local f="${dir}/${base}.log"
-    [[ -f "$f" ]] && open_log "$f"
+    local out=""
+    [[ -f "$f" ]] && out=$(open_log "$f")
+    if [[ -n "${_PERF_SELECT_FILE:-}" ]]; then
+        local _nf=0 _nb=0
+        if [[ -f "$f" ]]; then
+            _nf=1
+            _nb=$(stat -c %s "$f" 2>/dev/null || echo 0)
+        fi
+        printf '%s %s %s\n' 0 "$_nf" "$_nb" >> "$_PERF_SELECT_FILE" 2>/dev/null || true
+    fi
+    echo "$out"
 }
 open_current_logs()        { open_current_log_for "${ACCESS_LOG_DIR:-$(dirname "$ACCESS_LOG")}" "$ACCESS_LOG_BASE"; }
 open_current_server_logs() { open_current_log_for "${SERVER_LOG_DIR:-$(dirname "$SERVER_LOG")}" "$SERVER_LOG_BASE"; }
@@ -92,6 +107,8 @@ open_current_server_logs() { open_current_log_for "${SERVER_LOG_DIR:-$(dirname "
 # Uso: logs_expr=$(open_glob_logs DIR GLOB)  → espressione per `eval gawk ...`
 open_glob_logs() {
     local dir="$1" glob="$2"
+    local _t0 _t1
+    _t0=$(date +%s%3N 2>/dev/null || echo 0)
     local chosen
     chosen=$(resolve_log_glob "$dir" "$glob") || return 1
     [[ -z "$chosen" ]] && return 1
@@ -103,18 +120,73 @@ open_glob_logs() {
     # ESATTO dentro il motore: "prod1nsse-cc" non tira più dentro
     # "prod1nsse-ccCanaliz.log". Prima questo era un post-filtro qui
     # (rimosso 2026-08-06, ridondante col motore generalizzato).
-    local list expr="" f
+    local list expr="" f _nf=0 _nb=0
     list=$(select_log_files "$dir" "$base" "${TIME_FROM:-}" "${TIME_TO:-}")
     IFS='|' read -ra _cand <<< "$list"
     for f in "${_cand[@]}"; do
         [[ -z "$f" ]] && continue
         expr+=" $(open_log "$f")"
+        _nf=$(( _nf + 1 ))
+        _nb=$(( _nb + $(stat -c %s "$f" 2>/dev/null || echo 0) ))
     done
 
     # Nessun candidato nella finestra temporale: ricade sul file scelto, così una
     # finestra troppo stretta non produce un output vuoto senza spiegazione.
-    [[ -z "$expr" ]] && expr=" $(open_log "$chosen")"
+    if [[ -z "$expr" ]]; then
+        expr=" $(open_log "$chosen")"
+        _nf=1
+        _nb=$(stat -c %s "$chosen" 2>/dev/null || echo 0)
+    fi
+    _t1=$(date +%s%3N 2>/dev/null || echo 0)
+    # Stessa strumentazione di open_logs_for (vedi commento lì): girando in
+    # subshell via $(...), le metriche vanno passate per file. tail_named_log/
+    # grep_named_log via escape hatch glob passavano prima da qui senza mai
+    # emettere selezione/byte — OBS-3.
+    if [[ -n "${_PERF_SELECT_FILE:-}" ]]; then
+        printf '%s %s %s\n' "$(( _t1 - _t0 ))" "$_nf" "$_nb" >> "$_PERF_SELECT_FILE" 2>/dev/null || true
+    fi
     echo "$expr"
+}
+
+# Risolve NAMED_LOG a un singolo path su disco, provando in ordine: match
+# esatto "*-<nome>.log", poi "*<nome>.log(.gz)" senza rotazioni epoch, poi
+# "*<nome>*.log(.gz)" fuzzy. Unica fonte di verità per tail_named_log e
+# grep_named_log (prima erano due copie identiche della stessa catena find,
+# OBS-3 — principio 2 di CLAUDE.md). Non passa da select_log_files: qui si
+# vuole UN file rappresentativo per nome, non le sue rotazioni.
+#
+# Emette anche le metriche di volume su _PERF_SELECT_FILE (se impostato): un
+# solo stat sul file scelto, stesso pattern di open_current_log_for. Prima
+# questo ramo non passava da nessuna funzione open_*, quindi selezione/byte
+# restavano sempre a 0 anche quando un file veniva letto per intero.
+resolve_named_log_path() {
+    local gw_dir="$1" named_log="$2"
+    local _t0 _t1
+    _t0=$(date +%s%3N 2>/dev/null || echo 0)
+    local log_path=""
+    if [[ -n "$gw_dir" ]]; then
+        log_path=$(find "$gw_dir" -maxdepth 1 -name "*-${named_log}.log" 2>/dev/null | head -1)
+        if [[ -z "$log_path" ]]; then
+            log_path=$(find "$gw_dir" -maxdepth 1 \
+                \( -name "*${named_log}.log" -o -name "*${named_log}.log.gz" \) \
+                2>/dev/null | grep -v "[0-9]\{10\}" | head -1)
+        fi
+        if [[ -z "$log_path" ]]; then
+            log_path=$(find "$gw_dir" -maxdepth 1 \
+                \( -name "*${named_log}*.log" -o -name "*${named_log}*.log.gz" \) \
+                2>/dev/null | grep -v "[0-9]\{10\}" | sort | head -1)
+        fi
+    fi
+    _t1=$(date +%s%3N 2>/dev/null || echo 0)
+    if [[ -n "${_PERF_SELECT_FILE:-}" ]]; then
+        local _nf=0 _nb=0
+        if [[ -n "$log_path" ]]; then
+            _nf=1
+            _nb=$(stat -c %s "$log_path" 2>/dev/null || echo 0)
+        fi
+        printf '%s %s %s\n' "$(( _t1 - _t0 ))" "$_nf" "$_nb" >> "$_PERF_SELECT_FILE" 2>/dev/null || true
+    fi
+    echo "$log_path"
 }
 
 # Messaggio di skip: il tool non può produrre output (log assente, parametro mancante).
@@ -516,20 +588,8 @@ _dispatch_tool_run() {
                 skip_msg "Nessun log Guidewire specificato nella query"
                 return
             fi
-            local log_path=""
-            if [[ -n "$gw_dir" ]]; then
-                log_path=$(find "$gw_dir" -maxdepth 1 -name "*-${named_log}.log" 2>/dev/null | head -1)
-                if [[ -z "$log_path" ]]; then
-                    log_path=$(find "$gw_dir" -maxdepth 1 \
-                        \( -name "*${named_log}.log" -o -name "*${named_log}.log.gz" \) \
-                        2>/dev/null | grep -v "[0-9]\{10\}" | head -1)
-                fi
-                if [[ -z "$log_path" ]]; then
-                    log_path=$(find "$gw_dir" -maxdepth 1 \
-                        \( -name "*${named_log}*.log" -o -name "*${named_log}*.log.gz" \) \
-                        2>/dev/null | grep -v "[0-9]\{10\}" | sort | head -1)
-                fi
-            fi
+            local log_path
+            log_path=$(resolve_named_log_path "$gw_dir" "$named_log")
             if [[ -z "$log_path" ]]; then
                 skip_msg "Log '$named_log' non trovato in ${gw_dir:-<gw_dir non impostata>}"
                 suggest_available_logs "$gw_dir" "$named_log"
@@ -566,20 +626,8 @@ _dispatch_tool_run() {
                 skip_msg "Nessun log Guidewire specificato nella query"
                 return
             fi
-            local log_path=""
-            if [[ -n "$gw_dir" ]]; then
-                log_path=$(find "$gw_dir" -maxdepth 1 -name "*-${named_log}.log" 2>/dev/null | head -1)
-                if [[ -z "$log_path" ]]; then
-                    log_path=$(find "$gw_dir" -maxdepth 1 \
-                        \( -name "*${named_log}.log" -o -name "*${named_log}.log.gz" \) \
-                        2>/dev/null | grep -v "[0-9]\{10\}" | head -1)
-                fi
-                if [[ -z "$log_path" ]]; then
-                    log_path=$(find "$gw_dir" -maxdepth 1 \
-                        \( -name "*${named_log}*.log" -o -name "*${named_log}*.log.gz" \) \
-                        2>/dev/null | grep -v "[0-9]\{10\}" | sort | head -1)
-                fi
-            fi
+            local log_path
+            log_path=$(resolve_named_log_path "$gw_dir" "$named_log")
             if [[ -z "$log_path" ]]; then
                 skip_msg "Log '$named_log' non trovato in ${gw_dir:-<gw_dir non impostata>}"
                 suggest_available_logs "$gw_dir" "$named_log"
