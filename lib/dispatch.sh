@@ -628,6 +628,38 @@ _dispatch_tool_run() {
             local gw_dir="${GUIDEWIRE_LOG_DIR:-}"
             local named_log="${NAMED_LOG:-}"
             local log_glob="${NAMED_LOG_GLOB:-}"
+            # SRCH-1: ricerca testuale in un log nominato ("cerca X nel cc.log").
+            #
+            # Il canale esisteva già ai due estremi ma non era collegato:
+            # grep_named_log.awk accetta `-v pattern` (sua riga 5 e 35),
+            # param-extract.sh estrae già SEARCH_PATTERN dal testo fra
+            # virgolette, e il classificatore instrada già qui (96.7%).
+            # Mancava solo il passaggio del parametro — nessun retrain, nessuna
+            # nuova classe: era un canale già scavato ai due capi.
+            #
+            # SEMANTICA (decisa con l'utente, 2026-08-06): se la query porta un
+            # pattern esplicito fra virgolette, l'intento è trovare QUEL testo,
+            # quindi si cerca in tutto il file (level=ALL) e non solo fra gli
+            # ERROR. Senza pattern resta il filtro per livello di prima.
+            # La regola è deducibile dalla query, quindi non serve una parola
+            # nuova nel vocabolario per esprimerla.
+            local _gnl_pattern="${SEARCH_PATTERN:-}"
+            # __MISSING__ è il segnale di param-extract.sh per "l'utente voleva
+            # cercare qualcosa ma non ho trovato la stringa": qui vale come
+            # assenza di pattern, non come pattern letterale.
+            [[ "$_gnl_pattern" == "__MISSING__" ]] && _gnl_pattern=""
+            local _gnl_level="${LOG_LEVEL:-ERROR}"
+            # LEVEL_EXPLICIT (da param-extract.sh) distingue "livello chiesto
+            # dall'utente" da "default applicato": senza quel flag i due casi
+            # arrivano qui identici (LOG_LEVEL='ERROR') e la regola non
+            # scatterebbe mai.
+            if [[ -n "$_gnl_pattern" && "${LEVEL_EXPLICIT:-0}" -eq 0 ]]; then
+                _gnl_level="ALL"
+            fi
+            # Etichetta per l'utente: mostra cosa si sta effettivamente facendo,
+            # altrimenti "(level=ALL)" senza contesto sembrerebbe un errore.
+            local _gnl_what="(level=${_gnl_level})"
+            [[ -n "$_gnl_pattern" ]] && _gnl_what="(cerca \"${_gnl_pattern}\", level=${_gnl_level})"
             # Stesso escape hatch di tail_named_log — vedi commento sopra.
             if [[ -n "$log_glob" ]]; then
                 local glob_expr=""
@@ -637,9 +669,10 @@ _dispatch_tool_run() {
                     return
                 fi
                 print_log_source "$glob_expr"
-                printf "${C_LBL}(glob: %s)${C_RESET}  (level=%s)\n" "$log_glob" "${LOG_LEVEL:-ERROR}"
+                printf "${C_LBL}(glob: %s)${C_RESET}  %s\n" "$log_glob" "$_gnl_what"
                 eval gawk "$tw_args" -f "$TOOLS_DIR/grep_named_log.awk" \
-                    -v level="${LOG_LEVEL:-ERROR}" \
+                    -v level="$_gnl_level" \
+                    -v pattern="$_gnl_pattern" \
                     -v tail_n="${TAIL_N:-50}" \
                     "$glob_expr"
                 return
@@ -655,9 +688,10 @@ _dispatch_tool_run() {
                 suggest_available_logs "$gw_dir" "$named_log"
                 return
             fi
-            printf "${C_ACCENT}Log: %s${C_RESET}  (level=%s)\n" "$log_path" "${LOG_LEVEL:-ERROR}"
+            printf "${C_ACCENT}Log: %s${C_RESET}  %s\n" "$log_path" "$_gnl_what"
             eval gawk "$tw_args" -f "$TOOLS_DIR/grep_named_log.awk" \
-                -v level="${LOG_LEVEL:-ERROR}" \
+                -v level="$_gnl_level" \
+                -v pattern="$_gnl_pattern" \
                 -v tail_n="${TAIL_N:-50}" \
                 "$(open_log "$log_path")"
             ;;

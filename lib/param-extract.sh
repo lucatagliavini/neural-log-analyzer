@@ -66,15 +66,29 @@ fi
 
 # Livello log per grep_named_log: "problemi/anomalie" → WARN+ (ERROR+WARN),
 # "errori/error" → ERROR, "warning/warn" → WARN, "info" → INFO, "tutti/all" → ALL
+#
+# LEVEL_EXPLICIT distingue "l'utente ha chiesto un livello" da "ho applicato il
+# default": senza questo flag i due casi sono indistinguibili, perché entrambi
+# arrivano a dispatch.sh come LOG_LEVEL='ERROR'. Serve a SRCH-1 (ricerca
+# testuale in un log nominato): quando la query porta un pattern e NON nomina un
+# livello, l'intento è cercare in tutto il file, non solo fra gli errori.
+# Stesso pattern di TIME_EXPLICIT e LOG_EXPLICIT in chatbot.sh — non
+# persistente, si ricalcola a ogni query.
 LOG_LEVEL="ERROR"
+LEVEL_EXPLICIT=0
 if   echo "$query" | grep -qE "\bwarn(ing)?\b|\bavviso\b"; then
-    LOG_LEVEL="WARN"
+    LOG_LEVEL="WARN"; LEVEL_EXPLICIT=1
 elif echo "$query" | grep -qE "\binfo\b|\binformazioni\b"; then
-    LOG_LEVEL="INFO"
+    LOG_LEVEL="INFO"; LEVEL_EXPLICIT=1
 elif echo "$query" | grep -qE "\btutti?\b.*livell|\ball\b.*level|ogni.livell"; then
-    LOG_LEVEL="ALL"
+    LOG_LEVEL="ALL"; LEVEL_EXPLICIT=1
 elif echo "$query" | grep -qE "\bprobl[ei]|anomal|cosa.non.va|non.va\b|incident|stran"; then
-    LOG_LEVEL="WARN+"
+    LOG_LEVEL="WARN+"; LEVEL_EXPLICIT=1
+elif echo "$query" | grep -qE "\berror[ei]?\b|\bERROR\b"; then
+    # "errori nel cc.log" — il livello ERROR è chiesto, non ereditato dal
+    # default: senza questo ramo una query esplicita sugli errori con anche un
+    # pattern verrebbe allargata a tutti i livelli.
+    LEVEL_EXPLICIT=1
 fi
 
 # Nome log applicativo specifico — la lista viene dal profilo (entities.conf: APP_LOG_NAMES).
@@ -217,6 +231,7 @@ echo "TAIL_N='${TAIL_N}'"
 echo "LOG_ORDER='${LOG_ORDER}'"
 echo "NAMED_LOG='${NAMED_LOG}'"
 echo "LOG_LEVEL='${LOG_LEVEL}'"
+echo "LEVEL_EXPLICIT='${LEVEL_EXPLICIT}'"
 echo "LOG_TYPE='${LOG_TYPE}'"
 echo "SEARCH_PATTERN='${SEARCH_PATTERN}'"
 echo "NAMED_LOG_GLOB='${NAMED_LOG_GLOB}'"
