@@ -313,6 +313,42 @@ assert_true "pattern letterale minuscolo su testo maiuscolo: match trovato (gate
 rm -rf "$_FIX6"
 export SEARCH_PATTERN="searchHub"
 
+# (f) EQUIVALENZA dei due percorsi sull'eredità del timestamp. Con gate attivo
+# gawk riceve il file UNA volta con gated=1 (salta la passata di rilevamento,
+# già fatta da grep); senza gate ne riceve due. I due percorsi DEVONO dare lo
+# stesso risultato, incluso il caso dello stack trace del 2026-08-05: le righe
+# senza timestamp proprio ereditano quello dell'eccezione, e l'eccezione fuori
+# range va scartata coi suoi frame. Se divergessero, il fix di ieri sarebbe
+# regredito solo sul percorso ottimizzato — invisibile senza questo confronto.
+_FIX7="$(mktemp -d)"
+cat > "$_FIX7/t.log" <<'EOF'
+                2026-08-05T10:27:38,925 ERROR SEARCHHUB: fuori range
+	at it.unipol.sx.bo.SearchHubExtApi.searchHubSxApi(SearchHubExtApi.gs:163)
+	at it.unipol.sx.bo.SearchHubExtApi$block_0_.invoke(SearchHubExtApi.gs:196)
+                2026-08-05T16:30:00,000 ERROR SEARCHHUB: dentro range
+	at it.unipol.sx.bo.SearchHubExtApi.searchHubSxApi(SearchHubExtApi.gs:200)
+	at it.unipol.sx.bo.SearchHubExtApi$block_0_.invoke(SearchHubExtApi.gs:210)
+EOF
+gzip -c "$_FIX7/t.log" > "$_FIX7/t.log.gz"
+_AWKT="$ROOT_DIR/lib/tools/search_all_logs.awk"
+_TF="2026-08-05 16:00:00"; _TT="2026-08-05 16:59:59"
+_EXPECT="3|2026-08-05 16:30:00|2026-08-05 16:30:00"
+
+_r_gated=$(gawk -v pat="searchHub" -v tf="$_TF" -v tt="$_TT" -v gated=1 -f "$_AWKT" "$_FIX7/t.log")
+_r_2pass=$(gawk -v pat="searchHub" -v tf="$_TF" -v tt="$_TT" -f "$_AWKT" "$_FIX7/t.log" "$_FIX7/t.log")
+_r_gz_gated=$(gzip -dc "$_FIX7/t.log.gz" | gawk -v pat="searchHub" -v tf="$_TF" -v tt="$_TT" -v gated=1 -f "$_AWKT")
+_r_gz_2pass=$(gawk -v pat="searchHub" -v tf="$_TF" -v tt="$_TT" -f "$_AWKT" <(gzip -dc "$_FIX7/t.log.gz") <(gzip -dc "$_FIX7/t.log.gz"))
+rm -rf "$_FIX7"
+
+assert_true "gated=1 (plain): eredità stack trace corretta ($_r_gated)" \
+    "$([[ "$_r_gated" == "$_EXPECT" ]] && echo 1 || echo 0)"
+assert_true "due passate (plain): stesso risultato di gated=1" \
+    "$([[ "$_r_2pass" == "$_EXPECT" ]] && echo 1 || echo 0)"
+assert_true "gated=1 (.gz): eredità stack trace corretta" \
+    "$([[ "$_r_gz_gated" == "$_EXPECT" ]] && echo 1 || echo 0)"
+assert_true "due passate (.gz): stesso risultato di gated=1" \
+    "$([[ "$_r_gz_2pass" == "$_EXPECT" ]] && echo 1 || echo 0)"
+
 # ─── Metriche di performance: contratto BOT_PERF_FILE ─────────────────────────
 section "Metriche di performance (BOT_PERF_FILE)"
 

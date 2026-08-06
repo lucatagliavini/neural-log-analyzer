@@ -230,12 +230,24 @@ for (( i=0; i<total_files; i++ )); do
         fi
 
         if [[ "$_skip" -eq 0 ]]; then
-            if [[ "$pth" == *.gz ]]; then
-                # Lo stream .gz non è rigiocabile: due process substitution
-                # indipendenti forniscono due decompressioni distinte. Se la
-                # prima passata non trova candidati, gawk esce prima di leggere
-                # la seconda: il secondo decompressore riceve SIGPIPE e termina
-                # subito, senza completare la decompressione.
+            if [[ "$_use_gate" -eq 1 ]]; then
+                # Il gate ha già confermato che il pattern c'è: gawk riceve il
+                # file UNA volta sola con gated=1, saltando la passata di
+                # rilevamento (che sarebbe lavoro duplicato). Sui .gz questo
+                # elimina una decompressione su tre — e la decompressione è
+                # ~90% del costo di un .gz.
+                if [[ "$pth" == *.gz ]]; then
+                    _result=$($GZ_CAT "$pth" 2>/dev/null | gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -v gated=1 -f "$_AWK_TOOL" 2>/dev/null)
+                else
+                    _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -v gated=1 -f "$_AWK_TOOL" "$pth" 2>/dev/null)
+                fi
+            elif [[ "$pth" == *.gz ]]; then
+                # Senza gate (pattern con metacaratteri ERE) servono due
+                # passate. Lo stream .gz non è rigiocabile: due process
+                # substitution indipendenti forniscono due decompressioni
+                # distinte. Se la prima passata non trova candidati, gawk esce
+                # prima di leggere la seconda: il secondo decompressore riceve
+                # SIGPIPE e termina subito, senza completare la decompressione.
                 _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -f "$_AWK_TOOL" \
                     <($GZ_CAT "$pth" 2>/dev/null) <($GZ_CAT "$pth" 2>/dev/null) 2>/dev/null)
             else

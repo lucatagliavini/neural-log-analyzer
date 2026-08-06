@@ -41,10 +41,17 @@ BEGIN {
     MONTHS["Sep"]="09"; MONTHS["Oct"]="10"; MONTHS["Nov"]="11"; MONTHS["Dec"]="12"
     do_filter = (tf != "" || tt != "")
     hits = 0; first_ts = ""; last_ts = ""
-    candidate = 0
+    # gated=1 → il chiamante ha GIÀ verificato che il pattern esiste nel file
+    # (pre-gate `grep -qiF` in search_all_logs.sh) e passa il file UNA volta
+    # sola: la prima passata sarebbe lavoro duplicato. Conta soprattutto sui
+    # .gz, dove ogni passata è una decompressione e la decompressione è ~90%
+    # del costo — senza questo un .gz con match veniva decompresso 3 volte
+    # (gate + pass1 + pass2) invece di 2.
+    candidate = (gated ? 1 : 0)
+    single_pass = (gated ? 1 : 0)
 }
 
-FNR == NR {
+FNR == NR && !single_pass {
     if ($0 ~ pat) candidate = 1
     next
 }
