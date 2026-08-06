@@ -158,7 +158,25 @@ _QUERY_LOG_FILE=""
 _init_query_log() {
     [[ -z "${QUERY_LOG_DIR:-}" ]] && return
     mkdir -p "$QUERY_LOG_DIR" 2>/dev/null || return
+    # g+w sulla directory: il bot può essere lanciato da utenti diversi (o da
+    # root in una sessione di manutenzione) e chi crea la directory per primo
+    # ne diventa proprietario — senza questo, l'utente successivo non potrebbe
+    # più scrivere e il logging si spegnerebbe in silenzio (accaduto in
+    # produzione 2026-08-06: directory creata da root, bot usato da uga04128).
+    chmod g+w "$QUERY_LOG_DIR" 2>/dev/null || true
     _QUERY_LOG_FILE="${QUERY_LOG_DIR}/chatbot-$(date +%Y-%m-%d).log"
+    # Se il file esiste ma non è scrivibile, il logging è inefficace: meglio
+    # dirlo che accumulare query non registrate credendo di raccogliere dati.
+    if [[ -e "$_QUERY_LOG_FILE" && ! -w "$_QUERY_LOG_FILE" ]]; then
+        printf "  \033[33m⚠ Log query non scrivibile: %s\033[0m\n" "$_QUERY_LOG_FILE" >&2
+        printf "  \033[2mIl logging di performance è disattivato per questa sessione.\033[0m\n" >&2
+        _QUERY_LOG_FILE=""
+        return
+    fi
+    # Nuovo file: g+w così un altro utente potrà appendervi domani.
+    if [[ ! -e "$_QUERY_LOG_FILE" ]]; then
+        : > "$_QUERY_LOG_FILE" 2>/dev/null && chmod g+w "$_QUERY_LOG_FILE" 2>/dev/null || true
+    fi
 }
 
 # log_query QUERY TOOLS [TOTAL_MS]
