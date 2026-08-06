@@ -329,14 +329,27 @@ rm -rf "$_FIX2"
 # ─── skip_msg: warning visibile ───────────────────────────────────────────────
 section "skip_msg (visibilita' dei warning)"
 
-# Gli [SKIP] erano testo bianco identico all'output normale e si perdevano fra le
-# righe di log: ora sono gialli. \033[33m = giallo, \033[0m = reset.
-_sk=$(skip_msg "messaggio di prova")
-if [[ "$_sk" == $'\033[33m'* && "$_sk" == *$'\033[0m' ]]; then
-    printf "  ${GREEN}PASS${RESET}  [SKIP] colorato in giallo\n"; pass=$(( pass + 1 ))
+# Gli [SKIP] erano testo bianco identico all'output normale e si perdevano fra
+# le righe di log: devono essere evidenziati come warning.
+#
+# Dal 2026-08-06 il colore viene dal TEMA attivo (C_WARN), non è più `\033[33m`
+# hardcoded — e il default del progetto è mono (nessun colore). Quindi il test
+# verifica la PROPRIETÀ ("usa il colore di warning del tema") e non un valore
+# fisso: con un tema a colori lo [SKIP] è avvolto in C_WARN…C_RESET, con mono
+# resta testo puro. Asserire `\033[33m` legherebbe il test a un tema
+# particolare, e fallirebbe legittimamente cambiando il default.
+_sk_theme=$(C_WARN=$'\033[33m' C_RESET=$'\033[0m' bash -c 'source "$1/lib/dispatch.sh" 2>/dev/null; skip_msg "messaggio di prova"' _ "$ROOT_DIR" 2>/dev/null)
+if [[ "$_sk_theme" == $'\033[33m'* && "$_sk_theme" == *$'\033[0m' ]]; then
+    printf "  ${GREEN}PASS${RESET}  [SKIP] usa C_WARN/C_RESET del tema\n"; pass=$(( pass + 1 ))
 else
-    printf "  ${RED}${BOLD}FAIL${RESET}  [SKIP] non colorato: %q\n" "$_sk"; fail=$(( fail + 1 ))
+    printf "  ${RED}${BOLD}FAIL${RESET}  [SKIP] non usa i colori del tema: %q\n" "$_sk_theme"; fail=$(( fail + 1 ))
 fi
+# Con il tema mono (default) non deve emettere NESSUNA sequenza ANSI: è il
+# requisito per cui mono esiste — output consumabile da un servizio.
+_sk_mono=$(C_WARN="" C_RESET="" bash -c 'source "$1/lib/dispatch.sh" 2>/dev/null; skip_msg "messaggio di prova"' _ "$ROOT_DIR" 2>/dev/null)
+assert_eq "[SKIP] con tema mono: nessuna sequenza ANSI" "[SKIP] messaggio di prova" "$_sk_mono"
+
+_sk=$(skip_msg "messaggio di prova")
 assert_eq "[SKIP] conserva il messaggio" "[SKIP] messaggio di prova" \
     "$(sed 's/\x1b\[[0-9;]*m//g' <<< "$_sk")"
 # printf con il messaggio come ARGOMENTO, non come formato: un % nel nome di un log

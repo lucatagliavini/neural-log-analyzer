@@ -54,7 +54,7 @@ done
 sorted=$(printf '%s\n' "${pairs[@]}" | sort -rn -k1)
 
 # Colori
-G="\033[32m"; Y="\033[33m"; D="\033[2m"; B="\033[1m"; R="\033[0m"; C="\033[36m"
+G="${C_OK}"; Y="${C_WARN}"; D="${C_LBL}"; B="${C_BOLD}"; R="${C_RESET}"; C="${C_ACCENT}"
 
 rank=0
 threshold_line_printed=0

@@ -35,6 +35,12 @@ QUERY=""
 DRY_RUN=0
 RESOLVED_DATE_FILTER=""
 ACTIVE_NAMED_LOG=""
+# Tema colore. Vuoto qui = non specificato da CLI: la risoluzione avviene dopo
+# il caricamento di system.conf (che può impostare BOT_THEME), con default
+# "mono" — nessun colore, perché il bot è usato anche da servizi che
+# consumano l'output come testo e con redirect su file le sequenze ANSI
+# sporcherebbero il contenuto.
+THEME_CLI=""
 # Default temporale: oggi (00:00→23:59). L'utente può sovrascrivere con query esplicita.
 ACTIVE_TIME_FROM="$(date +%Y-%m-%dT00:00)"
 ACTIVE_TIME_TO="$(date +%Y-%m-%dT23:59)"
@@ -50,7 +56,16 @@ while [[ $# -gt 0 ]]; do
         --server-log) SERVER_LOG="$2";          shift 2 ;;
         --gc-log)     GC_LOG="$2";              shift 2 ;;
         --query)      QUERY="$2"; INTERACTIVE=0; shift 2 ;;
+        --theme)      THEME_CLI="$2";           shift 2 ;;
         --dry-run)    DRY_RUN=1; shift ;;
+        --list-themes)
+            source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/utils-theme.sh"
+            echo "Temi disponibili (--theme <nome>, o BOT_THEME in system.conf):"
+            theme_list | sed 's/^/  /'
+            echo ""
+            echo "Default: mono (nessun colore — output pulito per servizi e file)."
+            exit 0
+            ;;
         -h|--help)
             grep "^#" "$0" | grep -v "^#!" | head -16 | sed 's/^# \?//'
             exit 0
@@ -79,6 +94,19 @@ source "$PROFILE_DIR/system.conf"
 source "$PROFILE_DIR/domain.conf"
 # Dizionario entità (APP alias, ENV synonyms, NODE patterns) per normalize-query.sh
 [[ -f "$PROFILE_DIR/entities.conf" ]] && source "$PROFILE_DIR/entities.conf"
+
+# ─── Tema colore ─────────────────────────────────────────────────────────────
+# Precedenza: --theme > BOT_THEME dall'ambiente > BOT_THEME da system.conf /
+# system.local.conf > "mono".
+# NO_COLOR (convenzione https://no-color.org) forza mono: è rispettata da
+# molti strumenti a riga di comando e chi la imposta non vuole ANSI da nessuno.
+source "$LIB_DIR/utils-theme.sh"
+_theme_want="${THEME_CLI:-${BOT_THEME:-mono}}"
+[[ -n "${NO_COLOR:-}" ]] && _theme_want="mono"
+theme_load "$_theme_want"
+# Esportato per i tool che girano come processi figli (search_all_logs.sh) e
+# per dispatch.sh, che lo passa a gawk con theme_awk_args.
+export BOT_THEME="$BOT_THEME_ACTIVE"
 
 # Allinea TZ di sistema con quella dei log del server (tutti i sottoprocessi la ereditano)
 [[ -n "${LOG_TZ:-}" ]] && export TZ="$LOG_TZ"
@@ -168,8 +196,8 @@ _init_query_log() {
     # Se il file esiste ma non è scrivibile, il logging è inefficace: meglio
     # dirlo che accumulare query non registrate credendo di raccogliere dati.
     if [[ -e "$_QUERY_LOG_FILE" && ! -w "$_QUERY_LOG_FILE" ]]; then
-        printf "  \033[33m⚠ Log query non scrivibile: %s\033[0m\n" "$_QUERY_LOG_FILE" >&2
-        printf "  \033[2mIl logging di performance è disattivato per questa sessione.\033[0m\n" >&2
+        printf "  ${C_WARN}⚠ Log query non scrivibile: %s${C_RESET}\n" "$_QUERY_LOG_FILE" >&2
+        printf "  ${C_LBL}Il logging di performance è disattivato per questa sessione.${C_RESET}\n" >&2
         _QUERY_LOG_FILE=""
         return
     fi
@@ -315,15 +343,15 @@ run_query() {
         fi
         printf "\n"
         context_line
-        printf "  \033[2mContesto aggiornato.\033[0m\n\n"
+        printf "  ${C_LBL}Contesto aggiornato.${C_RESET}\n\n"
         return
     fi
 
     # show_help non richiede contesto — intercetta prima della lazy resolution
     if echo "${query,,}" | grep -qiE "^(aiuto|help|\?|cosa (sai|puoi)[[:space:]]+(fare|fai)|cosa (fai|fare)|che (cosa )?(sai|puoi)[[:space:]]+(fare|fai)|strumenti|comandi)[[:space:]]*\?*$"; then
-        printf "\n\033[1m┌─\033[0m Query: %s\n" "$query"
+        printf "\n${C_BOLD}┌─${C_RESET} Query: %s\n" "$query"
         print_help
-        printf "\033[1m└──────────────────────────────────────────\033[0m\n"
+        printf "${C_BOLD}└──────────────────────────────────────────${C_RESET}\n"
         return
     fi
 
@@ -341,7 +369,7 @@ run_query() {
         fi
     fi
 
-    printf "\n\033[1m┌─\033[0m Query: %s\n" "$query"
+    printf "\n${C_BOLD}┌─${C_RESET} Query: %s\n" "$query"
 
     # Modalità dry-run: mostra ranking classificatore senza eseguire tool
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -355,8 +383,8 @@ run_query() {
     if [[ -z "$tools" ]]; then
         log_query "$query" "none" \
             "$(( $(date +%s%3N 2>/dev/null || echo 0) - _t_query_start ))"
-        printf "\033[1m└─\033[0m \033[2m[INFO] Nessun tool attivato con confidenza >= %s\033[0m\n" "$TOOL_THRESHOLD"
-        printf "   Prova a riformulare la query. Digita \033[1maiuto\033[0m per vedere cosa so fare.\n"
+        printf "${C_BOLD}└─${C_RESET} ${C_LBL}[INFO] Nessun tool attivato con confidenza >= %s${C_RESET}\n" "$TOOL_THRESHOLD"
+        printf "   Prova a riformulare la query. Digita ${C_BOLD}aiuto${C_RESET} per vedere cosa so fare.\n"
         return
     fi
 
@@ -366,10 +394,10 @@ run_query() {
     local tools_log
     tools_log=$(awk '{printf "%s:%d%%,", $1, $2*100}' <<< "$tools" | sed 's/,$//')
 
-    printf "\033[1m│\033[0m  Tool attivati:\n"
+    printf "${C_BOLD}│${C_RESET}  Tool attivati:\n"
     while IFS=' ' read -r tool prob; do
         pct=$(awk -v p="$prob" 'BEGIN { printf "%.0f", p * 100 }')
-        printf "\033[1m│\033[0m    \033[1m▸ %s\033[0m \033[2m(%s%%)\033[0m — %s\n" \
+        printf "${C_BOLD}│${C_RESET}    ${C_BOLD}▸ %s${C_RESET} ${C_LBL}(%s%%)${C_RESET} — %s\n" \
             "$tool" "$pct" "${TOOL_DESC[$tool]:-}"
     done <<< "$tools"
 
@@ -390,17 +418,17 @@ run_query() {
             [[ "$_t" == "tail_named_log" || "$_t" == "grep_named_log" ]] && _reads_named=1
         done <<< "$tools"
         if [[ "$_reads_named" -eq 0 ]]; then
-            local _Y="\033[33m" _D="\033[2m" _B="\033[1m" _X="\033[0m"
-            printf "\033[1m│\033[0m\n"
-            printf "\033[1m│\033[0m  ${_Y}⚠ Hai nominato il log \"%s\" ma nessuno degli strumenti attivati lo legge.${_X}\n" \
+            local _Y="${C_WARN}" _D="${C_LBL}" _B="${C_BOLD}" _X="${C_RESET}"
+            printf "${C_BOLD}│${C_RESET}\n"
+            printf "${C_BOLD}│${C_RESET}  ${_Y}⚠ Hai nominato il log \"%s\" ma nessuno degli strumenti attivati lo legge.${_X}\n" \
                 "$NAMED_LOG"
-            printf "\033[1m│\033[0m    ${_D}Per leggere quel log, nominalo con l'estensione:${_X}\n"
-            printf "\033[1m│\033[0m    ${_D}es:${_X} ${_B}errori nel %s.log${_X}${_D}  ·  ${_X}${_B}ultime righe del %s.log${_X}\n" \
+            printf "${C_BOLD}│${C_RESET}    ${_D}Per leggere quel log, nominalo con l'estensione:${_X}\n"
+            printf "${C_BOLD}│${C_RESET}    ${_D}es:${_X} ${_B}errori nel %s.log${_X}${_D}  ·  ${_X}${_B}ultime righe del %s.log${_X}\n" \
                 "$NAMED_LOG" "$NAMED_LOG"
         fi
     fi
 
-    printf "\033[1m│\033[0m\n"
+    printf "${C_BOLD}│${C_RESET}\n"
 
     # BOT_PERF_FILE: canale con cui i tool (processi figli) restituiscono le
     # proprie metriche di fase. Creato solo se il query log è attivo — senza
@@ -412,7 +440,7 @@ run_query() {
     fi
 
     while IFS=' ' read -r tool _prob; do
-        printf "\033[1m├─── %s\033[0m ─────────────────────────────\n" "$tool"
+        printf "${C_BOLD}├─── %s${C_RESET} ─────────────────────────────\n" "$tool"
         if [[ "$tool" == "search_all_logs" && -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]]; then
             context_line "no_node"
         else
@@ -435,7 +463,7 @@ run_query() {
     log_query "$query" "$tools_log" \
         "$(( $(date +%s%3N 2>/dev/null || echo 0) - _t_query_start ))"
 
-    printf "\033[1m└──────────────────────────────────────────\033[0m\n"
+    printf "${C_BOLD}└──────────────────────────────────────────${C_RESET}\n"
 }
 
 # ─── Main ────────────────────────────────────────────────────────────────────
@@ -447,7 +475,7 @@ run_query() {
 # Con argomento "no_node": omette il nodo dal contesto (es. ricerca multi-nodo).
 context_line() {
     local _hide_node="${1:-}"
-    local _D="\033[2m" _W="\033[97m" _B="\033[1m" _X="\033[0m"
+    local _D="${C_LBL}" _W="${C_VAL}" _B="${C_BOLD}" _X="${C_RESET}"
     local parts=()
 
     local _has_any=0
@@ -489,11 +517,11 @@ _init_query_log
 if [[ "$INTERACTIVE" -eq 0 ]]; then
     run_query "${QUERY:-}"
 else
-    printf "\033[1mNeural Log Analyzer\033[0m — profilo: \033[36m${profile_name}\033[0m\n"
+    printf "${C_BOLD}Neural Log Analyzer${C_RESET} — profilo: ${C_ACCENT}${profile_name}${C_RESET}\n"
     context_line
-    [[ -n "${SERVER_LOG:-}" ]] && printf "     server.log: \033[2m$SERVER_LOG\033[0m\n"
-    [[ -n "${GC_LOG:-}"     ]] && printf "     gc.log:     \033[2m$GC_LOG\033[0m\n"
-    printf "\033[2mDigita la tua domanda (Ctrl+C per uscire) — \033[0m\033[1maiuto\033[0m\033[2m per la lista degli strumenti\033[0m\n\n"
+    [[ -n "${SERVER_LOG:-}" ]] && printf "     server.log: ${C_LBL}$SERVER_LOG${C_RESET}\n"
+    [[ -n "${GC_LOG:-}"     ]] && printf "     gc.log:     ${C_LBL}$GC_LOG${C_RESET}\n"
+    printf "${C_LBL}Digita la tua domanda (Ctrl+C per uscire) — ${C_RESET}${C_BOLD}aiuto${C_RESET}${C_LBL} per la lista degli strumenti${C_RESET}\n\n"
 
     while true; do
         printf "> "

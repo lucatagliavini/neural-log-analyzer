@@ -327,7 +327,7 @@ resolve_log_glob() {
     while IFS= read -r lname; do [[ -n "$lname" ]] && order+=("$lname"); done <<< "$_by_name"
 
     if [[ "${#order[@]}" -gt 1 ]]; then
-        local _Y="\033[33m" _D="\033[2m" _X="\033[0m"
+        local _Y="${C_WARN}" _D="${C_LBL}" _X="${C_RESET}"
         printf "${_Y}⚠ '%s' corrisponde a %d log diversi — mostrato il primo non ruotato:${_X}\n" \
             "$glob" "${#order[@]}" >&2
         local i=1

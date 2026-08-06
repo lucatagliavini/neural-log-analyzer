@@ -15,23 +15,32 @@
 #
 
 source "$(dirname "${BASH_SOURCE[0]}")/../utils-logfiles.sh"
+# Tema colore: le C_* arrivano esportate da chatbot.sh (theme_load). Se questo
+# script è invocato direttamente (test, debug), non ci sono: si carica il tema
+# indicato da BOT_THEME, default mono — nessun colore, come il resto del
+# progetto. Senza questo, con `set -u` a monte le C_* non definite sarebbero un
+# errore fatale invece di un output senza colori.
+if [[ -z "${C_RESET+x}" ]]; then
+    source "$(dirname "${BASH_SOURCE[0]}")/../utils-theme.sh"
+    theme_load "${BOT_THEME:-mono}"
+fi
 # system.conf: ENV_NODE_CODE e altri array associativi non sono esportabili via env
 source "$PROFILE_DIR/system.conf"
 source "$(dirname "${BASH_SOURCE[0]}")/../utils-nodes.sh"
 
 sp="${SEARCH_PATTERN:-}"
 if [[ -z "$sp" ]]; then
-    printf "\n  \033[33mNessuna stringa di ricerca specificata.\033[0m\n"
+    printf "\n  ${C_WARN}Nessuna stringa di ricerca specificata.${C_RESET}\n"
     printf "  Racchiudi la stringa tra virgolette doppie o singole:\n"
-    printf "  \033[2mes: cerca \"NullPointerException\" in prod\033[0m\n"
-    printf "  \033[2mes: trova 'claim 1-8101-2026-0473954' nel nodo 5\033[0m\n\n"
+    printf "  ${C_LBL}es: cerca \"NullPointerException\" in prod${C_RESET}\n"
+    printf "  ${C_LBL}es: trova 'claim 1-8101-2026-0473954' nel nodo 5${C_RESET}\n\n"
     exit 0
 fi
 if [[ "$sp" == "__MISSING__" ]]; then
-    printf "\n  \033[33mNon ho trovato la stringa da cercare.\033[0m\n"
+    printf "\n  ${C_WARN}Non ho trovato la stringa da cercare.${C_RESET}\n"
     printf "  Racchiudi la stringa tra virgolette doppie o singole:\n"
-    printf "  \033[2mes: cerca \"NullPointerException\" in prod\033[0m\n"
-    printf "  \033[2mes: trova 'claim 1-8101-2026-0473954' nel nodo 5\033[0m\n\n"
+    printf "  ${C_LBL}es: cerca \"NullPointerException\" in prod${C_RESET}\n"
+    printf "  ${C_LBL}es: trova 'claim 1-8101-2026-0473954' nel nodo 5${C_RESET}\n\n"
     exit 0
 fi
 
@@ -39,8 +48,8 @@ jobs="${SEARCH_PARALLEL_JOBS:-4}"
 tmp_dir=$(mktemp -d)
 _AWK_TOOL="$(dirname "${BASH_SOURCE[0]}")/search_all_logs.awk"
 
-_R="\033[31m" _Y="\033[33m" _G="\033[32m"
-_B="\033[1m"  _D="\033[2m"  _X="\033[0m"
+_R="${C_CRIT}" _Y="${C_WARN}" _G="${C_OK}"
+_B="${C_BOLD}"  _D="${C_LBL}"  _X="${C_RESET}"
 
 # Feedback progressivo: progress_show/progress_clear vivono in utils-log.sh
 # (sourcato via utils-logfiles.sh), non qui — la fase "selezione log" avviene
@@ -374,19 +383,19 @@ for (( i=0; i<total_files; i++ )); do
     fi
     # _RL: sfondo alternato per gruppo nodo, non solo testo attenuato — DIM (solo
     # riduzione di luminosità del foreground) era troppo poco visibile per essere
-    # utile a distinguere i gruppi (segnalato dall'utente, 2026-08-05). \033[100m
+    # utile a distinguere i gruppi (segnalato dall'utente, 2026-08-05). ${C_ROW_ALT}
     # è sfondo grigio scuro (SGR bright-black, estensione aixterm ampiamente
-    # supportata, stesso registro esteso già usato per \033[97m bianco intenso).
-    # _RR ("reset riga") sostituisce ogni \033[0m INTERNO alla riga: un reset pieno
+    # supportata, stesso registro esteso già usato per ${C_VAL} bianco intenso).
+    # _RR ("reset riga") sostituisce ogni ${C_RESET} INTERNO alla riga: un reset pieno
     # cancellerebbe anche il background appena impostato, spegnendolo a metà riga.
-    # Solo l'ultimo \033[0m di fine riga resta un reset pieno (niente da preservare
+    # Solo l'ultimo ${C_RESET} di fine riga resta un reset pieno (niente da preservare
     # dopo). Il numero nodo resta sempre bold+white per garantire contrasto su
     # entrambi gli sfondi.
-    _RL="\033[0m"
-    _RR="\033[0m"
+    _RL="${C_RESET}"
+    _RR="${C_RESET}"
     if [[ "$_row_dim" -eq 1 ]]; then
-        _RL="\033[100m"
-        _RR="\033[0m\033[100m"
+        _RL="${C_ROW_ALT}"
+        _RR="${C_RESET}${C_ROW_ALT}"
     fi
 
     bar_len=$(( _h * bar_max / max_hits ))
@@ -406,7 +415,7 @@ for (( i=0; i<total_files; i++ )); do
     # Usa _RR (non _X) per non spegnere il background a metà riga.
     node_col=""
     if [[ "$_multi_node" -eq 1 ]]; then
-        node_col=$(printf "${_D}nodo ${_RR}\033[1m\033[97m%${_node_w}s${_RR}  " "$_n")
+        node_col=$(printf "${_D}nodo ${_RR}${C_BOLD}${C_VAL}%${_node_w}s${_RR}  " "$_n")
     fi
 
     printf "  ${_RL}${node_col}%-${max_lbl}s${_RR}  ${bc}%s${_RR}%s  %6d" \

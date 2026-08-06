@@ -193,7 +193,7 @@ resolve_named_log_path() {
 # In giallo perché è un WARNING, non un risultato: prima era testo bianco identico
 # all'output normale e si perdeva fra le righe di log.
 skip_msg() {
-    printf "\033[33m[SKIP] %s\033[0m\n" "$1"
+    printf "${C_WARN}[SKIP] %s${C_RESET}\n" "$1"
 }
 
 # Estrae i nomi logici dei log ".log" presenti in una directory (Guidewire), uno
@@ -217,7 +217,7 @@ _log_names_in_dir() {
 _print_names_in_columns() {
     local -a names=("$@")
     [[ "${#names[@]}" -eq 0 ]] && return
-    local _D="\033[2m" _X="\033[0m"
+    local _D="${C_LBL}" _X="${C_RESET}"
     local _w="${COLUMNS:-100}"
     [[ "$_w" -lt 40 ]] && _w=100
     local _line
@@ -249,7 +249,7 @@ suggest_available_logs() {
     while IFS= read -r n; do [[ -n "$n" ]] && names+=("$n"); done < <(_log_names_in_dir "$dir")
     [[ "${#names[@]}" -eq 0 ]] && return
 
-    local _D="\033[2m" _B="\033[1m" _X="\033[0m"
+    local _D="${C_LBL}" _B="${C_BOLD}" _X="${C_RESET}"
     # Match parziale case-insensitive: cattura i refusi e le differenze di plurale
     if [[ -n "$wanted" ]]; then
         local -a near=()
@@ -272,7 +272,7 @@ suggest_available_logs() {
 # via NAMED_LOG ("<nome>.log"), access/server/gc via LOG_TYPE ("access log", ecc.) —
 # mescolarli suggerirebbe una sintassi che per i secondi non funziona.
 list_available_logs() {
-    local _D="\033[2m" _B="\033[1m" _X="\033[0m"
+    local _D="${C_LBL}" _B="${C_BOLD}" _X="${C_RESET}"
 
     printf "  ${_B}Log applicativi${_X}\n"
     local -a gw_names=()
@@ -323,7 +323,7 @@ print_log_source() {
     local count
     count=$(wc -w <<< "$paths")
     if [[ "$count" -eq 1 ]]; then
-        printf "\033[36mLog: %s\033[0m\n" "$paths"
+        printf "${C_ACCENT}Log: %s${C_RESET}\n" "$paths"
         return
     fi
 
@@ -335,22 +335,22 @@ print_log_source() {
     dir=$(dirname "$first")
     local names
     names=$(tr ' ' '\n' <<< "$paths" | xargs -r -n1 basename | paste -sd' ' -)
-    printf "\033[36mLog: %s file in %s\033[0m\n" "$count" "$dir"
+    printf "${C_ACCENT}Log: %s file in %s${C_RESET}\n" "$count" "$dir"
     if [[ "$count" -le 4 ]]; then
-        printf "     \033[2m%s\033[0m\n" "$names"
+        printf "     ${C_LBL}%s${C_RESET}\n" "$names"
     else
         local head_n tail_n
         head_n=$(tr ' ' '\n' <<< "$names" | head -2 | paste -sd' ' -)
         tail_n=$(tr ' ' '\n' <<< "$names" | tail -1)
-        printf "     \033[2m%s … %s\033[0m\n" "$head_n" "$tail_n"
+        printf "     ${C_LBL}%s … %s${C_RESET}\n" "$head_n" "$tail_n"
     fi
 }
 
 print_help() {
-    local BOLD="\033[1m"
-    local CYAN="\033[36m"
-    local DIM="\033[2m"
-    local RESET="\033[0m"
+    local BOLD="${C_BOLD}"
+    local CYAN="${C_ACCENT}"
+    local DIM="${C_LBL}"
+    local RESET="${C_RESET}"
 
     printf "\n${BOLD}Cosa so analizzare${RESET}\n\n"
 
@@ -456,7 +456,15 @@ _dispatch_tool_run() {
     fi
     local fmt="$SERVER_LOG_FORMAT"
     local common_f="-f '$LIB_DIR/utils-time.awk' -f '$LIB_DIR/utils-colors.awk' -f '$LIB_DIR/utils-${fmt}.awk' -f '$LIB_DIR/utils-dedup.awk'"
-    local tw_args="$common_f -v time_from='${TIME_FROM:-}' -v time_to='${TIME_TO:-}'"
+    # Tema colore: i valori arrivano da lib/utils-theme.sh (già caricato da
+    # chatbot.sh) e vengono passati a gawk come -v. utils-colors.awk li mappa
+    # sulle costanti storiche (RED, YELLOW, …), così i tool non cambiano.
+    # I -v vanno DOPO i -f e PRIMA dei file di input, come gli altri.
+    local theme_v=""
+    if declare -F theme_awk_args >/dev/null 2>&1; then
+        theme_v="$(theme_awk_args)"
+    fi
+    local tw_args="$common_f $theme_v -v time_from='${TIME_FROM:-}' -v time_to='${TIME_TO:-}'"
 
     case "$tool" in
         count_status)
@@ -513,7 +521,7 @@ _dispatch_tool_run() {
                     logs_expr="$(open_server_logs)"
                     print_log_source "$logs_expr"
                     eval gawk -f "'$LIB_DIR/utils-time.awk'" -f "'$LIB_DIR/utils-${fmt}.awk'" \
-                        -f "'$LIB_DIR/utils-colors.awk'" \
+                        -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
                         -f "$TOOLS_DIR/tail_log.awk" \
                         -v tail_n="${TAIL_N:-50}" -v log_kind="server" \
                         -v time_from="${TIME_FROM:-}" -v time_to="${TIME_TO:-}" \
@@ -522,7 +530,7 @@ _dispatch_tool_run() {
                 else
                     logs_expr="$(open_current_server_logs)"
                     print_log_source "$logs_expr"
-                    eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
+                    eval gawk -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
                         -f "$TOOLS_DIR/tail_log.awk" \
                         -v tail_n="${TAIL_N:-50}" \
                         -v order="${LOG_ORDER:-tail}" \
@@ -533,7 +541,7 @@ _dispatch_tool_run() {
                     logs_expr="$(open_logs)"
                     print_log_source "$logs_expr"
                     eval gawk -f "'$LIB_DIR/utils-time.awk'" \
-                        -f "'$LIB_DIR/utils-colors.awk'" \
+                        -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
                         -f "$TOOLS_DIR/tail_log.awk" \
                         -v tail_n="${TAIL_N:-50}" -v log_kind="access" \
                         -v time_from="${TIME_FROM:-}" -v time_to="${TIME_TO:-}" \
@@ -542,7 +550,7 @@ _dispatch_tool_run() {
                 else
                     logs_expr="$(open_current_logs)"
                     print_log_source "$logs_expr"
-                    eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
+                    eval gawk -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
                         -f "$TOOLS_DIR/tail_log.awk" \
                         -v tail_n="${TAIL_N:-50}" \
                         -v order="${LOG_ORDER:-tail}" \
@@ -576,8 +584,8 @@ _dispatch_tool_run() {
                     return
                 fi
                 print_log_source "$glob_expr"
-                printf "\033[2m(glob: %s)\033[0m\n" "$log_glob"
-                eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
+                printf "${C_LBL}(glob: %s)${C_RESET}\n" "$log_glob"
+                eval gawk -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
                     -f "$TOOLS_DIR/tail_named_log.awk" \
                     -v tail_n="${TAIL_N:-50}" \
                     -v order="${LOG_ORDER:-tail}" \
@@ -595,8 +603,8 @@ _dispatch_tool_run() {
                 suggest_available_logs "$gw_dir" "$named_log"
                 return
             fi
-            printf "\033[36mLog: %s\033[0m\n" "$log_path"
-            eval gawk -f "'$LIB_DIR/utils-colors.awk'" \
+            printf "${C_ACCENT}Log: %s${C_RESET}\n" "$log_path"
+            eval gawk -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
                 -f "$TOOLS_DIR/tail_named_log.awk" \
                 -v tail_n="${TAIL_N:-50}" \
                 -v order="${LOG_ORDER:-tail}" \
@@ -615,7 +623,7 @@ _dispatch_tool_run() {
                     return
                 fi
                 print_log_source "$glob_expr"
-                printf "\033[2m(glob: %s)\033[0m  (level=%s)\n" "$log_glob" "${LOG_LEVEL:-ERROR}"
+                printf "${C_LBL}(glob: %s)${C_RESET}  (level=%s)\n" "$log_glob" "${LOG_LEVEL:-ERROR}"
                 eval gawk "$tw_args" -f "$TOOLS_DIR/grep_named_log.awk" \
                     -v level="${LOG_LEVEL:-ERROR}" \
                     -v tail_n="${TAIL_N:-50}" \
@@ -633,7 +641,7 @@ _dispatch_tool_run() {
                 suggest_available_logs "$gw_dir" "$named_log"
                 return
             fi
-            printf "\033[36mLog: %s\033[0m  (level=%s)\n" "$log_path" "${LOG_LEVEL:-ERROR}"
+            printf "${C_ACCENT}Log: %s${C_RESET}  (level=%s)\n" "$log_path" "${LOG_LEVEL:-ERROR}"
             eval gawk "$tw_args" -f "$TOOLS_DIR/grep_named_log.awk" \
                 -v level="${LOG_LEVEL:-ERROR}" \
                 -v tail_n="${TAIL_N:-50}" \

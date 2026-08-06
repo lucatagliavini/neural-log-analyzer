@@ -21,6 +21,17 @@
 
 declare -A _LOG_LEVEL_NUM=([debug]=0 [info]=1 [warn]=2 [error]=3 [off]=4)
 
+# ─── Colori: default inerte ───────────────────────────────────────────────────
+# Questo file (e utils-logfiles.sh, che lo sourcia) può essere caricato PRIMA
+# che chatbot.sh abbia risolto il tema — o del tutto fuori da chatbot.sh, dai
+# test e dagli script di utilità. Con `set -u` a monte, una C_* non definita
+# sarebbe un errore fatale nel punto più lontano possibile dalla causa.
+# Il default è la stringa vuota, coerente col tema mono: nessun colore, non un
+# colore scelto arbitrariamente. `:=` non sovrascrive un valore già esportato
+# da theme_load, quindi il tema attivo vince sempre.
+: "${C_CRIT:=}" "${C_WARN:=}" "${C_OK:=}" "${C_VAL:=}"
+: "${C_LBL:=}" "${C_ACCENT:=}" "${C_ROW_ALT:=}" "${C_BOLD:=}" "${C_RESET:=}"
+
 # ─── Decompressore per i log .gz ──────────────────────────────────────────────
 # Unica fonte di verità (principio 2): usato da open_log() in dispatch.sh — e
 # quindi da tutti i tool — da search_all_logs.sh e da utils-logfiles.sh.
@@ -78,7 +89,7 @@ log_error() { _log_write error 3 "$1"; }
 progress_show() {
     [[ -t 2 ]] || return
     [[ "${BOT_PROGRESS:-on}" == "off" ]] && return
-    printf "\r\033[K  \033[2m⋯ %s\033[0m" "$1" >&2
+    printf "\r\033[K  ${C_LBL}⋯ %s${C_RESET}" "$1" >&2
 }
 progress_clear() {
     [[ -t 2 ]] || return
