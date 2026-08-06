@@ -21,6 +21,18 @@
 # Dipende da: nessuna utility esterna (non usa utils-time.awk: qui il
 # confronto è per stringa "YYYY-MM-DD HH:MM:SS", non per epoch, per restare
 # coerente col resto di search_all_logs.sh che opera sulla stessa rappresentazione).
+#
+# Due passate sullo STESSO file (il chiamante passa il path due volte come
+# argomento): la prima (FNR==NR) testa solo `pat`, a costo di un semplice
+# match per riga. Solo se esiste almeno una riga candidata si esegue la
+# seconda passata, che fa il lavoro costoso (estrazione timestamp + eredità
+# per le righe di stack trace). Misurato su 208k righe: il match() del
+# timestamp da solo costa 0.19s su 0.27s totali — con 30 file su 33 senza
+# match nel caso comune, la prima passata (0.03s) evita quasi tutto quel
+# costo. Non si può sostituire con un pre-gate `grep -qiE`: esistono pattern
+# ERE dove gawk e grep divergono (es. `a\.b`, `{brace`), quindi un motore
+# diverso da quello di analisi rischierebbe di scartare match reali — le due
+# passate usano lo stesso motore, quindi il rischio non esiste (2026-08-06).
 
 BEGIN {
     IGNORECASE = 1
@@ -29,9 +41,16 @@ BEGIN {
     MONTHS["Sep"]="09"; MONTHS["Oct"]="10"; MONTHS["Nov"]="11"; MONTHS["Dec"]="12"
     do_filter = (tf != "" || tt != "")
     hits = 0; first_ts = ""; last_ts = ""
+    candidate = 0
+}
+
+FNR == NR {
+    if ($0 ~ pat) candidate = 1
+    next
 }
 
 {
+    if (!candidate) exit
     ts = ""
     if (match($0, /[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}/)) {
         ts = substr($0, RSTART, RLENGTH)

@@ -144,23 +144,28 @@ for (( i=0; i<total_files; i++ )); do
         nod="${all_nodes[$i]}"
         hits=0 first_ts="" last_ts=""
 
-        # Un'unica passata gawk sull'INTERO file (non solo sulle righe che
-        # matchano): il timestamp "effettivo" di una riga di stack trace senza
-        # timestamp proprio si eredita dall'ultima riga con timestamp vista,
-        # e questo si può determinare solo scandendo il file in ordine. Prima
-        # il filtro temporale girava in bash sulle sole righe già estratte da
-        # grep, perdendo il contesto: una riga come "at ...SearchHubExtApi..."
-        # matcha "searchHub" per puro caso testuale e veniva sempre mantenuta,
-        # anche quando l'eccezione a cui appartiene (con il suo vero timestamp)
-        # era fuori dal range richiesto — bug reale (2026-08-05).
+        # Due passate gawk sullo STESSO file (search_all_logs.awk: FNR==NR):
+        # la prima testa solo il pattern, la seconda — eseguita solo se
+        # esiste un candidato — fa il lavoro costoso (timestamp + eredità
+        # per le righe di stack trace senza timestamp proprio, necessaria
+        # perché una riga come "at ...SearchHubExtApi..." matcha "searchHub"
+        # per puro caso testuale — bug reale 2026-08-05). Con la maggioranza
+        # dei file senza match (caso comune) questo evita quasi del tutto il
+        # costo per-riga del timestamp — misurato 0.27s → 0.03s (2026-08-06).
         # select_log_files() (sopra) filtra solo a livello di FILE (il file è
         # incluso se il suo intervallo si sovrappone al range): un log corrente
         # non ruotato copre l'intera giornata, quindi il filtro riga-per-riga
         # qui resta necessario.
         if [[ "$pth" == *.gz ]]; then
-            _result=$(gunzip -c "$pth" 2>/dev/null | gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -f "$_AWK_TOOL" 2>/dev/null)
+            # Lo stream .gz non è rigiocabile: due process substitution
+            # indipendenti forniscono due decompressioni distinte. Se la
+            # prima passata non trova candidati, gawk esce prima di leggere
+            # la seconda: il secondo gunzip riceve SIGPIPE e termina subito,
+            # senza completare la decompressione.
+            _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -f "$_AWK_TOOL" \
+                <(gunzip -c "$pth" 2>/dev/null) <(gunzip -c "$pth" 2>/dev/null) 2>/dev/null)
         else
-            _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -f "$_AWK_TOOL" "$pth" 2>/dev/null)
+            _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -f "$_AWK_TOOL" "$pth" "$pth" 2>/dev/null)
         fi
         IFS='|' read -r hits first_ts last_ts <<< "$_result"
 
