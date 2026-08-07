@@ -129,6 +129,13 @@ def load_profile(profile_dir):
             parse_scalar(system, 'GC_LOG_BASE'),
         ) if b
     ]
+    # Sinonimi (es. "access" -> "undertow_access_log", SYSTEM_LOG_SYNONYMS in
+    # system.conf): replica _is_system_log_base() (utils-logfiles.sh) per
+    # mantenere la parità con normalize-query.sh, verificata da
+    # test-normalize-parity.py.
+    cfg['system_log_synonyms'] = {
+        k.lower(): v.lower() for k, v in parse_assoc_array(system, 'SYSTEM_LOG_SYNONYMS').items()
+    }
 
     return cfg
 
@@ -273,7 +280,8 @@ def normalize_query(query, cfg):
         if m_log:
             cand_log = m_log.group(0)
             cand_base = cand_log[:-len('.log')]
-            if cand_base.lower() not in cfg['system_log_bases']:
+            cand_base_resolved = cfg['system_log_synonyms'].get(cand_base.lower(), cand_base.lower())
+            if cand_base_resolved not in cfg['system_log_bases']:
                 # c) Preserva detected_app quando il nome del log è anche uno
                 #    short-alias di app (cc→claimcenter, cm→contactmanager).
                 if not detected_app:

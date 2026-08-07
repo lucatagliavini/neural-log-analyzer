@@ -180,6 +180,12 @@ assert_eq "server.log escluso dal fallback" "" \
     "$(_extract 'righe di errore nel server.log' NAMED_LOG)"
 assert_eq "gc.log escluso dal fallback" "" \
     "$(_extract 'ultime righe del gc.log' NAMED_LOG)"
+# Bug reale in produzione (2026-08-07): "access" è il sinonimo con cui gli utenti
+# nominano ACCESS_LOG_BASE ("undertow_access_log" su disco) — senza
+# SYSTEM_LOG_SYNONYMS (system.conf) il confronto esatto falliva e "access.log"
+# collassava sul fallback NAMED_LOG generico invece che sul tool dedicato.
+assert_eq "access.log escluso dal fallback (sinonimo di ACCESS_LOG_BASE)" "" \
+    "$(_extract 'ultime 50 righe del access.log' NAMED_LOG)"
 assert_eq "nessun .log: NAMED_LOG vuoto" "" \
     "$(_extract 'ultime 100 righe' NAMED_LOG)"
 # Il valore finisce in `find -name`: serve almeno un alfanumerico, altrimenti

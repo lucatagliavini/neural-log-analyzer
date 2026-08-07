@@ -127,6 +127,14 @@ _logfiles_sort_key() {
         echo $(( 5000000000 - ${BASH_REMATCH[1]} ))
         return
     fi
+    # Rotazione giornaliera (undertow_access_log.2026-07-14.log): la data
+    # precede .log invece di seguirlo, stesso schema di logfile_logical_name().
+    # Convertita in epoch reale così è comparabile con la rotazione con epoch.
+    if [[ "$rest" =~ \.([0-9]{4}-[0-9]{2}-[0-9]{2})\.log$ ]]; then
+        date -d "${BASH_REMATCH[1]}" +%s 2>/dev/null && return
+        echo 0
+        return
+    fi
     stat -c %Y "$f" 2>/dev/null || echo 0
 }
 
@@ -259,25 +267,38 @@ select_log_files() {
 # Rimuove il suffisso di rotazione dal nome di un file di log, restituendo il
 # "nome logico" — la chiave per capire se due file sono lo stesso log in momenti
 # diversi o due log distinti.
-#   prod1nsse-cc.log                      -> prod1nsse-cc
-#   prod1nsse-cc.log-2026-07-26-17850.gz  -> prod1nsse-cc
-#   prod1nsse-cc.log.3.gz                 -> prod1nsse-cc
+#   prod1nsse-cc.log                        -> prod1nsse-cc
+#   prod1nsse-cc.log-2026-07-26-17850.gz    -> prod1nsse-cc
+#   prod1nsse-cc.log.3.gz                   -> prod1nsse-cc
+#   undertow_access_log.2026-07-14.log      -> undertow_access_log
 logfile_logical_name() {
     local base="${1##*/}"
     base="${base%.gz}"
     # -DATE-EPOCH oppure .N appesi dopo .log
     base=$(sed -E 's/\.log([-.].*)?$/.log/' <<< "$base")
+    # Rotazione giornaliera: la data precede .log invece di seguirlo
+    # (undertow_access_log.2026-07-14.log) — bug reale in produzione,
+    # 19 rotazioni giornaliere producevano 19 nomi logici distinti invece di 1
+    # (2026-08-07). Schema già dichiarato nell'header del file ma non gestito qui.
+    base=$(sed -E 's/\.[0-9]{4}-[0-9]{2}-[0-9]{2}\.log$/.log/' <<< "$base")
     echo "${base%.log}"
 }
 
 # Un nome logico è "di sistema" (access/server/gc) se coincide, case-insensitive,
-# con uno dei tre *_LOG_BASE di system.conf. Questi log hanno tool e sintassi
-# dedicati ("access log", non "<nome>.log"): condiviso da param-extract.sh
-# (esclude il fallback NAMED_LOG) e da list_available_logs() in dispatch.sh
-# (esclude la sezione "Log del nodo") — un solo punto di verità invece di due
-# copie della stessa condizione (principio 2 di CLAUDE.md).
+# con uno dei tre *_LOG_BASE di system.conf, o con un sinonimo mappato su uno di
+# essi via SYSTEM_LOG_SYNONYMS (es. "access" -> "undertow_access_log": il nome
+# su disco non coincide con la parola naturale che gli utenti digitano).
+# Questi log hanno tool e sintassi dedicati ("access log", non "<nome>.log"):
+# condiviso da param-extract.sh (esclude il fallback NAMED_LOG),
+# normalize-query.sh (sezione 3.5, esclude <LOGFILE>) e list_available_logs()
+# in dispatch.sh (esclude la sezione "Log del nodo") — un solo punto di verità
+# invece di più copie della stessa condizione (principio 2 di CLAUDE.md).
 _is_system_log_base() {
     local name="${1,,}"
+    if declare -p SYSTEM_LOG_SYNONYMS &>/dev/null; then
+        local _mapped="${SYSTEM_LOG_SYNONYMS[$name]:-}"
+        [[ -n "$_mapped" ]] && name="${_mapped,,}"
+    fi
     local _sysb
     for _sysb in "${ACCESS_LOG_BASE:-}" "${SERVER_LOG_BASE:-}" "${GC_LOG_BASE:-}"; do
         [[ -n "$_sysb" && "$name" == "${_sysb,,}" ]] && return 0

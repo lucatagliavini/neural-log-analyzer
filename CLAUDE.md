@@ -212,6 +212,26 @@ specifico:
    log realmente osservato, un sinonimo che gli utenti digitano davvero
    (`entities.conf`), un bug storico in un session log: lì "Guidewire" resta,
    perché è un dato di dominio, non un'assunzione del codice.
+8. **Centralizzare significa migrare tutti i chiamanti, non solo crearne uno
+   nuovo** (deciso 2026-08-07, dopo bug collegati a LOGDISC-1): introdurre una
+   funzione condivisa (es. `_is_system_log_base()`) non elimina il difetto se
+   un chiamante preesistente continua a usare una copia inline della stessa
+   logica — succede quando la centralizzazione avviene mentre il codice
+   esistente non viene riletto per intero. Prima di considerare chiusa una
+   centralizzazione, cercare (`grep`) altre occorrenze della stessa condizione
+   o assunzione altrove nel codice, non solo nel punto che ha originato il
+   refactor. Lo stesso vale quando più funzioni fanno **assunzioni parallele
+   sullo stesso formato** (es. schemi di rotazione dei nomi file in
+   `logfile_logical_name()` e `_logfiles_sort_key()`): estendere una senza
+   controllare le altre lascia un gap identico, solo più difficile da notare
+   perché "sembra" già risolto altrove. Ogni modifica a `normalize-query.sh`
+   richiede l'esecuzione di `bash tests/run-tests.sh --parity` (non incluso
+   nella suite di default) per verificare che `lib/build_dataset.py`, la sua
+   replica Python intenzionale, resti bit-identica — altrimenti la parità si
+   rompe silenziosamente. Infine: un test che fallisce non implica
+   automaticamente un bug nel codice — verificare sempre se è la fixture di
+   test a violare un'invariante voluta (es. principio 5, pruning conservativo)
+   prima di modificare la logica di produzione per farlo passare.
 
 ## Dependencies
 

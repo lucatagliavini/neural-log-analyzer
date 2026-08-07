@@ -20,6 +20,7 @@ fi
 
 source "$PROFILE_DIR/system.conf"
 source "$PROFILE_DIR/entities.conf"
+source "$(dirname "${BASH_SOURCE[0]}")/utils-logfiles.sh"
 
 query="${1,,}"
 norm_query="$query"
@@ -152,19 +153,17 @@ fi
 # b) Qualsiasi nome di logfile: "<token>.log" → <LOGFILE>.
 #    Sostituisce nome+estensione insieme, così non resta un token "cc" isolato che
 #    la sezione 4 trasformerebbe in <APP>.
-#    Esclusi i log di infrastruttura (basename da system.conf): hanno tool dedicati
+#    Esclusi i log di infrastruttura, via _is_system_log_base() (utils-logfiles.sh,
+#    condivisa con param-extract.sh e dispatch.sh): hanno tool dedicati
 #    (filter_errors, tail_log via LOG_TYPE) e generalizzarli li farebbe collassare
-#    sulla classe named-log. L'esclusione è un semplice confronto in bash — in ERE
-#    non sarebbe esprimibile, perché `grep -E` non ha il lookahead negativo.
+#    sulla classe named-log. Riconosce sia il basename esatto (ACCESS_LOG_BASE) sia
+#    i sinonimi in SYSTEM_LOG_SYNONYMS (system.conf) — "access.log" deve escludersi
+#    anche se il file su disco si chiama undertow_access_log.log.
 if [[ "$_logfile_done" -eq 0 ]]; then
     _cand_log=$(echo "$norm_query" | grep -oiE "[a-z0-9_.-]+\.log" | head -1)
     if [[ -n "$_cand_log" ]]; then
         _cand_base="${_cand_log%.log}"
-        _is_sys=0
-        for _sysbase in "${ACCESS_LOG_BASE:-}" "${SERVER_LOG_BASE:-}" "${GC_LOG_BASE:-}"; do
-            [[ -n "$_sysbase" && "${_cand_base,,}" == "${_sysbase,,}" ]] && { _is_sys=1; break; }
-        done
-        if [[ "$_is_sys" -eq 0 ]]; then
+        if ! _is_system_log_base "$_cand_base"; then
             # c) Preserva DETECTED_APP quando il nome del log è anche uno short-alias
             #    di app (cc→claimcenter, cm→contactmanager): serve a resolve-logs.sh
             #    per costruire la directory dei log custom giusta. Data-driven.

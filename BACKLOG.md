@@ -10,7 +10,8 @@ Aggiornato: 2026-08-07
 |----|-------------|----------|
 | LOGDISC-2 | **`search_all_logs.sh` non segue il contratto "fino al nodo"** (vedi principio 6 in CLAUDE.md, e LOGDISC-1 sotto). Enumera ancora 4 directory fisse via `APP_SUBPATH`/`CUSTOM_LOG_SUBPATH` (`search_all_logs.sh:132-148`) e chiama `select_log_files_grouped`, che è flat (`find -maxdepth 1`). Dopo LOGDISC-1, `tail_named_log`/`grep_named_log` raggiungono qualunque log sotto il nodo per nome o glob; `search_all_logs` no — un log in una directory arbitraria (es. `weird/deep/nested/custom.log`) è nominabile ma non cercabile con "in quali log c'è X". Asimmetria nota, non ancora valutata in dettaglio se/come estendere la ricorsione qui: il volume di dati da scansionare cambia (oggi 4 directory note, potenzialmente l'intero nodo), quindi l'impatto su tempo/rumore va misurato prima di decidere. | Da valutare |
 
-**Chiuso il 2026-08-07**: LOGDISC-1 (ricerca ricorsiva log sotto il nodo, vedi sezione dedicata).
+**Chiuso il 2026-08-07**: LOGDISC-1 (ricerca ricorsiva log sotto il nodo, vedi sezione dedicata),
+LOGDISC-3 (bug collegati a LOGDISC-1, vedi sezione dedicata).
 
 **Chiuse il 2026-08-06**: OBS-3 (copertura logging), OBS-5 (feedback progressivo nei 3 tool
 mancanti), UI-11 (sistema di temi colore, default `mono` a zero ANSI), SRCH-1 (ricerca
@@ -71,6 +72,27 @@ organizzare i log diversamente. Documentato come principio 6 in CLAUDE.md.
 
 **Asimmetria nota, non chiusa qui**: vedi `LOGDISC-2` in cima al file — `search_all_logs.sh`
 resta enumerativo (non ricorsivo), quindi trova per nome log che non cerca per contenuto.
+
+---
+
+## LOGDISC-3 — Bug collegati alla centralizzazione di LOGDISC-1 (2026-08-07)
+
+Richiesta esplicita dell'utente dopo LOGDISC-1: *"correggi i bug intanto, mi aspetto che ci
+siano altri bug collegati perché stiamo 'centralizzando' le logiche"*. 4 bug reali trovati e
+corretti, tutti riconducibili a centralizzazione incompleta o assunzioni duplicate sullo
+stesso formato — vedi principio 8 in CLAUDE.md.
+
+| ID | Descrizione | Stato |
+|----|-------------|-------|
+| LOGDISC-3a | `logfile_logical_name()` (`utils-logfiles.sh`) non gestiva la rotazione giornaliera `BASENAME.DATE.log` (data prima di `.log`, es. `undertow_access_log.2026-07-14.log`), nonostante lo schema fosse già dichiarato supportato nell'header. 19 rotazioni giornaliere producevano 19 nomi logici invece di 1. Nuovo ramo `sed` dedicato. | **Fatto** |
+| LOGDISC-3b | `_logfiles_sort_key()` aveva lo stesso gap di 3a — assunzione indipendente sugli schemi di rotazione, mai aggiornata insieme. Nuovo ramo che converte la data in epoch reale, comparabile con le rotazioni con epoch esplicito. | **Fatto** |
+| LOGDISC-3c | `access.log` (sinonimo digitato dagli utenti) non coincideva col basename esatto `undertow_access_log` (`ACCESS_LOG_BASE`): la query collassava sul fallback generico `<LOGFILE>`/`NAMED_LOG` invece che sul tool dedicato. Inoltre `normalize-query.sh` aveva una copia inline indipendente dello stesso confronto già centralizzato in `_is_system_log_base()` (introdotta in LOGDISC-1), mai migrata. Nuovo dizionario data-driven `SYSTEM_LOG_SYNONYMS` in `system.conf`; `_is_system_log_base()` estesa a consultarlo; `normalize-query.sh` migrato alla funzione condivisa. | **Fatto** |
+| LOGDISC-3d | `lib/build_dataset.py` (replica Python di `normalize-query.sh`) non rifletteva né la sinonimia né la migrazione — parità bash/Python a rischio di rottura silenziosa. Aggiunta `system_log_synonyms` in `load_profile()`, usata in `normalize_query()`. | **Fatto** |
+
+**Verifica**: `bash tests/run-tests.sh --parity` → 85 PASS / 0 FAIL, parità confermata su 1070
+query (111 feature). 6 nuove asserzioni (`test-utils-logfiles.sh` ×4, `test-normalize-query.sh`
+×1, `test-param-extract.sh` ×1), più il caso end-to-end sulla query originale del bug. Dettaglio
+completo in `docs/sessions/2026-08-07-02.md`.
 
 ---
 

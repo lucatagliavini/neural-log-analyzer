@@ -236,6 +236,20 @@ else
     (( PASS++ ))
 fi
 
+# Bug reale in produzione (2026-08-07): "access.log" è un sinonimo digitato
+# dagli utenti, ma il file su disco si chiama undertow_access_log.log
+# (ACCESS_LOG_BASE). Senza SYSTEM_LOG_SYNONYMS, "access" non coincideva mai col
+# basename esatto e la query collassava su <LOGFILE> (named-log generico)
+# invece che sul tool dedicato dell'access log.
+_run "ultime 50 righe del access.log"
+if [[ "$NORM_QUERY" == *"<LOGFILE>"* ]]; then
+    printf "  \033[31mFAIL\033[0m  access.log NON deve diventare <LOGFILE> (sinonimo di ACCESS_LOG_BASE): '%s'\n" "$NORM_QUERY"
+    (( FAIL++ ))
+else
+    printf "  \033[32mPASS\033[0m  access.log resta letterale (sinonimo riconosciuto, tool dedicato)\n"
+    (( PASS++ ))
+fi
+
 # "api" senza ".log" significa endpoint HTTP, non api.log: 17 esempi
 # distribute_status dipendono da questa distinzione.
 _run "quali api hanno più fallimenti"

@@ -121,6 +121,38 @@ assert_true "srv: finestra breve seleziona solo corrente + .1 (non scende a .2/.
 assert_true "srv: la rotazione .10 (più vecchia) non compare con finestra breve" \
     "$(( 1 - $(_contains "$_srv_win" "$_FIX/srv.log.10.gz") ))"
 
+# ─── Rotazione giornaliera: data PRIMA di .log (BASENAME.DATE.log) ───────────
+# Bug reale in produzione (2026-08-07): logfile_logical_name() e
+# _logfiles_sort_key() gestivano solo un suffisso di rotazione DOPO ".log"
+# (.log.N, .log-DATE-EPOCH.gz), non uno PRIMA (undertow_access_log.2026-07-14.log)
+# — nonostante l'header del file dichiarasse questo schema come supportato.
+# 19 rotazioni giornaliere producevano 19 nomi logici distinti invece di 1.
+section "Rotazione giornaliera BASENAME.DATE.log (data prima di .log)"
+
+assert_true "logfile_logical_name: BASENAME.DATE.log -> BASENAME (non BASENAME.DATE)" \
+    "$([[ "$(logfile_logical_name "undertow_access_log.2026-07-14.log")" == "undertow_access_log" ]] && echo 1 || echo 0)"
+assert_true "logfile_logical_name: BASENAME.DATE.log.gz -> BASENAME" \
+    "$([[ "$(logfile_logical_name "undertow_access_log.2026-07-14.log.gz")" == "undertow_access_log" ]] && echo 1 || echo 0)"
+
+echo "2026-08-05T12:00:00,000 INFO corrente"        > "$_FIX/undertow_access_log.log"
+echo "2026-08-04T12:00:00,000 INFO rotazione ieri"   > "$_FIX/undertow_access_log.2026-08-04.log"
+echo "2026-08-03T12:00:00,000 INFO rotazione 2gg fa" > "$_FIX/undertow_access_log.2026-08-03.log"
+
+_access_all=$(select_log_files_grouped "$_FIX" "" "" "undertow_access_log*")
+_access_count=$(( $(grep -o '|' <<< "$_access_all" | wc -l) + 1 ))
+assert_true "undertow_access_log: le 3 rotazioni giornaliere si raggruppano in UN nome logico" \
+    "$([[ "$_access_count" -eq 3 ]] && echo 1 || echo 0)"
+
+# Finestra interamente DOPO il ts_start del file corrente (12:00): deve
+# fermarsi lì senza scendere alla rotazione di ieri. Una finestra che inizia
+# a mezzanotte non sarebbe un caso valido — il file corrente non la coprirebbe
+# per intero e il walk scenderebbe correttamente (principio 5, conservativo).
+_access_win=$(select_log_files_grouped "$_FIX" "2026-08-05T13:00" "2026-08-05T23:59" "undertow_access_log*")
+_access_win_count=$(( $(grep -o '|' <<< "$_access_win" | wc -l) + 1 ))
+[[ -z "$_access_win" ]] && _access_win_count=0
+assert_true "undertow_access_log: finestra dopo l'inizio del corrente non scende alla rotazione di ieri" \
+    "$([[ "$_access_win_count" -eq 1 ]] && echo 1 || echo 0)"
+
 # ─── File vuoto scartato, file senza timestamp sempre incluso ──────────────────
 section "File vuoto scartato, file senza timestamp sempre incluso (conservativo)"
 
