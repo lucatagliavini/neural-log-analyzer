@@ -11,7 +11,8 @@ Aggiornato: 2026-08-07
 | LOGDISC-2 | **`search_all_logs.sh` non segue il contratto "fino al nodo"** (vedi principio 6 in CLAUDE.md, e LOGDISC-1 sotto). Enumera ancora 4 directory fisse via `APP_SUBPATH`/`CUSTOM_LOG_SUBPATH` (`search_all_logs.sh:132-148`) e chiama `select_log_files_grouped`, che è flat (`find -maxdepth 1`). Dopo LOGDISC-1, `tail_named_log`/`grep_named_log` raggiungono qualunque log sotto il nodo per nome o glob; `search_all_logs` no — un log in una directory arbitraria (es. `weird/deep/nested/custom.log`) è nominabile ma non cercabile con "in quali log c'è X". Asimmetria nota, non ancora valutata in dettaglio se/come estendere la ricorsione qui: il volume di dati da scansionare cambia (oggi 4 directory note, potenzialmente l'intero nodo), quindi l'impatto su tempo/rumore va misurato prima di decidere. | Da valutare |
 
 **Chiuso il 2026-08-07**: LOGDISC-1 (ricerca ricorsiva log sotto il nodo, vedi sezione dedicata),
-LOGDISC-3 (bug collegati a LOGDISC-1, vedi sezione dedicata).
+LOGDISC-3 (bug collegati a LOGDISC-1, vedi sezione dedicata), LOGSEL-1 (misrouting +
+falso positivo silenzioso sugli errori nell'access log, vedi sezione dedicata).
 
 **Chiuse il 2026-08-06**: OBS-3 (copertura logging), OBS-5 (feedback progressivo nei 3 tool
 mancanti), UI-11 (sistema di temi colore, default `mono` a zero ANSI), SRCH-1 (ricerca
@@ -93,6 +94,55 @@ stesso formato — vedi principio 8 in CLAUDE.md.
 query (111 feature). 6 nuove asserzioni (`test-utils-logfiles.sh` ×4, `test-normalize-query.sh`
 ×1, `test-param-extract.sh` ×1), più il caso end-to-end sulla query originale del bug. Dettaglio
 completo in `docs/sessions/2026-08-07-02.md`.
+
+---
+
+## LOGSEL-1 — Errori nell'access log: misrouting + falso positivo silenzioso (bug prod, 2026-08-07)
+
+Bug reale: «errori nel access.log di produzione stamattina del nodo 4» rispondeva con righe
+prese dal **server.log**, senza alcun avviso. **Non un regresso di LOGDISC-1/3** — quel lavoro
+(scoperta file, sinonimia `access` → `undertow_access_log`) funzionava correttamente;
+`normalize-query.sh` manteneva già `access.log` letterale. Il difetto era a monte
+(classificazione) e a valle (trasparenza), due difetti indipendenti che si sommavano.
+
+**D1 — misrouting.** `access.log` è escluso dalla generalizzazione `<LOGFILE>` (scelta
+corretta: ha un tool dedicato), ma questo significa che i due bigram `<logfile>` — i
+discriminatori named-log — non si attivano mai su di esso. Restavano solo unigram deboli
+(`errore\|errori`, `access\b`, tempo), identici a quelli di `filter_errors` sul server log.
+Zero esempi nel dataset per la firma «errore + access log senza status code»: la rete
+instradava sull'unica firma nota, strutturalmente identica a meno del nome del log.
+
+**D2 — falso positivo silenzioso (il più grave dei due).** Il ramo `filter_errors` trovava il
+server.log, funzionava, e non emetteva alcun indizio: nessun `[SKIP]`, nessun
+`print_log_source`. L'utente riceveva dati plausibili dal file sbagliato senza saperlo.
+`print_log_source()` esisteva già (creato per `tail_log`) ma non era stato migrato ai tool di
+sistema — stesso pattern del principio 8 di `CLAUDE.md` (centralizzare significa migrare
+tutti i chiamanti).
+
+**Vincolo dell'utente**: nessuna regola ad hoc per tipo di log («errori = 4xx/5xx» cablato per
+l'access log violerebbe il principio di generalizzazione). Se un log non ha il concetto
+cercato, il bot lo dice e chiede una stringa da cercare — non una semantica specifica del
+formato.
+
+| ID | Descrizione | Stato |
+|----|-------------|-------|
+| LOGSEL-1a | **`print_log_source()` su tutti i tool di sistema** (`dispatch.sh`): prima solo `tail_log`. Estesa a `count_status`, `distribute_status`, `slow_requests`, `traffic_volume`, `filter_errors`, `service_times`, `gc_stats`, `filter_ip`, `filter_app_errors`, `correlate_gc_slow` (due sorgenti, gc+access, entrambe passate in un'unica chiamata). Chiude D2: qualunque misrouting residuo diventa visibile, non silenzioso | **Fatto** |
+| LOGSEL-1b | **Firma mancante nel dataset** (D1): 16 esempi multi-label `count_status,distribute_status` per «errore/eccezione/anomalia + access log/log http/log delle richieste + senza status code», in `queries_labeled.txt`. Nessun cambio di vocabolario/topologia (111→48→16 invariata) — solo dataset (1070→1086) e retrain. Routing scelto con l'utente: multi-label, non una nuova classe — conteggio e distribuzione per endpoint sono entrambi risposte valide, e leggono davvero l'access log | **Fatto** |
+| LOGSEL-1c | **`grep_named_log.awk`: formato non riconosciuto distinto da "nessuna riga col livello"** — il gate `GW_RE` (timestamp ISO + livello) scartava ogni riga di un log con formato diverso (es. access log Undertow) e stampava `Nessuna riga trovata (level=X)`, indistinguibile da "letto correttamente, nessun errore". Falso negativo silenzioso verificato: il 500 c'era, il messaggio diceva il contrario. Fix generico (nessuna conoscenza del tipo di log): contatore `matched_format` separato da `count`; se `NR > 0` ma `matched_format == 0`, messaggio dedicato con conteggio righe lette e suggerimento di cercare una stringa specifica | **Fatto** |
+
+**Verifica**: `bash tests/run-tests.sh --parity` → 87 PASS / 0 FAIL, parità confermata su 1086
+query (111 feature). 2 nuovi casi di routing in `run-tests.sh` (positivo `count_status`,
+negativo `!filter_errors`), 2 nuovi in `test-srch-named-log.sh` (fixture con formato non
+Guidewire → messaggio distinto + conteggio righe). Cinque confini adiacenti (server.log via
+`filter_errors`, access.log via `tail_log`, `cc.log` via `grep_named_log`) riverificati senza
+regressione: 0.96-0.9998 di confidenza, invariati rispetto a prima del retrain. Dettaglio
+completo in `docs/sessions/2026-08-07-03.md`.
+
+**Perché non è la stessa cosa di LOGDISC-1/3**: quel lavoro garantiva che il file giusto fosse
+*trovabile* sotto il nodo; qui il file era trovabile ma la rete sceglieva il tool sbagliato
+(D1) e, anche a scelta corretta di un tool diverso dall'atteso, nessuno lo segnalava (D2).
+Due livelli diversi della stessa pipeline: risoluzione file vs. classificazione intent vs.
+trasparenza dell'output.
 
 ---
 

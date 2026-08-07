@@ -127,8 +127,8 @@ queries_labeled.txt
   `NUM_FEATURES`), `TOOL_NAMES`/`TOOL_DESC`. Modifiche richiedono `./train.sh`.
 - **`entities.conf`** — mappa alias APP/ENV/NODE, sinonimi, risoluzione inversa.
   Aggiungere una nuova applicazione richiede solo una riga qui, non un retrain.
-- **`vocab.sh`** — `UNIGRAMS`/`BIGRAMS` con peso, `NUM_FEATURES`. Modifiche richiedono
-  `./build-dataset.sh` + `./train.sh`.
+- **`unigrams.txt`/`bigrams.txt`** — pattern con peso, letti da `domain.conf` che calcola
+  `NUM_FEATURES` automaticamente. Modifiche richiedono `./build-dataset.sh` + `./train.sh`.
 - **`examples.sh`** — generatori di esempi specifici del profilo.
 - **`dataset/`** — `queries_labeled.txt` → `queries.txt` (generato).
 
@@ -137,9 +137,10 @@ queries_labeled.txt
 - **Entity normalization**: le query passano sempre da `normalize-query.sh` prima della
   vectorizzazione (`"errori jboss"` → `"errori <APP>"`). Il classificatore non deve mai
   vedere nomi applicativi concreti nel training set.
-- **Verifica coerenza topologia**: `train.sh` confronta `NUM_FEATURES` (da `vocab.sh`)
-  con le colonne di `layer1.txt` prima di addestrare — se divergono, errore esplicito
-  con suggerimento di reinizializzare via `setup.sh`. Evita modelli corrotti silenziosi.
+- **Verifica coerenza topologia**: `train.sh` confronta `NUM_FEATURES` (da `domain.conf`,
+  calcolato da `unigrams.txt`/`bigrams.txt`) con le colonne di `layer1.txt` prima di
+  addestrare — se divergono, errore esplicito con suggerimento di reinizializzare via
+  `setup.sh`. Evita modelli corrotti silenziosi.
 - **Nessun default hardcoded**: valori come `SERVER_LOG_FORMAT`, nomi log, alias app
   vengono sempre letti da `system.conf`/`entities.conf`, mai da fallback impliciti nel
   codice (rifattorizzato in ARCH-6, vedi BACKLOG.md).

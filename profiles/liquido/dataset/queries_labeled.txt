@@ -1176,3 +1176,28 @@ search_all_logs	dimmi in quali log appare DAOLavaParametri
 search_all_logs	in quali log ci sono occorrenze di AssignmentException
 # [NEG OSTILE #2 → search_all_logs] attiva U2 (elenca.i.log) + appare\b.
 search_all_logs	elenca i log in cui appare NullPointerException
+
+# ─── LOGSEL-1 (2026-08-07): "errore" + access log senza status code ───────────
+# Bug prod: "errori nel access.log di produzione stamattina del nodo 4" finiva
+# su filter_errors (server.log) — zero esempi coprivano questa firma, la rete
+# instradava sull'unica firma nota (errori+server log, riga ~417). Fix: NON una
+# regola ad hoc "errori=4xx/5xx sull'access log" (violerebbe la generalizzazione),
+# ma dataset che insegna il confine — count_status+distribute_status leggono
+# davvero l'access log e danno conteggio+distribuzione, la risposta più utile
+# quando la query non porta un codice esplicito.
+count_status,distribute_status	errori nell'access log di stamattina
+count_status,distribute_status	errori nel access.log di produzione stamattina del nodo 4
+count_status,distribute_status	eccezioni nel log di accesso stanotte
+count_status,distribute_status	problemi nel log http di questa mattina
+count_status,distribute_status	anomalie nel log delle richieste poco fa
+count_status,distribute_status	errori gravi nel log undertow di questa sera
+count_status,distribute_status	messaggi di errore nell'access log di stanotte
+count_status,distribute_status	warning nell'access.log di stamattina
+count_status,distribute_status	errori nel access.log del nodo 4
+count_status,distribute_status	exception nel log di accesso in produzione
+count_status,distribute_status	problemi nell'access log
+count_status,distribute_status	errori nel log http
+count_status,distribute_status	anomalie nell'access.log di stamattina in produzione
+count_status,distribute_status	errori nell'access log di oggi
+count_status,distribute_status	messaggi di errore nel log delle richieste di stanotte
+count_status,distribute_status	eccezioni nel access.log questa mattina

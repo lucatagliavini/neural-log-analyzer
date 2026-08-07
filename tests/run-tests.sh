@@ -102,6 +102,12 @@ INTENT_TESTS=(
     "filter_errors|errori nel server log del nodo 3"
     "filter_errors|righe di errore nel server.log"
 
+    # count_status — LOGSEL-1: "errore" + access log senza status code non deve
+    # finire su filter_errors (bug prod 2026-08-07). count_status/distribute_status
+    # sono entrambi sopra soglia (multi-label), qui si verifica solo il top-1.
+    "count_status|errori nel access.log di produzione stamattina del nodo 4"
+    "!filter_errors|errori nell'access log di stamattina"
+
     # service_times
     "service_times|tempi dei servizi backend di stamattina"
     "service_times|latenza dei servizi SOA"

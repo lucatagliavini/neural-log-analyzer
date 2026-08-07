@@ -66,6 +66,16 @@ cat > "$_node/ClaimCenter/Guidewire/prod1nssd-cc.log" <<EOF
 [main] USER ${_today_plain}T10:03:00,000 WARN  searchHub lento
 EOF
 
+# LOGSEL-1: log applicativo con formato NON Guidewire (nessun timestamp
+# ISO+livello riconoscibile) — righe presenti ma nessuna nel formato atteso.
+# Generico per costruzione: qualunque log con questo schema di contenuto
+# innesca lo stesso messaggio, non solo l'access log (già gestito da un tool
+# dedicato, mai instradato qui).
+cat > "$_node/ClaimCenter/Guidewire/prod1nssd-formatolibero.log" <<EOF
+10.0.0.1 [${_today_apache}:10:05:00 +0200] "GET /b HTTP/1.1" 500 200 100 - UA
+10.0.0.1 [${_today_apache}:10:06:00 +0200] "GET /c HTTP/1.1" 200 100 100 - UA
+EOF
+
 _run() {
     QUERY_LOG_DIR= bash "$ROOT_DIR/chatbot.sh" --profile "$PROFILE_DIR" \
         --base-dir "$_FIX" --env prod --node 4 --query "$1" 2>&1
@@ -121,6 +131,18 @@ section "Il pattern compare nell'etichetta mostrata all'utente"
 _out_lbl=$(_run 'cerca "searchHub" nel cc.log')
 assert_eq "l'etichetta mostra il pattern cercato" "1" \
     "$([[ "$_out_lbl" == *'cerca "searchHub"'* ]] && echo 1 || echo 0)"
+
+section "LOGSEL-1: formato non riconosciuto distinto da 'nessuna riga col livello'"
+
+# Righe presenti (2, lette) ma nessuna nel formato timestamp+livello atteso:
+# il messaggio deve dirlo esplicitamente, non implicare "nessun errore" come
+# faceva prima (falso negativo silenzioso, verificato in diagnosi su un
+# access log Undertow reale).
+_out_fmt=$(_run 'errori nel formatolibero.log')
+assert_eq "righe non nel formato atteso: messaggio distinto, non 'Nessuna riga trovata (level=...)'" "1" \
+    "$([[ "$_out_fmt" == *"formato atteso"* && "$_out_fmt" != *"Nessuna riga trovata (level="* ]] && echo 1 || echo 0)"
+assert_eq "il messaggio riporta il numero di righe lette" "1" \
+    "$([[ "$_out_fmt" == *"2 righe lette"* ]] && echo 1 || echo 0)"
 
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""

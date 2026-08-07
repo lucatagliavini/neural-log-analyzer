@@ -17,11 +17,13 @@ BEGIN {
     n = (tail_n+0 > 0) ? tail_n+0 : 50
     if (level == "") level = "ERROR"
     count = 0
+    matched_format = 0
     GW_RE = "([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]+) (ERROR|WARN|INFO|DEBUG|TRACE)(.*)"
 }
 
 {
     if (!match($0, GW_RE, m)) next
+    matched_format++
 
     row_ts    = m[1]
     row_level = m[2]
@@ -56,6 +58,11 @@ BEGIN {
 
 END {
     if (count == 0) {
+        if (NR > 0 && matched_format == 0) {
+            printf "Nessuna riga riconosciuta nel formato atteso (%d righe lette). ", NR
+            printf "Il log potrebbe non avere livelli ERROR/WARN riconoscibili: prova a cercare una stringa specifica.\n"
+            exit
+        }
         printf "Nessuna riga trovata"
         if (level == "WARN+")    printf " (level=ERROR+WARN)"
         else if (level != "ALL") printf " (level=%s)", level

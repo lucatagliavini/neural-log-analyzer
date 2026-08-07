@@ -550,43 +550,61 @@ _dispatch_tool_run() {
 
     case "$tool" in
         count_status)
+            logs_expr="$(open_logs)"
+            print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/count_status.awk" \
                 -v status_filter="$STATUS_CODE" \
-                "$(open_logs)"
+                "$logs_expr"
             ;;
         distribute_status)
+            logs_expr="$(open_logs)"
+            print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/distribute_status.awk" \
                 -v status_filter="$STATUS_CODE" \
-                "$(open_logs)"
+                "$logs_expr"
             ;;
         slow_requests)
+            logs_expr="$(open_logs)"
+            print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/slow_requests.awk" \
                 -v threshold_ms="${THRESHOLD_MS:-1000}" \
-                "$(open_logs)"
+                "$logs_expr"
             ;;
         traffic_volume)
+            logs_expr="$(open_logs)"
+            print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/traffic_volume.awk" \
-                "$(open_logs)"
+                "$logs_expr"
             ;;
         filter_errors)
             [[ -z "$server" ]] && { skip_msg "server.log non disponibile per filter_errors"; return; }
+            logs_expr="$(open_server_logs)"
+            print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/filter_errors.awk" \
-                "$(open_server_logs)"
+                "$logs_expr"
             ;;
         service_times)
+            logs_expr="$(open_logs)"
+            print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/service_times.awk" \
-                "$(open_logs)"
+                "$logs_expr"
             ;;
         gc_stats)
             [[ -z "$gc" ]] && { skip_msg "gc.log non disponibile per gc_stats"; return; }
+            logs_expr="$(open_gc_logs)"
+            print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/gc_stats.awk" \
-                "$(open_gc_logs)"
+                "$logs_expr"
             ;;
         correlate_gc_slow)
             [[ -z "$gc" ]] && { skip_msg "gc.log non disponibile per correlate_gc_slow"; return; }
+            local gc_expr access_expr
+            gc_expr="$(open_gc_logs)"
+            access_expr="$(open_logs)"
+            print_log_source "$gc_expr $access_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/correlate_gc_slow.awk" \
                 -v threshold_ms="${THRESHOLD_MS:-500}" \
-                "$(open_gc_logs)" "$(open_logs)"
+                "$gc_expr" "$access_expr"
             ;;
         tail_log)
             # Se la query corrente non nomina un tempo esplicito, il tail ignora
@@ -641,15 +659,19 @@ _dispatch_tool_run() {
             fi
             ;;
         filter_ip)
+            logs_expr="$(open_logs)"
+            print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/filter_ip.awk" \
                 -v ip_filter="$IP_FILTER" \
                 -v top_n="${TAIL_N:-10}" \
-                "$(open_logs)"
+                "$logs_expr"
             ;;
         filter_app_errors)
             [[ -z "$server" ]] && { skip_msg "server.log non disponibile per filter_app_errors"; return; }
+            logs_expr="$(open_server_logs)"
+            print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/filter_app_errors.awk" \
-                "$(open_server_logs)"
+                "$logs_expr"
             ;;
         tail_named_log)
             local search_root="${LOG_SEARCH_ROOT:-${CUSTOM_LOG_DIR:-}}"
