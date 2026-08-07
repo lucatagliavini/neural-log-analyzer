@@ -3,7 +3,11 @@
 # Risolve i path dei file di log data la tupla (base_dir, env, nodo, app).
 # Emette variabili shell: ACCESS_LOG, ACCESS_LOG_DIR, ACCESS_LOG_BASE,
 #                         SERVER_LOG, GC_LOG, GC_LOG_DIR, GC_LOG_BASE,
-#                         GUIDEWIRE_LOG_DIR
+#                         CUSTOM_LOG_DIR, LOG_SEARCH_ROOT
+#
+# LOG_SEARCH_ROOT è la directory del nodo: il contratto del profilo si ferma
+# lì, sotto la struttura è ignota e va scoperta ricorsivamente (vedi
+# CLAUDE.md, "Principi di progettazione").
 #
 # La selezione temporale dei file di rotazione è delegata a utils-logfiles.sh
 # (chiamata in open_logs() dentro dispatch.sh ad ogni query).
@@ -14,7 +18,7 @@
 #   <base_dir>/<env>/<NODE_NAME_TEMPLATE>/<APP_SUBPATH>/
 #     ${SERVER_LOG_BASE}.log, ${GC_LOG_BASE}.log, ${ACCESS_LOG_BASE}.*.log
 #
-# NODE_NAME_TEMPLATE, APP_SUBPATH, GUIDEWIRE_SUBPATH e i tre *_LOG_BASE sono
+# NODE_NAME_TEMPLATE, APP_SUBPATH, CUSTOM_LOG_SUBPATH e i tre *_LOG_BASE sono
 # definiti in system.conf — niente hardcoded qui (ARCH-6, "nessun default
 # implicito nel codice", consolidato 2026-08-06 rimuovendo la duplicazione
 # 'undertow_access_log'/'server'/'gc' che c'era prima in questo file).
@@ -106,10 +110,13 @@ fi
 # GC log: path del file corrente (usato solo per validazione esistenza)
 GC_LOG_PATH=$(resolve_log_file "$APP_DIR/${GC_LOG_BASE}.log")
 
-# ─── Guidewire log dir (opzionale, vuoto se GUIDEWIRE_SUBPATH è vuoto) ────────
-GW_LOG_DIR=""
-if [[ -n "${GUIDEWIRE_SUBPATH:-}" ]]; then
-    GW_LOG_DIR="$NODE_DIR/$(eval echo "$GUIDEWIRE_SUBPATH")"
+# ─── Directory log applicativi custom (opzionale, vuota se CUSTOM_LOG_SUBPATH è vuoto) ─
+# "Custom" = cartella flat, formato non standard JBoss (server/gc/access):
+# nel profilo liquido è la cartella dei log Guidewire, ma il contratto non
+# presume alcun middleware specifico (CLAUDE.md, "Principi di progettazione").
+CUSTOM_LOG_DIR=""
+if [[ -n "${CUSTOM_LOG_SUBPATH:-}" ]]; then
+    CUSTOM_LOG_DIR="$NODE_DIR/$(eval echo "$CUSTOM_LOG_SUBPATH")"
 fi
 
 # ─── Output ──────────────────────────────────────────────────────────────────
@@ -125,4 +132,5 @@ echo "GC_LOG_BASE='${GC_LOG_BASE}'"
 echo "ACTIVE_NODE='${NODE_NUM}'"
 echo "ACTIVE_ENV='${ENV_NAME}'"
 echo "ACTIVE_APP='${APP}'"
-echo "GUIDEWIRE_LOG_DIR='${GW_LOG_DIR}'"
+echo "CUSTOM_LOG_DIR='${CUSTOM_LOG_DIR}'"
+echo "LOG_SEARCH_ROOT='${NODE_DIR}'"

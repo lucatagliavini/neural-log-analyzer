@@ -167,7 +167,7 @@ if [[ "$_logfile_done" -eq 0 ]]; then
         if [[ "$_is_sys" -eq 0 ]]; then
             # c) Preserva DETECTED_APP quando il nome del log è anche uno short-alias
             #    di app (cc→claimcenter, cm→contactmanager): serve a resolve-logs.sh
-            #    per costruire la directory Guidewire giusta. Data-driven.
+            #    per costruire la directory dei log custom giusta. Data-driven.
             if [[ -z "$DETECTED_APP" ]] && declare -p APP_SHORT_ALIASES &>/dev/null; then
                 _alias_target="${APP_SHORT_ALIASES[${_cand_base,,}]:-}"
                 [[ -n "$_alias_target" ]] && DETECTED_APP="$_alias_target"

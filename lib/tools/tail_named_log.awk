@@ -1,8 +1,9 @@
-# Mostra le prime o le ultime N righe di un log Guidewire con colorazione WARN/ERROR.
+# Mostra le prime o le ultime N righe di un log applicativo custom con
+# colorazione WARN/ERROR.
 # Parametri: -v tail_n="50"
 #            -v order="head|tail"  (default tail)
 #
-# Formato Guidewire: [thread] USER YYYY-MM-DDTHH:MM:SS,mmm LEVEL messaggio
+# Formato (es. Guidewire nel profilo liquido): [thread] USER YYYY-MM-DDTHH:MM:SS,mmm LEVEL messaggio
 #
 # order="head": stampa non appena raggiunge tail_n righe ed esce, niente
 # buffer circolare — stesso ragionamento di tail_log.awk.

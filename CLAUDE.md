@@ -153,9 +153,9 @@ specifico:
 1. **Generalizzazione**: i tool sono funzioni generalizzate applicabili a più
    contesti. Solo la parte *finale* di analisi è specifica della tecnologia.
    La selezione dei file di log, comprensiva delle rotazioni, funziona per
-   qualsiasi log indipendentemente dal `BASE` — JBoss, Guidewire, e in altri
-   profili applicativi o webserver (`select_log_files_grouped`,
-   `lib/utils-logfiles.sh`).
+   qualsiasi log indipendentemente dal `BASE` — JBoss, log applicativi custom
+   (es. Guidewire), e in altri profili applicativi o webserver
+   (`select_log_files_grouped`, `lib/utils-logfiles.sh`).
 2. **Logica centralizzata**: un solo punto di verità per ogni comportamento,
    per semplificare il debug ed evitare difetti divergenti negli stessi
    percorsi. Prima di aggiungere un ramo condizionale a un tool, valutare se
@@ -177,6 +177,41 @@ specifico:
 5. **Pruning conservativo**: escludere un file per errore è un bug di
    correttezza; includerlo per errore è solo lentezza. In caso di dubbio
    (timestamp non riconoscibile, formato inatteso), includere sempre.
+6. **Il contratto di risoluzione si ferma al nodo** (deciso 2026-08-07,
+   LOGDISC-1): il profilo garantisce di risolvere `(env, nodo, app)` fino alla
+   directory del nodo (`LOG_SEARCH_ROOT`, emessa da `lib/resolve-logs.sh`).
+   Sotto quella directory, la struttura è **ignota per contratto** e va
+   **scoperta**, non enumerata: un profilo può non avere log applicativi
+   custom, o organizzare i log diversamente dal nodo in giù. Per questo
+   `resolve_log_glob()` (`lib/utils-logfiles.sh`) cerca ricorsivamente sotto
+   `LOG_SEARCH_ROOT` invece di elencare sottodirectory fisse — è il punto che
+   ha corretto il bug per cui `access.log` non veniva trovato perché viveva
+   fuori da `CUSTOM_LOG_DIR`, l'unica directory che i tool interrogavano.
+   Non violare questo principio aggiungendo una nuova directory nota
+   (`APP_SUBPATH`, `CUSTOM_LOG_SUBPATH`, ...) a un tool: se un log può stare
+   ovunque sotto il nodo, il tool deve cercarlo ovunque sotto il nodo.
+   Ricorsione per la *scoperta*, selezione flat (`select_log_files_grouped`)
+   per le *rotazioni* — che stanno sempre accanto al file che ruotano, quindi
+   si raggruppano dalla directory del file scelto, non dalla root. Quando più
+   app coesistono sotto lo stesso nodo con file omonimi, l'app della sessione
+   corrente (`ACTIVE_APP`) vince nel tie-break; se il log esiste solo sotto
+   un'altra app, non va aperto silenziosamente — va detto "non trovato" e
+   suggerita l'app dove si trova (mai mescolare dati di app diverse senza
+   dirlo). `search_all_logs.sh` è ancora enumerativo (asimmetria nota, vedi
+   BACKLOG.md).
+7. **Naming generico nel contratto, concreto solo nella prosa** (deciso
+   2026-08-07): variabili, funzioni e directory che fanno parte del contratto
+   generico del progetto non devono nominare un middleware o cliente
+   specifico — dove prima si sarebbe scritto "Guidewire" si scrive
+   "applicazione" o "custom" (es. `CUSTOM_LOG_SUBPATH`/`CUSTOM_LOG_DIR`, non
+   `GUIDEWIRE_SUBPATH`/`GUIDEWIRE_LOG_DIR`). Un profilo diverso da `liquido`
+   può non avere nulla a che fare con Guidewire, e il codice del contratto non
+   deve presumerlo. Il vincolo si applica al **contratto** (nomi di variabili,
+   funzioni, categorie di help, fixture di test), non alla **prosa che
+   descrive un fatto reale e concreto** del profilo `liquido` — un formato di
+   log realmente osservato, un sinonimo che gli utenti digitano davvero
+   (`entities.conf`), un bug storico in un session log: lì "Guidewire" resta,
+   perché è un dato di dominio, non un'assunzione del codice.
 
 ## Dependencies
 

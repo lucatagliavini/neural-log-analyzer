@@ -42,21 +42,28 @@ assert_eq() {
 }
 section() { printf "\n${BOLD}── %s ${RESET}${DIM}%s${RESET}\n" "$1" "────────────────────────────"; }
 
-# ─── Fixture: un log Guidewire con lo stesso testo su livelli diversi ─────────
+# ─── Fixture: un log applicativo con lo stesso testo su livelli diversi ───────
+# Le query senza range esplicito filtrano sulla data corrente: la fixture usa
+# SEMPRE la data del giorno di esecuzione, non un valore hardcoded — altrimenti
+# il test smette di trovare dati appena cambia il giorno (bug reale osservato
+# 2026-08-07: fixture datata 2026-08-06).
+_today_plain="$(date +%Y-%m-%d)"
+_today_apache="$(date +%d/%b/%Y)"
+
 _FIX="$(mktemp -d)"
 trap 'rm -rf "$_FIX"' EXIT
 _node="$_FIX/prod/lxprjbliq04"
 mkdir -p "$_node/prod/ClaimCenter" "$_node/ClaimCenter/Guidewire"
-echo "2026-08-06 10:00:00,000 ERROR srv" > "$_node/prod/ClaimCenter/server.log"
-echo "2026-08-06T10:00:00 INFO gc" > "$_node/prod/ClaimCenter/gc.log"
-echo '10.0.0.1 [06/Aug/2026:10:00:00 +0200] "GET /a HTTP/1.1" 200 100 100 - UA' \
+echo "${_today_plain} 10:00:00,000 ERROR srv" > "$_node/prod/ClaimCenter/server.log"
+echo "${_today_plain}T10:00:00 INFO gc" > "$_node/prod/ClaimCenter/gc.log"
+echo "10.0.0.1 [${_today_apache}:10:00:00 +0200] \"GET /a HTTP/1.1\" 200 100 100 - UA" \
     > "$_node/prod/ClaimCenter/undertow_access_log.log"
 # "searchHub" appare su ERROR, INFO e WARN; "NullPointer" solo su ERROR.
-cat > "$_node/ClaimCenter/Guidewire/prod1nssd-cc.log" <<'EOF'
-[main] USER 2026-08-06T10:00:00,000 ERROR searchHub timeout su chiamata
-[main] USER 2026-08-06T10:01:00,000 ERROR NullPointerException altrove
-[main] USER 2026-08-06T10:02:00,000 INFO  searchHub chiamata riuscita
-[main] USER 2026-08-06T10:03:00,000 WARN  searchHub lento
+cat > "$_node/ClaimCenter/Guidewire/prod1nssd-cc.log" <<EOF
+[main] USER ${_today_plain}T10:00:00,000 ERROR searchHub timeout su chiamata
+[main] USER ${_today_plain}T10:01:00,000 ERROR NullPointerException altrove
+[main] USER ${_today_plain}T10:02:00,000 INFO  searchHub chiamata riuscita
+[main] USER ${_today_plain}T10:03:00,000 WARN  searchHub lento
 EOF
 
 _run() {

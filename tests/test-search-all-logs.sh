@@ -63,7 +63,7 @@ export LOG_BASE_DIR="$_FIX"
 export SEARCH_PATTERN="searchhub"
 export SEARCH_PARALLEL_JOBS=2
 export ACCESS_LOG_BASE="undertow_access_log" SERVER_LOG_BASE="server" GC_LOG_BASE="gc"
-export GUIDEWIRE_SUBPATH='$APP/Guidewire'
+export CUSTOM_LOG_SUBPATH='$APP/Guidewire'
 export APP_SUBPATH='$ENV_NAME/$APP'
 export NODE_NAME_TEMPLATE='lx${ENV_CODE}jbliq${NODE_NUM}'
 export ACTIVE_ENV="prod" ACTIVE_APP="ClaimCenter"
@@ -80,7 +80,7 @@ export SERVER_LOG_DIR="$_FIX/prod/lxprjbliq04/prod/ClaimCenter"
 export SERVER_LOG="$SERVER_LOG_DIR/server.log"
 export ACCESS_LOG_DIR="" ACCESS_LOG=""
 export GC_LOG_DIR="" GC_LOG=""
-export GUIDEWIRE_LOG_DIR="$_FIX/prod/lxprjbliq04/ClaimCenter/Guidewire"
+export CUSTOM_LOG_DIR="$_FIX/prod/lxprjbliq04/ClaimCenter/Guidewire"
 
 _out_single=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
 
@@ -100,7 +100,7 @@ assert_true "nodo singolo: 'LOG' è la prima colonna dell'header" "$_log_col_ok"
 # ─── Multi-nodo: colonna NODO presente e allineata alle righe ─────────────────
 section "Multi-nodo (DETECTED_NODE vuoto, ACTIVE_ENV noto)"
 
-unset DETECTED_NODE ACTIVE_NODE SERVER_LOG_DIR SERVER_LOG ACCESS_LOG_DIR ACCESS_LOG GC_LOG_DIR GC_LOG GUIDEWIRE_LOG_DIR
+unset DETECTED_NODE ACTIVE_NODE SERVER_LOG_DIR SERVER_LOG ACCESS_LOG_DIR ACCESS_LOG GC_LOG_DIR GC_LOG CUSTOM_LOG_DIR
 
 _out_multi=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
 
@@ -145,7 +145,7 @@ export SERVER_LOG_DIR="$_node2_dir/prod/ClaimCenter"
 export SERVER_LOG="$SERVER_LOG_DIR/server.log"
 export ACCESS_LOG_DIR="" ACCESS_LOG=""
 export GC_LOG_DIR="" GC_LOG=""
-export GUIDEWIRE_LOG_DIR="$_node2_dir/ClaimCenter/Guidewire"
+export CUSTOM_LOG_DIR="$_node2_dir/ClaimCenter/Guidewire"
 export TIME_FROM="2026-08-05T16:00" TIME_TO="2026-08-05T16:59"
 
 _out_time=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
@@ -188,7 +188,7 @@ export DETECTED_NODE="04" ACTIVE_NODE="04"
 export SERVER_LOG_DIR="" SERVER_LOG=""
 export ACCESS_LOG_DIR="" ACCESS_LOG=""
 export GC_LOG_DIR="" GC_LOG=""
-export GUIDEWIRE_LOG_DIR="$_node3_dir/ClaimCenter/Guidewire"
+export CUSTOM_LOG_DIR="$_node3_dir/ClaimCenter/Guidewire"
 export SEARCH_PATTERN="searchHub"
 export TIME_FROM="2026-08-05T16:00" TIME_TO="2026-08-05T16:59"
 
@@ -212,10 +212,10 @@ _has_dash_ts=0
 echo "$_out_stack" | grep -E '^\s*policysearch\.log' | grep -qE '│\s+-\s+│' && _has_dash_ts=1
 assert_true "stack trace: PRIMO/ULTIMO MATCH popolati (non '-')" "$(( 1 - _has_dash_ts ))"
 
-# ─── Rotazioni .gz in directory flat (Guidewire) devono essere raggiungibili ─
+# ─── Rotazioni .gz in directory flat (log applicativi custom) devono essere raggiungibili ─
 section "Rotazioni .gz nella directory flat (bug: mai lette, 2026-08-06)"
 
-# Bug reale: il ramo BASE="" di _sal_add (usato per Guidewire, directory flat
+# Bug reale: il ramo BASE="" di _sal_add (usato per i log applicativi custom, directory flat
 # senza basename uniforme) filtra i candidati con `grep -v "[0-9]\{10\}"` per
 # escludere le rotazioni con epoch nel nome (es. tenute fuori dalla lista dei
 # "named log" ambigui) — ma quello stesso filtro scarta ANCHE le rotazioni con
@@ -237,7 +237,7 @@ export DETECTED_NODE="04" ACTIVE_NODE="04"
 export SERVER_LOG_DIR="" SERVER_LOG=""
 export ACCESS_LOG_DIR="" ACCESS_LOG=""
 export GC_LOG_DIR="" GC_LOG=""
-export GUIDEWIRE_LOG_DIR="$_node4_dir/ClaimCenter/Guidewire"
+export CUSTOM_LOG_DIR="$_node4_dir/ClaimCenter/Guidewire"
 export SEARCH_PATTERN="searchHub"
 export TIME_FROM="2026-08-04T00:00" TIME_TO="2026-08-04T23:59"
 
@@ -275,7 +275,7 @@ export LOG_BASE_DIR="$_FIX6"
 export DETECTED_NODE="04" ACTIVE_NODE="04"
 export SERVER_LOG_DIR="" SERVER_LOG="" ACCESS_LOG_DIR="" ACCESS_LOG=""
 export GC_LOG_DIR="" GC_LOG=""
-export GUIDEWIRE_LOG_DIR="$_node6_dir/ClaimCenter/Guidewire"
+export CUSTOM_LOG_DIR="$_node6_dir/ClaimCenter/Guidewire"
 unset TIME_FROM TIME_TO
 
 # (a) pattern letterale presente → gate attivo, match trovato
@@ -366,7 +366,7 @@ export LOG_BASE_DIR="$_FIX5"
 export DETECTED_NODE="04" ACTIVE_NODE="04"
 export SERVER_LOG_DIR="" SERVER_LOG="" ACCESS_LOG_DIR="" ACCESS_LOG=""
 export GC_LOG_DIR="" GC_LOG=""
-export GUIDEWIRE_LOG_DIR="$_node5_dir/ClaimCenter/Guidewire"
+export CUSTOM_LOG_DIR="$_node5_dir/ClaimCenter/Guidewire"
 export SEARCH_PATTERN="searchHub"
 _PERF_OUT="$(mktemp)"
 export BOT_PERF_FILE="$_PERF_OUT"

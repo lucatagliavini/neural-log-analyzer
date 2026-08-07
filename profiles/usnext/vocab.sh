@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # vocab.sh — vocabolario NLP per il profilo "usnext".
-# Basato su liquido, rimuove le 8 feature Guidewire (60-67) e riduce
+# Basato su liquido, rimuove le 8 feature dei log applicativi custom (60-67) e riduce
 # NUM_FEATURES a 64 (60 unigram + 4 bigram).
 #
 # Modificare questo file RICHIEDE rebuild del dataset e riaddestramento.

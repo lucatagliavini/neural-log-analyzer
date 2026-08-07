@@ -9,7 +9,7 @@
 #   ACCESS_LOG, ACCESS_LOG_DIR, ACCESS_LOG_BASE,
 #   SERVER_LOG, SERVER_LOG_DIR, SERVER_LOG_BASE,
 #   GC_LOG, GC_LOG_DIR, GC_LOG_BASE,
-#   GUIDEWIRE_LOG_DIR, GUIDEWIRE_SUBPATH,
+#   CUSTOM_LOG_DIR, CUSTOM_LOG_SUBPATH,
 #   APP_SUBPATH, SEARCH_PARALLEL_JOBS,
 #   LIB_DIR (per utils-logfiles.sh e utils-nodes.sh)
 #
@@ -76,8 +76,8 @@ all_labels=() all_paths=() all_nodes=()
 # generalizzato in utils-logfiles.sh).
 # BASE non vuoto → select_log_files_grouped ristretto a quel nome logico.
 # BASE vuoto     → select_log_files_grouped su TUTTI i nomi logici trovati
-#                  in DIR (es. log Guidewire in una cartella flat senza
-#                  basename uniforme) — prima (2026-08-05) un find diretto
+#                  in DIR (es. log applicativi custom in una cartella flat
+#                  senza basename uniforme) — prima (2026-08-05) un find diretto
 #                  con `grep -v "[0-9]\{10\}"` escludeva ogni rotazione con
 #                  epoch nel nome, quindi una ricerca "ieri" non poteva mai
 #                  vedere lo storico: bug di correttezza silenzioso, non un
@@ -132,8 +132,8 @@ if [[ -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]]; then
         _sal_add "$_app_dir" "$ACCESS_LOG_BASE" "$_nnum"
         _sal_add "$_app_dir" "$SERVER_LOG_BASE" "$_nnum"
         _sal_add "$_app_dir" "$GC_LOG_BASE"     "$_nnum"
-        if [[ -n "${GUIDEWIRE_SUBPATH:-}" ]]; then
-            _sal_add "${_node_dir}/$(eval echo "$GUIDEWIRE_SUBPATH")" "" "$_nnum"
+        if [[ -n "${CUSTOM_LOG_SUBPATH:-}" ]]; then
+            _sal_add "${_node_dir}/$(eval echo "$CUSTOM_LOG_SUBPATH")" "" "$_nnum"
         fi
     done < <(list_env_node_dirs "${ACTIVE_ENV}")
 else
@@ -145,7 +145,7 @@ else
     [[ -n "$access" ]] && _sal_add "${ACCESS_LOG_DIR:-$(dirname "$access")}" "$ACCESS_LOG_BASE" "${ACTIVE_NODE:-}"
     [[ -n "$server" ]] && _sal_add "${SERVER_LOG_DIR:-$(dirname "$server")}" "$SERVER_LOG_BASE" "${ACTIVE_NODE:-}"
     [[ -n "$gc"     ]] && _sal_add "${GC_LOG_DIR:-$(dirname "$gc")}"         "$GC_LOG_BASE"     "${ACTIVE_NODE:-}"
-    _sal_add "${GUIDEWIRE_LOG_DIR:-}" "" "${ACTIVE_NODE:-}"
+    _sal_add "${CUSTOM_LOG_DIR:-}" "" "${ACTIVE_NODE:-}"
 fi
 
 progress_clear

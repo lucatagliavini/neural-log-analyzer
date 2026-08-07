@@ -41,15 +41,22 @@ assert_true() {
 section() { printf "\n${BOLD}── %s ${RESET}${DIM}%s${RESET}\n" "$1" "────────────────────────────"; }
 
 # ─── Fixture minima per eseguire query reali ──────────────────────────────────
+# Le query senza range esplicito ("oggi") filtrano sulla data corrente: le
+# fixture usano SEMPRE la data del giorno di esecuzione, non un valore
+# hardcoded — altrimenti il test smette di trovare dati appena cambia il
+# giorno (bug reale osservato 2026-08-07: fixture datata 2026-08-06).
+_today_plain="$(date +%Y-%m-%d)"
+_today_apache="$(date +%d/%b/%Y)"
+
 _FIX="$(mktemp -d)"
 trap 'rm -rf "$_FIX"' EXIT
 _node="$_FIX/prod/lxprjbliq04"
 mkdir -p "$_node/prod/ClaimCenter" "$_node/ClaimCenter/Guidewire"
-echo "2026-08-06 10:00:00,000 ERROR errore di test" > "$_node/prod/ClaimCenter/server.log"
-echo "2026-08-06T10:00:00 INFO gc pause" > "$_node/prod/ClaimCenter/gc.log"
+echo "${_today_plain} 10:00:00,000 ERROR errore di test" > "$_node/prod/ClaimCenter/server.log"
+echo "${_today_plain}T10:00:00 INFO gc pause" > "$_node/prod/ClaimCenter/gc.log"
 for i in 1 2 3; do
-    printf '10.0.0.1 - - [06/Aug/2026:10:0%d:00 +0200] "GET /a%d HTTP/1.1" 50%d 100 3000 - UA\n' \
-        "$i" "$i" "$i" >> "$_node/prod/ClaimCenter/undertow_access_log.log"
+    printf '10.0.0.1 - - [%s:10:0%d:00 +0200] "GET /a%d HTTP/1.1" 50%d 100 3000 - UA\n' \
+        "$_today_apache" "$i" "$i" "$i" >> "$_node/prod/ClaimCenter/undertow_access_log.log"
 done
 
 # _run [TEMA] QUERY → output del bot (stdout+stderr)
@@ -205,13 +212,13 @@ section "Soglie di severità da domain.conf (UI-13)"
 _GCFIX="$(mktemp -d)"
 _gn="$_GCFIX/prod/lxprjbliq04"
 mkdir -p "$_gn/prod/ClaimCenter" "$_gn/ClaimCenter/Guidewire"
-echo "2026-08-06 10:00:00,000 ERROR x" > "$_gn/prod/ClaimCenter/server.log"
-echo '10.0.0.1 [06/Aug/2026:10:00:00 +0200] "GET /a HTTP/1.1" 200 100 100 - UA' \
+echo "${_today_plain} 10:00:00,000 ERROR x" > "$_gn/prod/ClaimCenter/server.log"
+echo "10.0.0.1 [${_today_apache}:10:00:00 +0200] \"GET /a HTTP/1.1\" 200 100 100 - UA" \
     > "$_gn/prod/ClaimCenter/undertow_access_log.log"
 # Due pause: 250ms (oltre GC_PAUSE_WARN_MS=200) e 600ms (oltre CRIT=500)
-cat > "$_gn/prod/ClaimCenter/gc.log" <<'GCEOF'
-[2026-08-06T10:00:00.000+0200] GC(1) Pause Young (Normal) 120M->40M(512M) 250.500ms
-[2026-08-06T10:01:00.000+0200] GC(2) Pause Young (Normal) 130M->50M(512M) 600.100ms
+cat > "$_gn/prod/ClaimCenter/gc.log" <<GCEOF
+[${_today_plain}T10:00:00.000+0200] GC(1) Pause Young (Normal) 120M->40M(512M) 250.500ms
+[${_today_plain}T10:01:00.000+0200] GC(2) Pause Young (Normal) 130M->50M(512M) 600.100ms
 GCEOF
 
 # _sev [ENV_ASSIGNMENTS] → quanti colori di severità (giallo 33 / rosso 31) usati
@@ -259,11 +266,11 @@ section "Ruoli semantici: categoria ≠ severità (UI-12)"
 _UIFIX="$(mktemp -d)"
 _un="$_UIFIX/prod/lxprjbliq04"
 mkdir -p "$_un/prod/ClaimCenter" "$_un/ClaimCenter/Guidewire"
-echo "2026-08-06 10:00:00,000 ERROR x" > "$_un/prod/ClaimCenter/server.log"
-echo "2026-08-06T10:00:00 INFO gc" > "$_un/prod/ClaimCenter/gc.log"
+echo "${_today_plain} 10:00:00,000 ERROR x" > "$_un/prod/ClaimCenter/server.log"
+echo "${_today_plain}T10:00:00 INFO gc" > "$_un/prod/ClaimCenter/gc.log"
 # Una richiesta GET lenta con status 200: il metodo e lo status NON devono avere
 # lo stesso colore, altrimenti il verbo HTTP sembra un giudizio sull'esito.
-echo '10.0.0.1 [06/Aug/2026:10:00:00 +0200] "GET /lenta HTTP/1.1" 200 100 9000 - UA' \
+echo "10.0.0.1 [${_today_apache}:10:00:00 +0200] \"GET /lenta HTTP/1.1\" 200 100 9000 - UA" \
     > "$_un/prod/ClaimCenter/undertow_access_log.log"
 
 # In un tema dove C_TAG e C_OK differiscono (light: magenta vs verde), il metodo

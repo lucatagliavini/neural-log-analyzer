@@ -77,7 +77,7 @@ END {
     shown = (count < n) ? count : n
     start = (count >= n) ? count - n : 0
 
-    # Conta livelli nelle righe del buffer (formato JBoss/Guidewire: campo 3 = livello)
+    # Conta livelli nelle righe del buffer (formato JBoss/applicativo custom: campo 3 = livello)
     for (i = start; i < count; i++) count_level(buf[i % n])
 
     for (i = start; i < count; i++) print_colored(buf[i % n])

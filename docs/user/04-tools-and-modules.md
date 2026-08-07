@@ -28,7 +28,7 @@
 | `gc_stats` | "statistiche GC del nodo 5" |
 | `correlate_gc_slow` | "il GC sta causando lentezza sul nodo 6?" |
 
-### Log Guidewire
+### Log applicativi custom
 
 | Tool | Query tipica |
 |------|-------------|

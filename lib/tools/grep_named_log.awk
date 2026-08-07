@@ -1,4 +1,4 @@
-# Filtra un log Guidewire per livello (ERROR/WARN/INFO) e/o pattern testuale.
+# Filtra un log applicativo custom per livello (ERROR/WARN/INFO) e/o pattern testuale.
 #
 # Parametri:
 #   -v level="ERROR"        livello (ERROR|WARN|INFO|WARN+|ALL)
@@ -7,7 +7,7 @@
 #   -v time_from="YYYY-MM-DDTHH:MM"
 #   -v time_to="YYYY-MM-DDTHH:MM"
 #
-# Formato Guidewire: [thread] USER YYYY-MM-DDTHH:MM:SS,mmm LEVEL messaggio
+# Formato (es. Guidewire nel profilo liquido): [thread] USER YYYY-MM-DDTHH:MM:SS,mmm LEVEL messaggio
 # Il timestamp è in posizione variabile — estratto con regex.
 #
 # Dipende da: utils-colors.awk, utils-dedup.awk, utils-time.awk

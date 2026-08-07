@@ -127,7 +127,7 @@ event[io]\b               :: 1
 # "genera errori", "concentrano su" — solo distribute_status (1 classe)
 genera\b|generano\b|concentr :: 1
 # \bdatabase\b e \bmessaging\b — rimossi: erano nomi di logfile concreti, ora
-# coperti da <logfile> (vedi la sezione "Log Guidewire" più sotto).
+# coperti da <logfile> (vedi la sezione "Log applicativi custom" più sotto).
 integrazion|integrazioni  :: 1
 # "appare nel log", "ovunque nei log" — solo search_all_logs (1 classe)
 appare\b|ovunque\b        :: 1
@@ -155,7 +155,7 @@ posso.fare|puoi.fare|cosa.fare|cosa.posso :: 2
 # "analisi disponibili" — max 2 classi (show_help + gc_stats/correlate) ma con peso basso
 analisi\b                        :: 1
 
-# ── Log Guidewire specifici ───────────────────────────────────────────────────
+# ── Log applicativi custom specifici (Guidewire nel profilo liquido) ──────────
 # UNA sola feature per tutti i log applicativi: normalize-query.sh sostituisce
 # qualsiasi "<nome>.log" (e i glob quotati) con il placeholder <LOGFILE>, quindi
 # il classificatore impara la *forma* "c'è un nome di logfile qui" e non l'elenco

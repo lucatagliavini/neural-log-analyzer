@@ -1,14 +1,18 @@
 # Backlog — neural-log-analyzer
 
-Aggiornato: 2026-08-06
+Aggiornato: 2026-08-07
 
 ---
 
 ## ⏭ APERTI
 
-**Nessuna voce aperta.** Il backlog è esaurito al 2026-08-06.
+| ID | Descrizione | Priorità |
+|----|-------------|----------|
+| LOGDISC-2 | **`search_all_logs.sh` non segue il contratto "fino al nodo"** (vedi principio 6 in CLAUDE.md, e LOGDISC-1 sotto). Enumera ancora 4 directory fisse via `APP_SUBPATH`/`CUSTOM_LOG_SUBPATH` (`search_all_logs.sh:132-148`) e chiama `select_log_files_grouped`, che è flat (`find -maxdepth 1`). Dopo LOGDISC-1, `tail_named_log`/`grep_named_log` raggiungono qualunque log sotto il nodo per nome o glob; `search_all_logs` no — un log in una directory arbitraria (es. `weird/deep/nested/custom.log`) è nominabile ma non cercabile con "in quali log c'è X". Asimmetria nota, non ancora valutata in dettaglio se/come estendere la ricorsione qui: il volume di dati da scansionare cambia (oggi 4 directory note, potenzialmente l'intero nodo), quindi l'impatto su tempo/rumore va misurato prima di decidere. | Da valutare |
 
-**Chiusi il 2026-08-06**: OBS-3 (copertura logging), OBS-5 (feedback progressivo nei 3 tool
+**Chiuso il 2026-08-07**: LOGDISC-1 (ricerca ricorsiva log sotto il nodo, vedi sezione dedicata).
+
+**Chiuse il 2026-08-06**: OBS-3 (copertura logging), OBS-5 (feedback progressivo nei 3 tool
 mancanti), UI-11 (sistema di temi colore, default `mono` a zero ANSI), SRCH-1 (ricerca
 testuale in un log nominato), P3/P4/P5/P6/P8 (performance applicate), P7 e P9 (chiusi: nessuna
 ottimizzazione applicabile / peggiorativa), O6 (medie sulle righe misurabili), UI-13 (soglie
@@ -46,6 +50,27 @@ Oggi ci sono due metà di funzionalità che non si toccano:
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
 | SRCH-1 | Scelta la via (a): `grep_named_log` riceve `SEARCH_PATTERN` da `dispatch.sh`. Si è rivelato **molto più piccolo del previsto** — il canale esisteva già ai due estremi ma non era collegato: il tool AWK accettava già `-v pattern` (sua riga 5), `param-extract.sh` estraeva già `SEARCH_PATTERN`, il classificatore instradava già al 96.7%, e `TOOL_DESC` diceva già "o pattern testuale". **Nessun retrain, nessuna nuova classe.** Semantica: pattern senza livello nominato → `level=ALL` (l'intento è trovare quel testo); livello nominato → vince quello. Ha richiesto `LEVEL_EXPLICIT` in `param-extract.sh` per distinguere "livello chiesto" da "default applicato" — stesso pattern di `TIME_EXPLICIT`/`LOG_EXPLICIT`. 15 test in `tests/test-srch-named-log.sh` | **Fatto** (2026-08-06) |
+
+---
+
+## LOGDISC — Ricerca ricorsiva sotto il nodo (bug segnalato in produzione, 2026-08-07)
+
+Bug reale: con contesto su prod/nodo 3, «ultime 50 righe del access.log» rispondeva «non
+trovato», suggerendo `cc.log`. Causa: `tail_named_log`/`grep_named_log` in `dispatch.sh`
+passavano **solo** `GUIDEWIRE_LOG_DIR` a `resolve_named_log_path()`/`open_glob_logs()`, mentre
+`undertow_access_log.log` vive in `ACCESS_LOG_DIR`, una directory sorella sotto lo stesso nodo.
+
+**Decisione architetturale (utente)**: il profilo garantisce la risoluzione solo **fino alla
+directory del nodo** (`LOG_SEARCH_ROOT`); sotto, la struttura è ignota per contratto e va
+**scoperta** ricorsivamente, non enumerata — un nuovo profilo può non avere Guidewire, o
+organizzare i log diversamente. Documentato come principio 6 in CLAUDE.md.
+
+| ID | Descrizione | Stato |
+|----|-------------|-------|
+| LOGDISC-1 | **`resolve_log_glob()` (`utils-logfiles.sh`) diventa ricorsivo** (rimosso `-maxdepth 1`, aggiunto `\( -type f -o -type l \)` per escludere directory-trappola come `archive.log/`). Tie-break deterministico: app di sessione (`ACTIVE_APP`) > file non ruotato > path più corto > alfabetico. `resolve_named_log_path()` (`dispatch.sh`) sostituisce le 3 catene `find -maxdepth 1` duplicate con 3 chiamate in cascata a `resolve_log_glob`, centralizzando la policy di disambiguazione. `open_glob_logs()` raggruppa le rotazioni dalla `dirname` del file scelto (flat), non dalla root — **ricorsione per la scoperta, flat per le rotazioni**. `resolve-logs.sh` esporta `LOG_SEARCH_ROOT` (= `NODE_DIR`). Nessun cross-app silenzioso: se un log esiste solo sotto un'altra app, `skip_named_log_not_found()` dice "non trovato" e suggerisce quell'app, invece di aprirlo o di restare muto. `_log_names_in_dir()` diventa ricorsiva e non filtrante; il filtro dei basename di sistema (access/server/gc) si sposta a valle in `list_available_logs()`, tramite il nuovo helper condiviso `_is_system_log_base()` (anche in `param-extract.sh`, eliminando una duplicazione preesistente). 17 test in `tests/test-log-discovery.sh` + 1 nuovo in `tests/test-dispatch-perf.sh` (ricerca multi-livello); fixture di `test-dispatch-perf.sh` isolate per sezione (la ricorsione avrebbe fatto leakage tra sezioni condivise) | **Fatto** (2026-08-07) |
+
+**Asimmetria nota, non chiusa qui**: vedi `LOGDISC-2` in cima al file — `search_all_logs.sh`
+resta enumerativo (non ricorsivo), quindi trova per nome log che non cerca per contenuto.
 
 ---
 

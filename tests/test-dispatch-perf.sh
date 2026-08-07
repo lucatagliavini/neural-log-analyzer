@@ -61,43 +61,61 @@ _sel_metrics() {
     echo "$sel $nf $nb"
 }
 
+# Ogni sezione ha la propria sottodirectory: resolve_log_glob (dietro
+# open_glob_logs/resolve_named_log_path) ora cerca ricorsivamente, quindi una
+# fixture condivisa fra sezioni farebbe leggere a una sezione i file creati
+# per un'altra — isolamento necessario dopo LOGDISC-1, non solo per igiene.
+
 # ─── open_current_log_for: bypassa select_log_files ma deve riportare volume ──
 section "open_current_log_for (tail_log, TIME_EXPLICIT=0)"
 
-echo "riga di log di prova" > "$_FIX/current.log"
-read -r _sel _nf _nb <<< "$(_sel_metrics open_current_log_for "$_FIX" current)"
+mkdir -p "$_FIX/sec1"
+echo "riga di log di prova" > "$_FIX/sec1/current.log"
+read -r _sel _nf _nb <<< "$(_sel_metrics open_current_log_for "$_FIX/sec1" current)"
 assert_true "file trovato: PERF_FILES=1" "$([[ "$_nf" -eq 1 ]] && echo 1 || echo 0)"
 assert_true "byte riportati > 0" "$([[ "$_nb" -gt 0 ]] && echo 1 || echo 0)"
 
-read -r _sel _nf _nb <<< "$(_sel_metrics open_current_log_for "$_FIX" assente)"
+read -r _sel _nf _nb <<< "$(_sel_metrics open_current_log_for "$_FIX/sec1" assente)"
 assert_true "file assente: PERF_FILES=0 (non un errore, un fatto)" "$([[ "$_nf" -eq 0 ]] && echo 1 || echo 0)"
 
 # ─── open_glob_logs: escape hatch glob di tail_named_log/grep_named_log ───────
 section "open_glob_logs (escape hatch glob)"
 
-echo "riga cc" > "$_FIX/prod1-cc.log"
-read -r _sel _nf _nb <<< "$(_sel_metrics open_glob_logs "$_FIX" '*-cc.log')"
+mkdir -p "$_FIX/sec2"
+echo "riga cc" > "$_FIX/sec2/prod1-cc.log"
+read -r _sel _nf _nb <<< "$(_sel_metrics open_glob_logs "$_FIX/sec2" '*-cc.log')"
 assert_true "glob risolto: PERF_FILES>=1" "$([[ "$_nf" -ge 1 ]] && echo 1 || echo 0)"
 assert_true "glob risolto: PERF_BYTES>0" "$([[ "$_nb" -gt 0 ]] && echo 1 || echo 0)"
 
-read -r _sel _nf _nb <<< "$(_sel_metrics open_glob_logs "$_FIX" '*-nomatch.log')"
+read -r _sel _nf _nb <<< "$(_sel_metrics open_glob_logs "$_FIX/sec2" '*-nomatch.log')"
 assert_true "glob senza match: nessuna riga PERF spuria (file=0)" "$([[ "$_nf" -eq 0 ]] && echo 1 || echo 0)"
 
 # ─── resolve_named_log_path: sostituisce le due catene find duplicate ────────
 section "resolve_named_log_path (tail_named_log/grep_named_log senza glob)"
 
-mkdir -p "$_FIX/gw"
-echo "riga api" > "$_FIX/gw/srv01-api.log"
-read -r _sel _nf _nb <<< "$(_sel_metrics resolve_named_log_path "$_FIX/gw" api)"
+mkdir -p "$_FIX/sec3/named"
+echo "riga api" > "$_FIX/sec3/named/srv01-api.log"
+read -r _sel _nf _nb <<< "$(_sel_metrics resolve_named_log_path "$_FIX/sec3/named" api)"
 assert_true "match esatto *-<nome>.log: PERF_FILES=1" "$([[ "$_nf" -eq 1 ]] && echo 1 || echo 0)"
 assert_true "match esatto *-<nome>.log: PERF_BYTES>0" "$([[ "$_nb" -gt 0 ]] && echo 1 || echo 0)"
 
-_path=$(resolve_named_log_path "$_FIX/gw" api)
+_path=$(resolve_named_log_path "$_FIX/sec3/named" api)
 assert_true "il path risolto è quello atteso" \
-    "$([[ "$_path" == "$_FIX/gw/srv01-api.log" ]] && echo 1 || echo 0)"
+    "$([[ "$_path" == "$_FIX/sec3/named/srv01-api.log" ]] && echo 1 || echo 0)"
 
-read -r _sel _nf _nb <<< "$(_sel_metrics resolve_named_log_path "$_FIX/gw" assente)"
+read -r _sel _nf _nb <<< "$(_sel_metrics resolve_named_log_path "$_FIX/sec3/named" assente)"
 assert_true "nome non trovato: PERF_FILES=0, nessuna riga spuria" "$([[ "$_nf" -eq 0 ]] && echo 1 || echo 0)"
+
+# ─── resolve_named_log_path: ricerca ricorsiva sotto una root con più livelli ──
+# Il caso che LOGDISC-1 introduce: il file non è direttamente sotto la root
+# passata, ma in una sottodirectory arbitraria (contratto "fino al nodo").
+section "resolve_named_log_path (ricerca ricorsiva multi-livello)"
+
+mkdir -p "$_FIX/sec4/App/Sub/Deep"
+echo "riga profonda" > "$_FIX/sec4/App/Sub/Deep/prod2-deep.log"
+_path=$(resolve_named_log_path "$_FIX/sec4" deep)
+assert_true "trovato in sottodirectory annidata sotto la root" \
+    "$([[ "$_path" == "$_FIX/sec4/App/Sub/Deep/prod2-deep.log" ]] && echo 1 || echo 0)"
 
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""

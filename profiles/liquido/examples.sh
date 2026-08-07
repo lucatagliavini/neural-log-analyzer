@@ -3,11 +3,13 @@
 # examples.sh — generatori di esempi specifici del profilo "liquido".
 # Sourcato da lib/gen-examples.sh DOPO le definizioni core.
 #
-# Definisce gen_tail_named_log() che usa i log Guidewire di questo sistema.
+# Definisce gen_tail_named_log() che usa i log applicativi custom di questo
+# sistema (Guidewire, nel profilo liquido).
 # Ridefinire qui qualunque gen_<tool>() per personalizzare gli esempi.
 #
 
-# Log Guidewire presenti su questo sistema (vedi system.conf GUIDEWIRE_SUBPATH)
+# Log applicativi custom presenti su questo sistema (Guidewire, vedi
+# system.conf CUSTOM_LOG_SUBPATH)
 APP_LOGS=(
     "cc.log"
     "api.log"

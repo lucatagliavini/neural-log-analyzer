@@ -17,13 +17,13 @@ volum|andament|picco         :: ora |ore |ultim|minut|giorn
 # ── righe/tail + recente → tail_log (non traffic_volume) ─────────────────────
 rig[ah]|tail\b               :: ultim|recent|recenti
 
-# ── log Guidewire + errore/problemi → grep_named_log (non tail_named_log) ────
+# ── log applicativo custom + errore/problemi → grep_named_log (non tail_named_log) ─
 # peso 2 per battere unigram errore (peso 2)
 # patternA = il placeholder <logfile> prodotto da normalize-query.sh: vale per
 # qualsiasi nome di log, non per un elenco (vedi il commento in unigrams.txt).
 <logfile> :: errore|errori|warn|filtr|cerca|eccezioni|exception|problem|anomal|incident|cosa.non.va|non.va\b :: 2
 
-# ── log Guidewire + mostra/riga → tail_named_log (non grep_named_log) ─────────
+# ── log applicativo custom + mostra/riga → tail_named_log (non grep_named_log) ────
 <logfile> :: mostr|visualizz|dammi|rig[ah]|ultim|cosa.c.*nel|tail\b
 
 # ── GC + lentezza/latenza → correlate_gc_slow (non gc_stats o service_times) ─

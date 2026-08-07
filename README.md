@@ -58,8 +58,8 @@ Il modello classifica la query e attiva uno o più dei seguenti tool:
 | `tail_log` | Ultime N righe di un file di log |
 | `filter_ip` | Traffico filtrato per IP (o top-clients se IP non specificato) |
 | `filter_app_errors` | Errori applicativi nel server.log (status 5xx e exception come INFO) |
-| `tail_named_log` | Ultime N righe di un log Guidewire specifico (cc.log, api.log, …) |
-| `grep_named_log` | Filtra un log Guidewire per livello ERROR/WARN/INFO o pattern testuale |
+| `tail_named_log` | Ultime N righe di un log applicativo custom specifico (cc.log, api.log, …) |
+| `grep_named_log` | Filtra un log applicativo custom per livello ERROR/WARN/INFO o pattern testuale |
 
 ## Struttura del progetto
 
@@ -127,7 +127,7 @@ queries_labeled.txt
 - `LOG_BASE_DIR` — path root dei log
 - `LOG_TZ` — timezone server log (es: `Europe/Rome`)
 - `DEFAULT_APP`, `AVAILABLE_APPS`
-- `NODE_PATTERN`, `APP_SUBPATH`, `GUIDEWIRE_SUBPATH`
+- `NODE_PATTERN`, `APP_SUBPATH`, `CUSTOM_LOG_SUBPATH`
 
 **`domain.conf`** — modifiche richiedono `./train.sh`:
 - `TOOL_THRESHOLD` — soglia confidenza per attivare un tool (default: 0.25)

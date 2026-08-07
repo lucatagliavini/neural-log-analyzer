@@ -2,7 +2,7 @@
 #
 # dispatch.sh — invoca il tool AWK corretto in base al nome tool.
 # Sourcato da chatbot.sh dopo che PROFILE_DIR, TOOLS_DIR e le variabili
-# di contesto (ACCESS_LOG, SERVER_LOG, GC_LOG, GUIDEWIRE_LOG_DIR) sono definite.
+# di contesto (ACCESS_LOG, SERVER_LOG, GC_LOG, CUSTOM_LOG_DIR) sono definite.
 #
 # Variabili di parametro lette dal chiamante (impostate da param-extract.sh):
 #   TIME_WINDOW, STATUS_CODE, THRESHOLD_MS, IP_FILTER, TAIL_N, NAMED_LOG
@@ -111,13 +111,19 @@ open_current_server_logs() { open_current_log_for "${SERVER_LOG_DIR:-$(dirname "
 # di leggere sempre il file corrente. Prima questo ramo faceva `find | head -1`,
 # quindi ignorava sia il tempo sia i .gz.
 #
+# DIR è la radice di ricerca (ricorsiva, tramite resolve_log_glob): il file
+# scelto può stare in una sottodirectory qualsiasi. Le rotazioni però si
+# raggruppano sulla DIRECTORY DEL FILE SCELTO, non sulla root: select_log_files
+# è flat per costruzione (le rotazioni di un log stanno sempre accanto al file
+# corrente, non sparse sotto il nodo).
+#
 # Uso: logs_expr=$(open_glob_logs DIR GLOB)  → espressione per `eval gawk ...`
 open_glob_logs() {
     local dir="$1" glob="$2"
     local _t0 _t1
     _t0=$(date +%s%3N 2>/dev/null || echo 0)
     local chosen
-    chosen=$(resolve_log_glob "$dir" "$glob") || return 1
+    chosen=$(resolve_log_glob "$dir" "$glob" "$glob") || return 1
     [[ -z "$chosen" ]] && return 1
 
     local base
@@ -128,7 +134,7 @@ open_glob_logs() {
     # "prod1nsse-ccCanaliz.log". Prima questo era un post-filtro qui
     # (rimosso 2026-08-06, ridondante col motore generalizzato).
     local list expr="" f _nf=0 _nb=0
-    list=$(select_log_files "$dir" "$base" "${TIME_FROM:-}" "${TIME_TO:-}")
+    list=$(select_log_files "$(dirname "$chosen")" "$base" "${TIME_FROM:-}" "${TIME_TO:-}")
     IFS='|' read -ra _cand <<< "$list"
     for f in "${_cand[@]}"; do
         [[ -z "$f" ]] && continue
@@ -156,18 +162,25 @@ open_glob_logs() {
 }
 
 # Risolve NAMED_LOG a un singolo path su disco, provando in ordine: match
-# esatto "*-<nome>.log", poi "*<nome>.log(.gz)" senza rotazioni epoch, poi
-# "*<nome>*.log(.gz)" fuzzy. Unica fonte di verità per tail_named_log e
-# grep_named_log (prima erano due copie identiche della stessa catena find,
-# OBS-3 — principio 2 di CLAUDE.md). Non passa da select_log_files: qui si
-# vuole UN file rappresentativo per nome, non le sue rotazioni.
+# esatto "*-<nome>.log", poi "*<nome>.log(.gz)", poi "*<nome>*.log(.gz)" fuzzy.
+# Unica fonte di verità per tail_named_log e grep_named_log (prima erano due
+# copie identiche della stessa catena find, OBS-3 — principio 2 di CLAUDE.md).
+# Non passa da select_log_files: qui si vuole UN file rappresentativo per
+# nome, non le sue rotazioni.
+#
+# La ricerca è ricorsiva sotto SEARCH_ROOT (contratto fino al nodo, vedi
+# CLAUDE.md) tramite resolve_log_glob, che applica la disambiguazione
+# multi-app/multi-rotazione in un solo posto. Il filtro "esclude rotazioni con
+# epoch a 10 cifre" del vecchio find non serve più: resolve_log_glob raggruppa
+# già per nome logico e sceglie il non ruotato, quindi una rotazione non può
+# mai vincere sul file corrente.
 #
 # Emette anche le metriche di volume su _PERF_SELECT_FILE (se impostato): un
 # solo stat sul file scelto, stesso pattern di open_current_log_for. Prima
 # questo ramo non passava da nessuna funzione open_*, quindi selezione/byte
 # restavano sempre a 0 anche quando un file veniva letto per intero.
 resolve_named_log_path() {
-    local gw_dir="$1" named_log="$2"
+    local search_root="$1" named_log="$2"
     local _t0 _t1
     _t0=$(date +%s%3N 2>/dev/null || echo 0)
     local log_path=""
@@ -177,17 +190,13 @@ resolve_named_log_path() {
     # performance in produzione grep_named_log arriva a 3.7s, abbastanza da far
     # sembrare la shell ferma.
     progress_show "ricerca log ${named_log}..."
-    if [[ -n "$gw_dir" ]]; then
-        log_path=$(find "$gw_dir" -maxdepth 1 -name "*-${named_log}.log" 2>/dev/null | head -1)
+    if [[ -n "$search_root" ]]; then
+        log_path=$(resolve_log_glob "$search_root" "*-${named_log}.log" "$named_log" 1) || true
         if [[ -z "$log_path" ]]; then
-            log_path=$(find "$gw_dir" -maxdepth 1 \
-                \( -name "*${named_log}.log" -o -name "*${named_log}.log.gz" \) \
-                2>/dev/null | grep -v "[0-9]\{10\}" | head -1)
+            log_path=$(resolve_log_glob "$search_root" "*${named_log}.log" "$named_log" 1) || true
         fi
         if [[ -z "$log_path" ]]; then
-            log_path=$(find "$gw_dir" -maxdepth 1 \
-                \( -name "*${named_log}*.log" -o -name "*${named_log}*.log.gz" \) \
-                2>/dev/null | grep -v "[0-9]\{10\}" | sort | head -1)
+            log_path=$(resolve_log_glob "$search_root" "*${named_log}*.log" "$named_log" 1) || true
         fi
     fi
     _t1=$(date +%s%3N 2>/dev/null || echo 0)
@@ -210,16 +219,21 @@ skip_msg() {
     printf "${C_WARN}[SKIP] %s${C_RESET}\n" "$1"
 }
 
-# Estrae i nomi logici dei log ".log" presenti in una directory (Guidewire), uno
-# per riga su stdout. Scarta i nomi con caratteri non digitabili: sul nodo esiste
-# "${gw.cc.serverid}-messaging.log", un placeholder Guidewire non risolto nella
-# loro config — non è un log che qualcuno possa nominare, sarebbe solo rumore.
+# Estrae i nomi logici dei log ".log" presenti sotto una directory (ricorsiva:
+# il contratto del profilo si ferma al nodo, sotto si scopre — vedi CLAUDE.md),
+# uno per riga su stdout. Scarta i nomi con caratteri non digitabili: sul nodo
+# reale (profilo liquido) esiste "${gw.cc.serverid}-messaging.log", un
+# placeholder Guidewire non risolto nella loro config — non è un log che
+# qualcuno possa nominare, sarebbe solo rumore. Non filtra per basename di
+# sistema (access/server/gc):
+# quel filtro sta a valle, in list_available_logs, perché suggest_available_logs
+# (l'altro chiamante) deve poter suggerire anche quei nomi su un tentativo errato.
 # Condivisa da suggest_available_logs() (reattivo, su nome sbagliato) e
 # list_available_logs() (su richiesta esplicita) — stessa fonte di verità.
 _log_names_in_dir() {
     local dir="$1"
     [[ -z "$dir" || ! -d "$dir" ]] && return
-    find "$dir" -maxdepth 1 -name "*.log" 2>/dev/null \
+    find "$dir" \( -type f -o -type l \) -name "*.log" 2>/dev/null \
         | sed -E 's|.*/||; s/^[A-Za-z0-9]+-//; s/\.log$//' \
         | grep -E '^[A-Za-z0-9_.-]+$' | sort -u
 }
@@ -249,6 +263,42 @@ _print_names_in_columns() {
             printf "    ${_D}%s${_X}\n" "$_line"
         done < <(printf '%s\n' "${names[@]}" | paste -d'\t' - - - \
                  | awk -F'\t' '{printf "%-34s %-34s %s\n", $1, $2, $3}')
+    fi
+}
+
+# Cerca named_log sotto SEARCH_ROOT senza il vincolo di app corrente (a
+# differenza di resolve_named_log_path, che con require_app=1 lo impone) e,
+# se lo trova, restituisce il nome dell'app sotto cui vive. Usata solo per il
+# messaggio di skip: decisione utente 2026-08-07 — se il log esiste ma solo
+# sotto un'altra app, non va aperto (mescolerebbe dati di app diverse senza
+# dirlo), ma l'utente va indirizzato lì invece di un generico "non trovato".
+_find_named_log_elsewhere() {
+    local search_root="$1" named_log="$2"
+    [[ -z "$search_root" ]] && return 1
+    local found
+    found=$(resolve_log_glob "$search_root" "*-${named_log}.log" "$named_log") || true
+    [[ -z "$found" ]] && found=$(resolve_log_glob "$search_root" "*${named_log}.log" "$named_log") || true
+    [[ -z "$found" ]] && found=$(resolve_log_glob "$search_root" "*${named_log}*.log" "$named_log") || true
+    [[ -z "$found" ]] && return 1
+    local app
+    for app in "${AVAILABLE_APPS[@]:-}"; do
+        [[ -n "$app" && "$found" == *"/${app}/"* ]] && { echo "$app"; return 0; }
+    done
+    return 1
+}
+
+# Messaggio di skip per named_log non trovato: distingue "non esiste sul nodo"
+# da "esiste ma sotto un'altra app" (decisione utente 2026-08-07). Unica fonte
+# di verità per tail_named_log e grep_named_log.
+skip_named_log_not_found() {
+    local search_root="$1" named_log="$2"
+    local elsewhere
+    elsewhere=$(_find_named_log_elsewhere "$search_root" "$named_log") || elsewhere=""
+    if [[ -n "$elsewhere" && "$elsewhere" != "${ACTIVE_APP:-}" ]]; then
+        skip_msg "Log '$named_log' non trovato sotto ${ACTIVE_APP:-app corrente} — esiste sotto ${elsewhere}"
+    else
+        skip_msg "Log '$named_log' non trovato in ${search_root:-<search_root non impostata>}"
+        suggest_available_logs "$search_root" "$named_log"
     fi
 }
 
@@ -282,21 +332,28 @@ suggest_available_logs() {
 }
 
 # Elenco su richiesta esplicita (list_logs), non reattivo come suggest_available_logs().
-# Due sezioni perché le due famiglie si nominano con sintassi diversa: i Guidewire
-# via NAMED_LOG ("<nome>.log"), access/server/gc via LOG_TYPE ("access log", ecc.) —
-# mescolarli suggerirebbe una sintassi che per i secondi non funziona.
+# Due sezioni perché le due famiglie si nominano con sintassi diversa: i log
+# applicativi custom via NAMED_LOG ("<nome>.log"), access/server/gc via
+# LOG_TYPE ("access log", ecc.) — mescolarli suggerirebbe una sintassi che per
+# i secondi non funziona.
 list_available_logs() {
     local _D="${C_LBL}" _B="${C_BOLD}" _X="${C_RESET}"
 
-    printf "  ${_B}Log applicativi${_X}\n"
-    local -a gw_names=()
-    while IFS= read -r n; do [[ -n "$n" ]] && gw_names+=("$n"); done < <(_log_names_in_dir "${GUIDEWIRE_LOG_DIR:-}")
-    if [[ "${#gw_names[@]}" -eq 0 ]]; then
+    printf "  ${_B}Log del nodo${_X}\n"
+    local -a custom_names=()
+    local -a _raw_names=()
+    while IFS= read -r n; do [[ -n "$n" ]] && _raw_names+=("$n"); done \
+        < <(_log_names_in_dir "${LOG_SEARCH_ROOT:-${CUSTOM_LOG_DIR:-}}")
+    local n
+    for n in "${_raw_names[@]}"; do
+        _is_system_log_base "$n" || custom_names+=("$n")
+    done
+    if [[ "${#custom_names[@]}" -eq 0 ]]; then
         printf "  ${_D}Nessun log applicativo trovato sul nodo.${_X}\n"
     else
         printf "  ${_D}%d log, si nominano con l'estensione (es: «ultime righe del %s.log»):${_X}\n" \
-            "${#gw_names[@]}" "${gw_names[0]}"
-        _print_names_in_columns "${gw_names[@]}"
+            "${#custom_names[@]}" "${custom_names[0]}"
+        _print_names_in_columns "${custom_names[@]}"
     fi
 
     printf "\n  ${_B}Log di sistema${_X}\n"
@@ -325,7 +382,7 @@ list_available_logs() {
 
 # Stampa quale file (o quali) il tool sta effettivamente leggendo.
 # tail_named_log/grep_named_log lo facevano già; tail_log no, e questo rendeva
-# indistinguibile il caso "ho chiesto un log Guidewire e mi è stato dato
+# indistinguibile il caso "ho chiesto un log applicativo e mi è stato dato
 # l'access log di Undertow" — l'utente vedeva righe plausibili e nessun indizio.
 # Prende l'espressione prodotta da open_*() (che contiene path quotati e
 # possibili <(gunzip -c '...')) e ne estrae i path per la sola visualizzazione.
@@ -595,7 +652,7 @@ _dispatch_tool_run() {
                 "$(open_server_logs)"
             ;;
         tail_named_log)
-            local gw_dir="${GUIDEWIRE_LOG_DIR:-}"
+            local search_root="${LOG_SEARCH_ROOT:-${CUSTOM_LOG_DIR:-}}"
             local named_log="${NAMED_LOG:-}"
             local log_glob="${NAMED_LOG_GLOB:-}"
             # Escape hatch: glob esplicito tra virgolette (validato in param-extract.sh)
@@ -603,9 +660,9 @@ _dispatch_tool_run() {
             # non quello normale — serve per i log imprevisti del profilo.
             if [[ -n "$log_glob" ]]; then
                 local glob_expr=""
-                [[ -n "$gw_dir" ]] && glob_expr=$(open_glob_logs "$gw_dir" "$log_glob")
+                [[ -n "$search_root" ]] && glob_expr=$(open_glob_logs "$search_root" "$log_glob")
                 if [[ -z "$glob_expr" ]]; then
-                    skip_msg "Nessun log corrispondente a '$log_glob' in ${gw_dir:-<gw_dir non impostata>}"
+                    skip_msg "Nessun log corrispondente a '$log_glob' in ${search_root:-<search_root non impostata>}"
                     return
                 fi
                 print_log_source "$glob_expr"
@@ -618,14 +675,13 @@ _dispatch_tool_run() {
                 return
             fi
             if [[ -z "$named_log" ]]; then
-                skip_msg "Nessun log Guidewire specificato nella query"
+                skip_msg "Nessun log applicativo specificato nella query"
                 return
             fi
             local log_path
-            log_path=$(resolve_named_log_path "$gw_dir" "$named_log")
+            log_path=$(resolve_named_log_path "$search_root" "$named_log")
             if [[ -z "$log_path" ]]; then
-                skip_msg "Log '$named_log' non trovato in ${gw_dir:-<gw_dir non impostata>}"
-                suggest_available_logs "$gw_dir" "$named_log"
+                skip_named_log_not_found "$search_root" "$named_log"
                 return
             fi
             printf "${C_ACCENT}Log: %s${C_RESET}\n" "$log_path"
@@ -636,7 +692,7 @@ _dispatch_tool_run() {
                 "$(open_log "$log_path")"
             ;;
         grep_named_log)
-            local gw_dir="${GUIDEWIRE_LOG_DIR:-}"
+            local search_root="${LOG_SEARCH_ROOT:-${CUSTOM_LOG_DIR:-}}"
             local named_log="${NAMED_LOG:-}"
             local log_glob="${NAMED_LOG_GLOB:-}"
             # SRCH-1: ricerca testuale in un log nominato ("cerca X nel cc.log").
@@ -674,9 +730,9 @@ _dispatch_tool_run() {
             # Stesso escape hatch di tail_named_log — vedi commento sopra.
             if [[ -n "$log_glob" ]]; then
                 local glob_expr=""
-                [[ -n "$gw_dir" ]] && glob_expr=$(open_glob_logs "$gw_dir" "$log_glob")
+                [[ -n "$search_root" ]] && glob_expr=$(open_glob_logs "$search_root" "$log_glob")
                 if [[ -z "$glob_expr" ]]; then
-                    skip_msg "Nessun log corrispondente a '$log_glob' in ${gw_dir:-<gw_dir non impostata>}"
+                    skip_msg "Nessun log corrispondente a '$log_glob' in ${search_root:-<search_root non impostata>}"
                     return
                 fi
                 print_log_source "$glob_expr"
@@ -689,14 +745,13 @@ _dispatch_tool_run() {
                 return
             fi
             if [[ -z "$named_log" ]]; then
-                skip_msg "Nessun log Guidewire specificato nella query"
+                skip_msg "Nessun log applicativo specificato nella query"
                 return
             fi
             local log_path
-            log_path=$(resolve_named_log_path "$gw_dir" "$named_log")
+            log_path=$(resolve_named_log_path "$search_root" "$named_log")
             if [[ -z "$log_path" ]]; then
-                skip_msg "Log '$named_log' non trovato in ${gw_dir:-<gw_dir non impostata>}"
-                suggest_available_logs "$gw_dir" "$named_log"
+                skip_named_log_not_found "$search_root" "$named_log"
                 return
             fi
             printf "${C_ACCENT}Log: %s${C_RESET}  %s\n" "$log_path" "$_gnl_what"
@@ -712,7 +767,7 @@ _dispatch_tool_run() {
                    ACCESS_LOG ACCESS_LOG_DIR ACCESS_LOG_BASE \
                    SERVER_LOG SERVER_LOG_DIR SERVER_LOG_BASE \
                    GC_LOG GC_LOG_DIR GC_LOG_BASE \
-                   GUIDEWIRE_LOG_DIR GUIDEWIRE_SUBPATH APP_SUBPATH \
+                   CUSTOM_LOG_DIR CUSTOM_LOG_SUBPATH APP_SUBPATH \
                    SEARCH_PARALLEL_JOBS LOG_BASE_DIR NODE_NAME_TEMPLATE \
                    ACCESS_LOG_BASE SERVER_LOG_BASE GC_LOG_BASE
             bash "$TOOLS_DIR/search_all_logs.sh"

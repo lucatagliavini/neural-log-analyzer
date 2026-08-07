@@ -8,8 +8,8 @@
 #       (es. "undertow_access_log", "gc") — non un prefisso.
 #   select_log_files_grouped DIR [TIME_FROM] [TIME_TO] [LOGICAL_NAME]
 #       Motore generalizzato: LOGICAL_NAME vuoto seleziona TUTTI i nomi
-#       logici trovati in DIR (caso Guidewire — cartella flat senza
-#       basename uniforme), raggruppando ogni log e le sue rotazioni.
+#       logici trovati in DIR (caso log applicativi custom — cartella flat
+#       senza basename uniforme), raggruppando ogni log e le sue rotazioni.
 #
 #   DIR      : directory dove cercare i file
 #   TIME_FROM: "YYYY-MM-DDTHH:MM" (vuoto = nessun limite inferiore)
@@ -81,11 +81,12 @@ _logfiles_read_first_ts() {
         # Server log (JBoss): 2026-07-29 08:01:23,456
         ts=$(date -d "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}:${BASH_REMATCH[3]}:00" +%s 2>/dev/null || echo "")
     elif [[ "$line" =~ ([0-9]{4}-[0-9]{2}-[0-9]{2})T([0-9]{2}):([0-9]{2}) ]]; then
-        # Log Guidewire: [thread] USER 2026-08-04T15:50:01,443 INFO messaggio
+        # Log applicativo custom (es. Guidewire nel profilo liquido):
+        # [thread] USER 2026-08-04T15:50:01,443 INFO messaggio
         # Timestamp ISO8601 in posizione variabile, NON fra parentesi quadre e non
-        # a inizio riga — nessuno dei tre pattern sopra lo catturava, quindi tutti i
-        # log Guidewire davano ts_start=0 e il filtro temporale di select_log_files
-        # non poteva discriminarli. Difetto preesistente, emerso testando il glob
+        # a inizio riga — nessuno dei tre pattern sopra lo catturava, quindi questi
+        # log davano ts_start=0 e il filtro temporale di select_log_files non
+        # poteva discriminarli. Difetto preesistente, emerso testando il glob
         # sulle rotazioni (2026-08-04). Va ULTIMO: il ramo GC sopra è più specifico
         # (richiede la parentesi quadra) e deve avere precedenza.
         ts=$(date -d "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}:${BASH_REMATCH[3]}:00" +%s 2>/dev/null || echo "")
@@ -132,7 +133,8 @@ _logfiles_sort_key() {
 # select_log_files_grouped DIR [TIME_FROM] [TIME_TO] [NAME_FILTER]
 #
 # Motore generalizzato: NAME_FILTER vuoto seleziona TUTTI i nomi logici
-# trovati in DIR (cartella flat multi-log, es. Guidewire); un NAME_FILTER
+# trovati in DIR (cartella flat multi-log, es. i log applicativi custom di
+# un profilo Guidewire); un NAME_FILTER
 # tipo "${BASE}*" restringe ai file che iniziano per BASE, poi filtra al
 # nome logico ESATTO — quindi "prod1nsse-cc" non si tira dietro
 # "prod1nsse-ccCanaliz" (prima il post-filtro viveva nel chiamante,
@@ -154,7 +156,7 @@ select_log_files_grouped() {
 
     # -type f: senza, `find -name "*"` con NAME_FILTER vuoto matcha anche DIR
     # stessa (bug latente, 2026-08-06 — innocuo finché nessuno passava un
-    # filtro vuoto, ma il caso Guidewire lo richiede esplicitamente).
+    # filtro vuoto, ma il caso dei log applicativi custom lo richiede esplicitamente).
     local -a candidates=()
     while IFS= read -r f; do
         [[ -s "$f" ]] && candidates+=("$f")
@@ -268,6 +270,21 @@ logfile_logical_name() {
     echo "${base%.log}"
 }
 
+# Un nome logico è "di sistema" (access/server/gc) se coincide, case-insensitive,
+# con uno dei tre *_LOG_BASE di system.conf. Questi log hanno tool e sintassi
+# dedicati ("access log", non "<nome>.log"): condiviso da param-extract.sh
+# (esclude il fallback NAMED_LOG) e da list_available_logs() in dispatch.sh
+# (esclude la sezione "Log del nodo") — un solo punto di verità invece di due
+# copie della stessa condizione (principio 2 di CLAUDE.md).
+_is_system_log_base() {
+    local name="${1,,}"
+    local _sysb
+    for _sysb in "${ACCESS_LOG_BASE:-}" "${SERVER_LOG_BASE:-}" "${GC_LOG_BASE:-}"; do
+        [[ -n "$_sysb" && "$name" == "${_sysb,,}" ]] && return 0
+    done
+    return 1
+}
+
 # Risolve un glob in un singolo file "rappresentante", disambiguando quando il
 # pattern matcha log logicamente diversi (es. "*cc*.log" → cc, ccJBatch, ccCanaliz).
 #
@@ -276,19 +293,50 @@ logfile_logical_name() {
 # distinzione un `sort | head -1` sceglierebbe silenziosamente, che è il difetto
 # che questo progetto ha già pagato altrove.
 #
-# Uso:  path=$(resolve_log_glob DIR GLOB)
+# La ricerca è RICORSIVA sotto DIR (contratto: il profilo risolve fino al nodo,
+# sotto la struttura si scopre — vedi CLAUDE.md). Questo introduce una seconda
+# fonte di ambiguità oltre alle rotazioni: sotto un nodo possono coesistere più
+# app con file omonimi (es. "undertow_access_log.log" identico sotto ClaimCenter
+# e ContactManager) o con lo stesso <nome> richiesto ma serverid diverso (es.
+# "prod1nsse-cc.log" vs "prod1nssd-cc.log"). In entrambi i casi la preferenza
+# per l'app della sessione corrente (ACTIVE_APP) viene prima di qualunque altro
+# criterio, sia nella scelta del rappresentante di un gruppo (stesso nome
+# logico, dir diverse) sia nella scelta finale fra nomi logici diversi.
+#
+# Uso:  path=$(resolve_log_glob DIR GLOB [DISPLAY_LABEL] [REQUIRE_APP])
+# DISPLAY_LABEL è quello che l'utente ha digitato (es. il <nome> della query);
+# senza, l'avviso di disambiguazione mostrerebbe il pattern find interno.
+# REQUIRE_APP=1 rifiuta silenziosamente (return 1, nessun output) un match
+# trovato solo fuori dall'app di sessione (ACTIVE_APP): decisione utente
+# 2026-08-07 — se il log chiesto esiste solo sotto un'altra app, non va
+# aperto, va detto "non trovato" (il chiamante suggerisce l'app altrove, vedi
+# dispatch.sh:_find_named_log_elsewhere). Senza REQUIRE_APP, ACTIVE_APP resta
+# solo un criterio di preferenza nel tie-break, non un vincolo.
 # Stampa su stdout il path scelto; l'elenco di disambiguazione va su stderr, così
 # non inquina il valore di ritorno.
 resolve_log_glob() {
-    local dir="$1" glob="$2"
+    local dir="$1" glob="$2" display_label="${3:-$2}" require_app="${4:-}"
     [[ -z "$dir" || -z "$glob" ]] && return 1
 
     local -a matches=()
     while IFS= read -r f; do [[ -n "$f" ]] && matches+=("$f"); done \
-        < <(find "$dir" -maxdepth 1 -name "$glob" 2>/dev/null | sort)
+        < <(find "$dir" \( -type f -o -type l \) -name "$glob" 2>/dev/null | sort)
     [[ "${#matches[@]}" -eq 0 ]] && return 1
 
-    # Raggruppa per nome logico; per ogni gruppo preferisce il file non ruotato
+    # I candidati toccano più di una directory? Serve per l'elenco: mostrare il
+    # path relativo alla root invece del solo basename evita righe identiche
+    # quando lo stesso nome esiste sotto app diverse.
+    local multi_dir=0 _d0=""
+    for f in "${matches[@]}"; do
+        local _d="${f%/*}"
+        if [[ -z "$_d0" ]]; then _d0="$_d"; elif [[ "$_d" != "$_d0" ]]; then multi_dir=1; break; fi
+    done
+
+    # Raggruppa per nome logico; per ogni gruppo scegli UN rappresentante con
+    # priorità: app corrente > file non ruotato (.log esatto) > path più corto >
+    # alfabetico. Un gruppo con candidati in directory diverse è una collisione
+    # reale (stesso nome sotto app diverse), non una rotazione — la priorità
+    # app-corrente decide, senza dipendere dall'ordine del filesystem.
     local -A rep=()
     local -a order=()
     local f lname
@@ -297,27 +345,46 @@ resolve_log_glob() {
         if [[ -z "${rep[$lname]:-}" ]]; then
             rep["$lname"]="$f"
             order+=("$lname")
+            continue
         fi
-        # un file che finisce esattamente in .log è il corrente: ha priorità
-        [[ "$f" == *.log ]] && rep["$lname"]="$f"
+        local cur="${rep[$lname]}"
+        local cur_app=1 f_app=1
+        [[ -n "${ACTIVE_APP:-}" && "$cur" == *"/${ACTIVE_APP}/"* ]] && cur_app=0
+        [[ -n "${ACTIVE_APP:-}" && "$f"   == *"/${ACTIVE_APP}/"* ]] && f_app=0
+        local cur_rot=1 f_rot=1
+        [[ "$cur" == *.log ]] && cur_rot=0
+        [[ "$f"   == *.log ]] && f_rot=0
+        if [[ "$f_app" -lt "$cur_app" ]] \
+            || { [[ "$f_app" -eq "$cur_app" ]] && [[ "$f_rot" -lt "$cur_rot" ]]; } \
+            || { [[ "$f_app" -eq "$cur_app" && "$f_rot" -eq "$cur_rot" ]] && [[ "${#f}" -lt "${#cur}" ]]; } \
+            || { [[ "$f_app" -eq "$cur_app" && "$f_rot" -eq "$cur_rot" && "${#f}" -eq "${#cur}" ]] && [[ "$f" < "$cur" ]]; }; then
+            rep["$lname"]="$f"
+        fi
     done
 
-    # La SCELTA deve essere deterministica: `order[@]` segue l'ordine di find, che
-    # varia con locale e filesystem — basarsi su quello la renderebbe arbitraria
-    # (verificato: sul server "*cc*.log" sceglieva ccCanaliz, in locale cc).
-    # Criterio: nome logico più corto, poi alfabetico. Fra "cc", "ccCanaliz" e
-    # "ccJBatch" vince "cc" — il log base, non una sua variante: l'interpretazione
-    # più probabile di "*cc*". A parità di lunghezza preferisce il non-ruotato.
-    local _by_len
-    _by_len=$(for lname in "${order[@]}"; do printf '%d %s\n' "${#lname}" "$lname"; done \
-              | sort -k1,1n -k2,2 | awk '{print $2}')
-    local chosen="" _first=""
-    while IFS= read -r lname; do
-        [[ -z "$lname" ]] && continue
-        [[ -z "$_first" ]] && _first="${rep[$lname]}"
-        if [[ -z "$chosen" && "${rep[$lname]}" == *.log ]]; then chosen="${rep[$lname]}"; fi
-    done <<< "$_by_len"
-    [[ -z "$chosen" ]] && chosen="$_first"
+    # La SCELTA fra nomi logici diversi deve essere deterministica: `order[@]`
+    # segue l'ordine di find, che varia con locale e filesystem — basarsi su
+    # quello la renderebbe arbitraria (verificato: sul server "*cc*.log"
+    # sceglieva ccCanaliz, in locale cc). Criterio: app corrente, poi nome
+    # logico più corto (fra "cc", "ccCanaliz" e "ccJBatch" vince "cc" — il log
+    # base, non una sua variante: l'interpretazione più probabile di "*cc*"),
+    # poi alfabetico.
+    local _by_pref
+    _by_pref=$(for lname in "${order[@]}"; do
+        local app_flag=1
+        [[ -n "${ACTIVE_APP:-}" && "${rep[$lname]}" == *"/${ACTIVE_APP}/"* ]] && app_flag=0
+        printf '%d %04d %s\n' "$app_flag" "${#lname}" "$lname"
+    done | sort -k1,1n -k2,2n -k3,3)
+    local chosen=""
+    chosen="${rep[$(head -1 <<< "$_by_pref" | awk '{print $3}')]}"
+
+    # Vincolo (non solo preferenza): il log scelto deve stare sotto l'app di
+    # sessione. Se tutti i candidati sono altrove, non è "il migliore che ho
+    # trovato" — è il log di un'altra app, e apre lo scenario che l'utente ha
+    # chiesto di evitare (mescolare dati di app diverse senza dirlo).
+    if [[ -n "$require_app" && -n "${ACTIVE_APP:-}" && "$chosen" != *"/${ACTIVE_APP}/"* ]]; then
+        return 1
+    fi
 
     # L'ELENCO invece si presenta in ordine alfabetico: è quello che l'utente si
     # aspetta scorrendo una lista di nomi.
@@ -329,16 +396,17 @@ resolve_log_glob() {
     if [[ "${#order[@]}" -gt 1 ]]; then
         local _Y="${C_WARN}" _D="${C_LBL}" _X="${C_RESET}"
         printf "${_Y}⚠ '%s' corrisponde a %d log diversi — mostrato il primo non ruotato:${_X}\n" \
-            "$glob" "${#order[@]}" >&2
+            "$display_label" "${#order[@]}" >&2
         local i=1
         for lname in "${order[@]}"; do
             if [[ "$i" -gt 10 ]]; then
                 printf "    ${_D}… e altri %d${_X}\n" "$(( ${#order[@]} - 10 ))" >&2
                 break
             fi
-            local tag=""
+            local tag="" label="${rep[$lname]##*/}"
+            [[ "$multi_dir" -eq 1 ]] && label="${rep[$lname]#"$dir"/}"
             [[ "${rep[$lname]}" == "$chosen" ]] && tag="  (mostrato)"
-            printf "    %d) %s%s\n" "$i" "${rep[$lname]##*/}" "$tag" >&2
+            printf "    %d) %s%s\n" "$i" "$label" "$tag" >&2
             i=$(( i + 1 ))
         done
         # Suggerisce il pattern che avrebbe selezionato univocamente il file scelto:

@@ -10,6 +10,10 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/utils-time.sh"
+# Solo per _is_system_log_base (esclusione basename di sistema dal fallback
+# NAMED_LOG, sotto) — unica fonte di verità condivisa con dispatch.sh.
+source "$SCRIPT_DIR/utils-log.sh"
+source "$SCRIPT_DIR/utils-logfiles.sh"
 
 # Carica gli ambienti del profilo per costruire il pattern di stop-word dinamico
 if [[ -n "${PROFILE_DIR:-}" && -f "$PROFILE_DIR/system.conf" ]]; then
@@ -138,9 +142,7 @@ if [[ -z "$NAMED_LOG" ]]; then
         # e "-.log" con base "-", che non sono nomi di log. Innocui per `find -name`
         # (che tratta il valore come pattern di nome, non come path) ma privi di senso.
         [[ ! "$_fb_base" =~ [A-Za-z0-9] ]] && _fb_ok=0
-        for _sysb in "${ACCESS_LOG_BASE:-}" "${SERVER_LOG_BASE:-}" "${GC_LOG_BASE:-}"; do
-            [[ -n "$_sysb" && "${_fb_base,,}" == "${_sysb,,}" ]] && _fb_ok=0
-        done
+        _is_system_log_base "$_fb_base" && _fb_ok=0
         [[ "$_fb_ok" -eq 1 ]] && NAMED_LOG="$_fb_base"
     fi
 fi
