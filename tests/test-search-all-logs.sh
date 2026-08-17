@@ -76,11 +76,11 @@ section "Nodo singolo (DETECTED_NODE impostato)"
 
 unset DETECTED_NODE
 export DETECTED_NODE="04" ACTIVE_NODE="04"
-export SERVER_LOG_DIR="$_FIX/prod/lxprjbliq04/prod/ClaimCenter"
-export SERVER_LOG="$SERVER_LOG_DIR/server.log"
-export ACCESS_LOG_DIR="" ACCESS_LOG=""
-export GC_LOG_DIR="" GC_LOG=""
-export CUSTOM_LOG_DIR="$_FIX/prod/lxprjbliq04/ClaimCenter/Guidewire"
+# LOG_SEARCH_ROOT deve puntare al NODO, non a $_FIX: da LOGDISC-2 la scoperta è
+# ricorsiva, e $_FIX contiene ANCHE il nodo 12 (fixture condivisa con la sezione
+# multi-nodo) — puntarlo lì farebbe leakage fra le due sezioni, lo stesso
+# problema già risolto isolando le fixture di test-dispatch-perf.sh.
+export LOG_SEARCH_ROOT="$_FIX/prod/lxprjbliq04"
 
 _out_single=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
 
@@ -100,7 +100,9 @@ assert_true "nodo singolo: 'LOG' è la prima colonna dell'header" "$_log_col_ok"
 # ─── Multi-nodo: colonna NODO presente e allineata alle righe ─────────────────
 section "Multi-nodo (DETECTED_NODE vuoto, ACTIVE_ENV noto)"
 
-unset DETECTED_NODE ACTIVE_NODE SERVER_LOG_DIR SERVER_LOG ACCESS_LOG_DIR ACCESS_LOG GC_LOG_DIR GC_LOG CUSTOM_LOG_DIR
+# In multi-nodo la scoperta parte da ogni NODE_DIR trovato da list_env_node_dirs,
+# quindi LOG_SEARCH_ROOT (che è del nodo attivo) non serve e va rimossa.
+unset DETECTED_NODE ACTIVE_NODE LOG_SEARCH_ROOT
 
 _out_multi=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
 
@@ -125,6 +127,103 @@ else
     assert_true "multi-nodo: colonna LOG allineata (righe non trovate, salto)" 0
 fi
 
+# ─── LOGDISC-2: scoperta ricorsiva e colonna APP ──────────────────────────────
+section "Ricorsione sotto il nodo + colonna APP (LOGDISC-2)"
+
+# Prima di LOGDISC-2 il tool costruiva 4 path fissi da APP_SUBPATH/CUSTOM_LOG_SUBPATH,
+# quindi: (a) un log in una directory arbitraria era invisibile pur essendo
+# nominabile con tail_named_log — l'ultima asimmetria dopo LOGDISC-1; (b) cercava
+# solo nell'app di sessione, mentre il tool si chiama search_ALL_logs.
+_FIX8="$(mktemp -d)"
+_node8_dir="$_FIX8/prod/lxprjbliq04"
+mkdir -p "$_node8_dir/prod/ClaimCenter" "$_node8_dir/ClaimCenter/Guidewire" \
+         "$_node8_dir/prod/ContactManager" "$_node8_dir/weird/deep/nested" \
+         "$_node8_dir/archive.log" "$_node8_dir/senza_log"
+echo "2026-08-05T10:00:00,000 INFO searchhub in claimcenter" > "$_node8_dir/prod/ClaimCenter/server.log"
+echo "2026-08-05T10:00:00,000 INFO searchhub in guidewire"   > "$_node8_dir/ClaimCenter/Guidewire/cc.log"
+echo "2026-08-05T10:00:00,000 INFO searchhub in contactmanager" > "$_node8_dir/prod/ContactManager/server.log"
+echo "2026-08-05T10:00:00,000 INFO searchhub in posto arbitrario" > "$_node8_dir/weird/deep/nested/custom_app.log"
+# Trappole: una directory che SEMBRA un file .log, e una senza log.
+echo "non sono un log" > "$_node8_dir/archive.log/non_e_un_file.txt"
+echo "irrilevante" > "$_node8_dir/senza_log/readme.txt"
+
+export LOG_BASE_DIR="$_FIX8"
+export DETECTED_NODE="04" ACTIVE_NODE="04" ACTIVE_APP="ClaimCenter"
+export LOG_SEARCH_ROOT="$_node8_dir"
+export SEARCH_PATTERN="searchhub"
+unset TIME_FROM TIME_TO
+
+_out_rec=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+
+# (a) il gap di LOGDISC-2: il log in directory arbitraria è cercato
+_has_arbitrary=0
+echo "$_out_rec" | grep -qE '^\s.*custom_app\.log' && _has_arbitrary=1
+assert_true "ricorsione: log in directory arbitraria (weird/deep/nested) è cercato" "$_has_arbitrary"
+
+# (b) cerca in TUTTE le app, non solo in ACTIVE_APP=ClaimCenter
+_rec_total=$(echo "$_out_rec" | grep -oE 'Totale:\s+[0-9]+' | grep -oE '[0-9]+' | head -1)
+assert_true "ricorsione: match in tutte le app, non solo ACTIVE_APP (totale: ${_rec_total:-?}, atteso 4)" \
+    "$([[ "${_rec_total:-0}" -eq 4 ]] && echo 1 || echo 0)"
+
+_has_other_app=0
+echo "$_out_rec" | grep -qE '^\s.*ContactManager' && _has_other_app=1
+assert_true "ricorsione: i log di un'altra app compaiono (ACTIVE_APP non filtra)" "$_has_other_app"
+
+# (c) la colonna APP dichiara la provenienza (principio 6: mai mescolare in silenzio)
+_hdr_app=$(echo "$_out_rec" | grep -E '^\s*APP\s+LOG' | head -1)
+assert_true "colonna APP: header presente quando i match sono di più app" \
+    "$([[ -n "$_hdr_app" ]] && echo 1 || echo 0)"
+
+# Allineamento con la stessa tecnica del test multi-nodo: byte-offset di LOG
+# nell'header vs nome file nelle righe. Se _app_col_w divergesse fra header e
+# righe, la tabella si disallineerebbe come nel bug del 2026-08-05.
+_row_app=$(echo "$_out_rec" | grep -E '^\s+(ClaimCenter|ContactManager|-)\s' | head -1)
+if [[ -n "$_hdr_app" && -n "$_row_app" ]]; then
+    _h_pos=$(echo "$_hdr_app" | grep -boE 'LOG' | head -1 | cut -d: -f1)
+    _r_pos=$(echo "$_row_app" | grep -boE '[A-Za-z0-9._-]+\.log' | head -1 | cut -d: -f1)
+    assert_true "colonna APP: LOG allineato fra header e righe (hdr=$_h_pos riga=$_r_pos)" \
+        "$([[ "$_h_pos" -eq "$_r_pos" ]] && echo 1 || echo 0)"
+else
+    assert_true "colonna APP: LOG allineato (righe non trovate, salto)" 0
+fi
+
+# (d) path non attribuibile: etichetta "-", MA il file resta nei risultati
+# (principio 5 — escluderlo sarebbe un bug di correttezza, non si inventa un'app)
+_has_dash_app=0
+echo "$_out_rec" | grep -qE '^\s+-\s+custom_app\.log' && _has_dash_app=1
+assert_true "colonna APP: path non attribuibile etichettato '-', non escluso" "$_has_dash_app"
+
+# (e) le trappole non producono file da cercare: 4 file, non 5 o 6
+_rec_files=$(echo "$_out_rec" | grep -oE '\([0-9]+ file' | grep -oE '[0-9]+' | head -1)
+assert_true "ricorsione: 'archive.log/' (directory) e dir senza log ignorate (file: ${_rec_files:-?}, atteso 4)" \
+    "$([[ "${_rec_files:-0}" -eq 4 ]] && echo 1 || echo 0)"
+
+rm -rf "$_FIX8"
+
+# ─── Colonna APP assente quando i match sono di una sola app ──────────────────
+section "Colonna APP condizionale (una sola app nei match)"
+
+# Stesso criterio di _multi_node: se non c'è nulla da disambiguare la colonna non
+# appare, altrimenti sarebbe lo stesso valore ripetuto su ogni riga.
+_FIX9="$(mktemp -d)"
+_node9_dir="$_FIX9/prod/lxprjbliq04"
+mkdir -p "$_node9_dir/prod/ClaimCenter"
+echo "2026-08-05T10:00:00,000 INFO searchhub uno" > "$_node9_dir/prod/ClaimCenter/server.log"
+echo "2026-08-05T10:00:00,000 INFO searchhub due" > "$_node9_dir/prod/ClaimCenter/gc.log"
+
+export LOG_BASE_DIR="$_FIX9" LOG_SEARCH_ROOT="$_node9_dir"
+export DETECTED_NODE="04" ACTIVE_NODE="04"
+_out_oneapp=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+rm -rf "$_FIX9"
+
+_has_app_hdr=0
+echo "$_out_oneapp" | grep -qE '^\s*APP\s+LOG' && _has_app_hdr=1
+assert_true "una sola app: header NON mostra la colonna APP" "$(( 1 - _has_app_hdr ))"
+
+_log_first=0
+echo "$_out_oneapp" | grep -qE '^\s*LOG\s+MATCH' && _log_first=1
+assert_true "una sola app: 'LOG' resta la prima colonna dell'header" "$_log_first"
+
 # ─── Filtro temporale riga per riga ────────────────────────────────────────
 section "Filtro temporale (TIME_FROM/TIME_TO applicato riga per riga)"
 
@@ -141,11 +240,7 @@ EOF
 
 export LOG_BASE_DIR="$_FIX2"
 export DETECTED_NODE="04" ACTIVE_NODE="04"
-export SERVER_LOG_DIR="$_node2_dir/prod/ClaimCenter"
-export SERVER_LOG="$SERVER_LOG_DIR/server.log"
-export ACCESS_LOG_DIR="" ACCESS_LOG=""
-export GC_LOG_DIR="" GC_LOG=""
-export CUSTOM_LOG_DIR="$_node2_dir/ClaimCenter/Guidewire"
+export LOG_SEARCH_ROOT="$_node2_dir"
 export TIME_FROM="2026-08-05T16:00" TIME_TO="2026-08-05T16:59"
 
 _out_time=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
@@ -185,10 +280,7 @@ EOF
 
 export LOG_BASE_DIR="$_FIX3"
 export DETECTED_NODE="04" ACTIVE_NODE="04"
-export SERVER_LOG_DIR="" SERVER_LOG=""
-export ACCESS_LOG_DIR="" ACCESS_LOG=""
-export GC_LOG_DIR="" GC_LOG=""
-export CUSTOM_LOG_DIR="$_node3_dir/ClaimCenter/Guidewire"
+export LOG_SEARCH_ROOT="$_node3_dir"
 export SEARCH_PATTERN="searchHub"
 export TIME_FROM="2026-08-05T16:00" TIME_TO="2026-08-05T16:59"
 
@@ -234,10 +326,7 @@ rm -f "$_gz_src"
 
 export LOG_BASE_DIR="$_FIX4"
 export DETECTED_NODE="04" ACTIVE_NODE="04"
-export SERVER_LOG_DIR="" SERVER_LOG=""
-export ACCESS_LOG_DIR="" ACCESS_LOG=""
-export GC_LOG_DIR="" GC_LOG=""
-export CUSTOM_LOG_DIR="$_node4_dir/ClaimCenter/Guidewire"
+export LOG_SEARCH_ROOT="$_node4_dir"
 export SEARCH_PATTERN="searchHub"
 export TIME_FROM="2026-08-04T00:00" TIME_TO="2026-08-04T23:59"
 
@@ -273,9 +362,7 @@ EOF
 
 export LOG_BASE_DIR="$_FIX6"
 export DETECTED_NODE="04" ACTIVE_NODE="04"
-export SERVER_LOG_DIR="" SERVER_LOG="" ACCESS_LOG_DIR="" ACCESS_LOG=""
-export GC_LOG_DIR="" GC_LOG=""
-export CUSTOM_LOG_DIR="$_node6_dir/ClaimCenter/Guidewire"
+export LOG_SEARCH_ROOT="$_node6_dir"
 unset TIME_FROM TIME_TO
 
 # (a) pattern letterale presente → gate attivo, match trovato
@@ -364,9 +451,7 @@ echo "2026-08-06T10:00:00,000 INFO searchHub presente" > "$_node5_dir/ClaimCente
 
 export LOG_BASE_DIR="$_FIX5"
 export DETECTED_NODE="04" ACTIVE_NODE="04"
-export SERVER_LOG_DIR="" SERVER_LOG="" ACCESS_LOG_DIR="" ACCESS_LOG=""
-export GC_LOG_DIR="" GC_LOG=""
-export CUSTOM_LOG_DIR="$_node5_dir/ClaimCenter/Guidewire"
+export LOG_SEARCH_ROOT="$_node5_dir"
 export SEARCH_PATTERN="searchHub"
 _PERF_OUT="$(mktemp)"
 export BOT_PERF_FILE="$_PERF_OUT"

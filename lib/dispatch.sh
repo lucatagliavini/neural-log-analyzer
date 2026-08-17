@@ -280,11 +280,11 @@ _find_named_log_elsewhere() {
     [[ -z "$found" ]] && found=$(resolve_log_glob "$search_root" "*${named_log}.log" "$named_log") || true
     [[ -z "$found" ]] && found=$(resolve_log_glob "$search_root" "*${named_log}*.log" "$named_log") || true
     [[ -z "$found" ]] && return 1
-    local app
-    for app in "${AVAILABLE_APPS[@]:-}"; do
-        [[ -n "$app" && "$found" == *"/${app}/"* ]] && { echo "$app"; return 0; }
-    done
-    return 1
+    # resolve_app_from_path (utils-logfiles.sh) — prima questa iterazione su
+    # AVAILABLE_APPS era inline qui; migrata alla funzione condivisa quando
+    # search_all_logs ha avuto bisogno della stessa risoluzione (principio 8:
+    # centralizzare significa migrare i chiamanti, non solo creare la funzione).
+    resolve_app_from_path "$found"
 }
 
 # Messaggio di skip per named_log non trovato: distingue "non esiste sul nodo"
@@ -784,14 +784,15 @@ _dispatch_tool_run() {
                 "$(open_log "$log_path")"
             ;;
         search_all_logs)
+            # Il contratto si ferma a LOG_SEARCH_ROOT (principio 6): sotto la
+            # directory del nodo il tool SCOPRE le directory dei log via
+            # discover_log_dirs, quindi non riceve più i path costruiti da
+            # APP_SUBPATH/CUSTOM_LOG_SUBPATH né i *_LOG_DIR/*_LOG_BASE — che
+            # nominavano directory note, l'assunzione che LOGDISC-2 rimuove.
             export SEARCH_PATTERN TIME_FROM TIME_TO \
                    ACTIVE_ENV ACTIVE_NODE ACTIVE_APP DETECTED_NODE \
-                   ACCESS_LOG ACCESS_LOG_DIR ACCESS_LOG_BASE \
-                   SERVER_LOG SERVER_LOG_DIR SERVER_LOG_BASE \
-                   GC_LOG GC_LOG_DIR GC_LOG_BASE \
-                   CUSTOM_LOG_DIR CUSTOM_LOG_SUBPATH APP_SUBPATH \
-                   SEARCH_PARALLEL_JOBS LOG_BASE_DIR NODE_NAME_TEMPLATE \
-                   ACCESS_LOG_BASE SERVER_LOG_BASE GC_LOG_BASE
+                   LOG_SEARCH_ROOT \
+                   SEARCH_PARALLEL_JOBS LOG_BASE_DIR NODE_NAME_TEMPLATE
             bash "$TOOLS_DIR/search_all_logs.sh"
             ;;
 

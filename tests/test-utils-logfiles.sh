@@ -254,6 +254,87 @@ else
 fi
 rm -rf "$_PROG_FIX"
 
+# ─── discover_log_dirs: scoperta ricorsiva delle directory con log ────────────
+section "discover_log_dirs (LOGDISC-2)"
+
+# Emette DIRECTORY, non file: chi la chiama passa ognuna a
+# select_log_files_grouped, che resta flat perché le rotazioni stanno accanto al
+# file che ruotano — ricorsione per la scoperta, flat per le rotazioni.
+_DL_FIX="$(mktemp -d)"
+mkdir -p "$_DL_FIX/prod/ClaimCenter" "$_DL_FIX/ClaimCenter/Guidewire" \
+         "$_DL_FIX/weird/deep/nested" "$_DL_FIX/archive.log" "$_DL_FIX/senza_log" \
+         "$_DL_FIX/solo_rotazioni"
+# Directory con 3 file dello stesso log: deve comparire UNA volta sola.
+echo x > "$_DL_FIX/prod/ClaimCenter/server.log"
+echo x > "$_DL_FIX/prod/ClaimCenter/server.log-2026-08-01-1785000000.gz"
+echo x > "$_DL_FIX/prod/ClaimCenter/undertow_access_log.2026-07-14.log"
+echo x > "$_DL_FIX/ClaimCenter/Guidewire/cc.log"
+echo x > "$_DL_FIX/weird/deep/nested/custom_app.log"
+# Trappola: directory il cui NOME finisce per .log, ma non è un file.
+echo x > "$_DL_FIX/archive.log/non_e_un_file.txt"
+# Directory senza alcun log: non va emessa.
+echo x > "$_DL_FIX/senza_log/readme.txt"
+# Solo rotazioni compresse, nessun .log corrente: va scoperta comunque
+# (principio 5 — escluderla sarebbe un falso negativo silenzioso).
+echo x > "$_DL_FIX/solo_rotazioni/vecchio.log-2026-07-01-1780000000.gz"
+
+_dl_out=$(discover_log_dirs "$_DL_FIX")
+_dl_n=$(echo "$_dl_out" | grep -c .)
+
+assert_eq "discover_log_dirs: 4 directory con log (dedup su più rotazioni)" "4" "$_dl_n"
+
+assert_true "discover_log_dirs: directory profonda arbitraria scoperta" \
+    "$([[ "$_dl_out" == *"weird/deep/nested"* ]] && echo 1 || echo 0)"
+
+assert_true "discover_log_dirs: directory con SOLE rotazioni .gz scoperta" \
+    "$([[ "$_dl_out" == *"solo_rotazioni"* ]] && echo 1 || echo 0)"
+
+assert_true "discover_log_dirs: 'archive.log/' (directory, non file) non scoperta" \
+    "$([[ "$_dl_out" != *"archive.log"* ]] && echo 1 || echo 0)"
+
+assert_true "discover_log_dirs: directory senza log non scoperta" \
+    "$([[ "$_dl_out" != *"senza_log"* ]] && echo 1 || echo 0)"
+
+# La directory con 3 file dello stesso log compare una volta, non tre.
+_dl_cc=$(echo "$_dl_out" | grep -c "prod/ClaimCenter$")
+assert_eq "discover_log_dirs: directory con 3 file emessa una sola volta" "1" "$_dl_cc"
+
+# Casi limite: root inesistente o argomento vuoto non devono produrre output
+# né errori (il chiamante itera su stdout, una riga spuria diventerebbe un path).
+assert_eq "discover_log_dirs: root inesistente → nessun output" "0" \
+    "$(discover_log_dirs "$_DL_FIX/non_esiste" | grep -c . || true)"
+assert_eq "discover_log_dirs: argomento vuoto → nessun output" "0" \
+    "$(discover_log_dirs "" | grep -c . || true)"
+
+rm -rf "$_DL_FIX"
+
+# ─── resolve_app_from_path: attribuzione dell'app dal path ────────────────────
+section "resolve_app_from_path (LOGDISC-2)"
+
+# Data-driven da AVAILABLE_APPS: nessun nome di app nel codice (principio 7).
+# Centralizzata da una copia inline che viveva in _find_named_log_elsewhere
+# (dispatch.sh), ora migrata a chiamarla (principio 8).
+AVAILABLE_APPS=("ClaimCenter" "ContactManager")
+
+assert_eq "resolve_app_from_path: app riconosciuta nel path" "ClaimCenter" \
+    "$(resolve_app_from_path "/logs/nodo/prod/ClaimCenter/server.log")"
+assert_eq "resolve_app_from_path: seconda app riconosciuta" "ContactManager" \
+    "$(resolve_app_from_path "/logs/nodo/prod/ContactManager/server.log")"
+assert_eq "resolve_app_from_path: riconosce l'app anche a metà path" "ClaimCenter" \
+    "$(resolve_app_from_path "/logs/nodo/ClaimCenter/Guidewire/cc.log")"
+
+# Path non attribuibile: nessun output e return 1 — il chiamante lo etichetta
+# come ignoto ma NON esclude il file (principio 5).
+_ra_out=$(resolve_app_from_path "/logs/nodo/weird/deep/nested/custom.log" && echo "MATCHED")
+assert_eq "resolve_app_from_path: path non attribuibile → vuoto" "" "$_ra_out"
+
+# Match sul SEGMENTO, non sulla sottostringa: "ClaimCenterX" non è "ClaimCenter".
+assert_eq "resolve_app_from_path: match sul segmento, non sul prefisso" "" \
+    "$(resolve_app_from_path "/logs/nodo/ClaimCenterX/server.log" || true)"
+
+assert_eq "resolve_app_from_path: path vuoto → vuoto" "" \
+    "$(resolve_app_from_path "" || true)"
+
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"

@@ -9,7 +9,8 @@ Aggiornato: 2026-08-17
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
 | DEPLOY-1 | **`deploy.sh` non ha `--delete`, e non può averlo senza una verifica di identità della directory target** (deciso 2026-08-17). Conseguenza attuale: i file rimossi in locale, o trasferiti per errore da un deploy passato, **restano** in produzione — oggi `CLAUDE.md` e `.claude/` copiati prima che le esclusioni esistessero (inerti, nessuno script del bot li legge). La rimozione manuale è stata **esplicitamente rifiutata dall'utente**: un `rsync --delete`, o un `rm` su `${HOST}:${DEST}`, cancella ricorsivamente qualunque directory gli venga passata — un `--dest` sbagliato, un `DEST` vuoto o un typo diventano una cancellazione in produzione, e il dry-run non protegge chi lancia il comando senza. Prerequisito per implementarlo: un **sentinel di identità** — `deploy.sh` verifica sul target la presenza di un marcatore noto (es. `chatbot.sh` + `profiles/`, o un file `.lana-bot-root` scritto dal deploy stesso) e rifiuta di procedere se manca, *prima* di qualsiasi operazione distruttiva. Finché non c'è, il deploy resta additivo per scelta: file residui sono rumore, una cancellazione sbagliata è un incidente | Da valutare |
-| LOGDISC-2 | **`search_all_logs.sh` non segue il contratto "fino al nodo"** (vedi principio 6 in CLAUDE.md, e LOGDISC-1 sotto). Enumera ancora 4 directory fisse via `APP_SUBPATH`/`CUSTOM_LOG_SUBPATH` (`search_all_logs.sh:132-148`) e chiama `select_log_files_grouped`, che è flat (`find -maxdepth 1`). Dopo LOGDISC-1, `tail_named_log`/`grep_named_log` raggiungono qualunque log sotto il nodo per nome o glob; `search_all_logs` no — un log in una directory arbitraria (es. `weird/deep/nested/custom.log`) è nominabile ma non cercabile con "in quali log c'è X". Asimmetria nota, non ancora valutata in dettaglio se/come estendere la ricorsione qui: il volume di dati da scansionare cambia (oggi 4 directory note, potenzialmente l'intero nodo), quindi l'impatto su tempo/rumore va misurato prima di decidere. | Da valutare |
+**Chiuso il 2026-08-17**: LOGDISC-2 (ricorsione in `search_all_logs` + colonna APP, vedi
+sezione dedicata).
 
 **Chiuso il 2026-08-07**: LOGDISC-1 (ricerca ricorsiva log sotto il nodo, vedi sezione dedicata),
 LOGDISC-3 (bug collegati a LOGDISC-1, vedi sezione dedicata), LOGSEL-1 (misrouting +
@@ -72,8 +73,77 @@ organizzare i log diversamente. Documentato come principio 6 in CLAUDE.md.
 |----|-------------|-------|
 | LOGDISC-1 | **`resolve_log_glob()` (`utils-logfiles.sh`) diventa ricorsivo** (rimosso `-maxdepth 1`, aggiunto `\( -type f -o -type l \)` per escludere directory-trappola come `archive.log/`). Tie-break deterministico: app di sessione (`ACTIVE_APP`) > file non ruotato > path più corto > alfabetico. `resolve_named_log_path()` (`dispatch.sh`) sostituisce le 3 catene `find -maxdepth 1` duplicate con 3 chiamate in cascata a `resolve_log_glob`, centralizzando la policy di disambiguazione. `open_glob_logs()` raggruppa le rotazioni dalla `dirname` del file scelto (flat), non dalla root — **ricorsione per la scoperta, flat per le rotazioni**. `resolve-logs.sh` esporta `LOG_SEARCH_ROOT` (= `NODE_DIR`). Nessun cross-app silenzioso: se un log esiste solo sotto un'altra app, `skip_named_log_not_found()` dice "non trovato" e suggerisce quell'app, invece di aprirlo o di restare muto. `_log_names_in_dir()` diventa ricorsiva e non filtrante; il filtro dei basename di sistema (access/server/gc) si sposta a valle in `list_available_logs()`, tramite il nuovo helper condiviso `_is_system_log_base()` (anche in `param-extract.sh`, eliminando una duplicazione preesistente). 17 test in `tests/test-log-discovery.sh` + 1 nuovo in `tests/test-dispatch-perf.sh` (ricerca multi-livello); fixture di `test-dispatch-perf.sh` isolate per sezione (la ricorsione avrebbe fatto leakage tra sezioni condivise) | **Fatto** (2026-08-07) |
 
-**Asimmetria nota, non chiusa qui**: vedi `LOGDISC-2` in cima al file — `search_all_logs.sh`
-resta enumerativo (non ricorsivo), quindi trova per nome log che non cerca per contenuto.
+**Asimmetria chiusa il 2026-08-17**: vedi la sezione LOGDISC-2 qui sotto — `search_all_logs.sh`
+era rimasto enumerativo, quindi trovava per nome log che non cercava per contenuto.
+
+---
+
+## LOGDISC-2 — Ricorsione in `search_all_logs` + colonna APP (2026-08-17)
+
+Ultimo tool a violare il **principio 6**: enumerava 4 directory fisse costruite da
+`APP_SUBPATH`/`CUSTOM_LOG_SUBPATH`, quindi un log in una directory arbitraria
+(`weird/deep/nested/custom.log`) era **nominabile** con `tail_named_log` ma invisibile a
+"in quali log c'è X".
+
+**La misura che ha sbloccato la decisione** (nodo `lxprjbliq04`, in produzione — non stimata):
+8 directory sotto il nodo, profondità max 3, `find` ricorsivo **0.01 s** su 3 round. Il costo
+di scoperta è irrilevante contro i ~83 s di una query reale (P4).
+
+**Errore di valutazione corretto durante l'analisi** (vale come lezione di metodo): una prima
+valutazione concludeva che la ricorsione fosse neutra, perché scopre "le stesse 4 directory che
+l'enumerazione già visita". Falso: confrontava la **cardinalità** degli insiemi, non la loro
+**identità**. Le 4 directory sono 2 di ClaimCenter (185 MB) e 2 di ContactManager (118 MB) —
+con `ACTIVE_APP=ClaimCenter` l'enumerazione visitava solo le prime due. Stesso errore di UI-12
+("dedotto contando gli usi senza leggere le condizioni") e di P9. Il volume scansionato
+**raddoppia** (185 → 303 MB): conseguenza accettata della decisione sotto, non effetto
+imprevisto.
+
+**Decisione utente**: cercare in **tutte** le app del nodo, con una **colonna APP** che
+dichiara la provenienza — non filtrare per app di sessione. Il tool si chiama
+`search_ALL_logs` e il suo `TOOL_DESC` promette "tutti i log del nodo". Il principio 6 vieta
+di mescolare app **senza dirlo**: il vincolo è la trasparenza, non l'esclusione.
+
+| ID | Descrizione | Stato |
+|----|-------------|-------|
+| LOGDISC-2a | **`discover_log_dirs ROOT`** in `utils-logfiles.sh`: emette le directory che *contengono* log sotto ROOT, a qualsiasi profondità, deduplicate. `-iname '*.log*'` (non `*.log`) perché una directory con sole rotazioni compresse va scoperta comunque (principio 5); `\( -type f -o -type l \)` prima del match esclude le directory-trappola tipo `archive.log/`. **`select_log_files_grouped` resta flat** (`-maxdepth 1`): ricorsione per la scoperta, flat per le rotazioni — la regola di LOGDISC-1, non toccata. Funzione sorella di `_log_names_in_dir()` (emette nomi logici invece di directory) | **Fatto** |
+| LOGDISC-2b | **`resolve_app_from_path PATH`** in `utils-logfiles.sh`, data-driven da `AVAILABLE_APPS` (liquido 2 app, usnext 3 diverse — nessun nome nel codice, principio 7). **La logica esisteva già inline** in `_find_named_log_elsewhere` (`dispatch.sh`), che ora la chiama: centralizzata *migrando* il chiamante, non creando una seconda copia (principio 8 — l'errore che ha prodotto i 4 bug di LOGDISC-3). Match sul **segmento** `/app/`, quindi `ClaimCenterX` non matcha `ClaimCenter` | **Fatto** |
+| LOGDISC-2c | **I due rami di `search_all_logs.sh`** (nodo singolo e multi-nodo) si riducono a iterare `discover_log_dirs` + `_sal_add "$dir" "" "$nodo"` — `base` sempre vuoto, il ramo che già serviva i log custom in cartella flat. Helper locale `_sal_scan_root` per il ciclo comune. **Contratto ridotto**: `LOG_SEARCH_ROOT` sostituisce `ACCESS_LOG*`/`SERVER_LOG*`/`GC_LOG*`/`CUSTOM_LOG_DIR`/`CUSTOM_LOG_SUBPATH`/`APP_SUBPATH` negli export di `dispatch.sh` — quelle variabili nominavano directory note, l'assunzione che questo lavoro rimuove. Il messaggio "nessun log disponibile" ora dice **dove** ha cercato: un `LOG_SEARCH_ROOT` vuoto produrrebbe altrimenti un silenzio indistinguibile da "il nodo non ha log" (stesso falso negativo di LOGSEL-1) | **Fatto** |
+| LOGDISC-2d | **Colonna APP condizionale**, stesso criterio di `_multi_node`: appare solo se i match provengono da più di una app, calcolata sui match **effettivi** (non sulla lunghezza di `AVAILABLE_APPS`). Due ragioni: (1) una colonna col medesimo valore su ogni riga è rumore — la stessa ragione per cui `_node_col_w` è 0 in nodo singolo; (2) `test-search-all-logs.sh` asserisce che `LOG` sia la prima colonna quando non c'è NODO, e una colonna sempre presente romperebbe l'invariante anche nel caso comune. Larghezza `_app_w + 2` (solo gutter, senza prefisso testuale: `ClaimCenter` si spiega da sé, `04` no). Path non attribuibile → `-`, e il file **resta** nei risultati (principio 5) | **Fatto** |
+
+**Verifica**: `bash tests/run-tests.sh` → **86 PASS / 0 FAIL** (invariato). 15 asserzioni nuove
+(`test-search-all-logs.sh` 32→41, `test-utils-logfiles.sh` +9 su `discover_log_dirs` e
+`resolve_app_from_path`). **Fail-before/pass-after verificato** via `git stash` sul solo codice
+di produzione: 27 FAIL + 3 FAIL senza il fix, 0 con — i test misurano il cambiamento, non
+passano per costruzione. `--parity` non necessario (`normalize-query.sh` non toccato).
+
+**Fixture isolate**: la sezione "nodo singolo" di `test-search-all-logs.sh` ora punta
+`LOG_SEARCH_ROOT` al **nodo specifico**, non a `$_FIX` che contiene anche il nodo 12 — con la
+ricorsione avrebbe letto i file dell'altra sezione (stesso leakage già risolto in
+`test-dispatch-perf.sh` durante LOGDISC-1).
+
+### Verifica in produzione (nodo 4, 2026-08-17) — il gap era più grande del previsto
+
+Query `cerca "NullPointerException" nel nodo 4`, misurata dal query log (colonne
+7-12: totale/select/search/file/matched/bytes):
+
+| | prima (baseline) | dopo |
+|---|---|---|
+| file selezionati | 31 | **51** (+65%) |
+| occorrenze trovate | — | **2205 in 5 log** |
+| totale end-to-end | — | 21.7 s (select 6.5 s, search 13.1 s) |
+| volume | — | 212 MB |
+
+**Il difetto era più grave di quanto il backlog stimasse.** L'analisi prevedeva "log in
+directory arbitraria non cercabile" come caso di scuola; in realtà su questo nodo la ricerca
+enumerativa **non vedeva `prod1nssd-cc.log` né la sua rotazione del giorno**, dove stanno
+**2199 delle 2205 occorrenze** (il 99.7%). Prima di questo fix, la stessa query rispondeva su
+un sottoinsieme che escludeva quasi tutti i risultati reali — senza dirlo. La colonna APP
+mostra anche che 6 occorrenze vengono da ContactManager (`prod2nssd-cm.log`, `console.log`,
+`server.log`): dati di un'altra app, ora dichiarati invece che invisibili.
+
+Il costo misurato è coerente con l'atteso (volume ~2×, +20 file), e i 6.5 s di `select` sono
+il walk temporale su 51 file, non la scoperta (0.01 s). Nessuna ottimizzazione applicata:
+`perf-report.sh` continua ad accumulare dati, si riapre se il tempo diventa scomodo.
 
 ---
 

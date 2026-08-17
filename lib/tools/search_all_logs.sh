@@ -6,12 +6,24 @@
 #   SEARCH_PATTERN, TIME_FROM, TIME_TO,
 #   ACTIVE_ENV, ACTIVE_NODE, ACTIVE_APP,
 #   DETECTED_NODE,
-#   ACCESS_LOG, ACCESS_LOG_DIR, ACCESS_LOG_BASE,
-#   SERVER_LOG, SERVER_LOG_DIR, SERVER_LOG_BASE,
-#   GC_LOG, GC_LOG_DIR, GC_LOG_BASE,
-#   CUSTOM_LOG_DIR, CUSTOM_LOG_SUBPATH,
-#   APP_SUBPATH, SEARCH_PARALLEL_JOBS,
+#   LOG_SEARCH_ROOT (directory del nodo — vedi sotto),
+#   SEARCH_PARALLEL_JOBS,
 #   LIB_DIR (per utils-logfiles.sh e utils-nodes.sh)
+#
+# Il contratto si ferma a LOG_SEARCH_ROOT (principio 6 di CLAUDE.md): sotto la
+# directory del nodo le directory dei log vengono SCOPERTE via
+# discover_log_dirs() (utils-logfiles.sh), non enumerate. Prima (fino a
+# LOGDISC-2) questo tool costruiva 4 path fissi da APP_SUBPATH e
+# CUSTOM_LOG_SUBPATH, quindi un log in una directory arbitraria era nominabile
+# con "ultime righe di X.log" ma invisibile a "in quali log c'è X" — l'ultima
+# asimmetria rimasta dopo LOGDISC-1.
+#
+# Cerca in TUTTE le app presenti sotto il nodo, non solo in ACTIVE_APP
+# (decisione utente 2026-08-17): il tool si chiama search_ALL_logs e il suo
+# TOOL_DESC promette "tutti i log del nodo". La provenienza non è mescolata in
+# silenzio — la colonna APP la dichiara quando i match vengono da più di una app
+# (principio 6: mai mescolare dati di app diverse SENZA DIRLO; il vincolo è la
+# trasparenza, non l'esclusione).
 #
 
 source "$(dirname "${BASH_SOURCE[0]}")/../utils-logfiles.sh"
@@ -68,7 +80,7 @@ tf_cmp="" tt_cmp=""
 [[ -n "${TIME_TO:-}"   ]] && tt_cmp="${TIME_TO/T/ }:59"
 
 # Arrays paralleli: un elemento per file trovato
-all_labels=() all_paths=() all_nodes=()
+all_labels=() all_paths=() all_nodes=() all_apps=()
 
 # _sal_add DIR BASE NODE_NUM
 # Aggiunge a all_* i file di log trovati in DIR, con pre-selezione per
@@ -99,7 +111,24 @@ _sal_add() {
         all_labels+=("$(basename "$_f")")
         all_paths+=("$_f")
         all_nodes+=("${node_num:-}")
+        # App di provenienza: vuota se il path non nomina nessuna delle
+        # AVAILABLE_APPS. Il file resta comunque nei risultati (principio 5) e
+        # a stampa l'etichetta diventa "-", come per i timestamp assenti.
+        all_apps+=("$(resolve_app_from_path "$_f" || true)")
     done
+}
+
+# _sal_scan_root ROOT [NODE_NUM]
+# Scopre ricorsivamente le directory con log sotto ROOT e le passa a _sal_add.
+# BASE vuoto sempre: dopo la scoperta non sappiamo cosa contiene una directory,
+# quindi si seleziona ogni nome logico presente — è il ramo che già serviva i
+# log applicativi custom in cartella flat.
+_sal_scan_root() {
+    local root="$1" node_num="${2:-}"
+    local _d
+    while IFS= read -r _d; do
+        [[ -n "$_d" ]] && _sal_add "$_d" "" "$node_num"
+    done < <(discover_log_dirs "$root")
 }
 
 # ── Costruisce la lista log ───────────────────────────────────────────────────
@@ -123,36 +152,33 @@ progress_show "selezione log..."
 if [[ -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]]; then
     _multi_node=1
     _scope_label="${ACTIVE_ENV} (tutti i nodi)"
-    ENV_NAME="$ACTIVE_ENV" APP="${ACTIVE_APP:-}"
+    # _node_dir da list_env_node_dirs È la directory del nodo — lo stesso
+    # oggetto che resolve-logs.sh esporta come LOG_SEARCH_ROOT per il nodo
+    # attivo. Quindi la scoperta parte da lì, senza APP_SUBPATH.
     while IFS= read -r _node_dir; do
         _nnum=$(node_num_from_dir "$_node_dir")
         progress_show "selezione log: nodo ${_nnum}..."
-        _app_dir="${_node_dir}/$(eval echo "$APP_SUBPATH")"
-        [[ -d "$_app_dir" ]] || continue
-        _sal_add "$_app_dir" "$ACCESS_LOG_BASE" "$_nnum"
-        _sal_add "$_app_dir" "$SERVER_LOG_BASE" "$_nnum"
-        _sal_add "$_app_dir" "$GC_LOG_BASE"     "$_nnum"
-        if [[ -n "${CUSTOM_LOG_SUBPATH:-}" ]]; then
-            _sal_add "${_node_dir}/$(eval echo "$CUSTOM_LOG_SUBPATH")" "" "$_nnum"
-        fi
+        _sal_scan_root "$_node_dir" "$_nnum"
     done < <(list_env_node_dirs "${ACTIVE_ENV}")
 else
     _multi_node=0
     _scope_label="nodo ${ACTIVE_NODE:-?}"
-    access="${ACCESS_LOG:-}"
-    server="${SERVER_LOG:-}"
-    gc="${GC_LOG:-}"
-    [[ -n "$access" ]] && _sal_add "${ACCESS_LOG_DIR:-$(dirname "$access")}" "$ACCESS_LOG_BASE" "${ACTIVE_NODE:-}"
-    [[ -n "$server" ]] && _sal_add "${SERVER_LOG_DIR:-$(dirname "$server")}" "$SERVER_LOG_BASE" "${ACTIVE_NODE:-}"
-    [[ -n "$gc"     ]] && _sal_add "${GC_LOG_DIR:-$(dirname "$gc")}"         "$GC_LOG_BASE"     "${ACTIVE_NODE:-}"
-    _sal_add "${CUSTOM_LOG_DIR:-}" "" "${ACTIVE_NODE:-}"
+    _sal_scan_root "${LOG_SEARCH_ROOT:-}" "${ACTIVE_NODE:-}"
 fi
 
 progress_clear
 _t_select_ms=$(( $(date +%s%3N 2>/dev/null || echo 0) - _t_select_start ))
 total_files="${#all_paths[@]}"
 if [[ "$total_files" -eq 0 ]]; then
-    echo "Nessun log disponibile da cercare."
+    # Dire DOVE si è cercato: con la scoperta ricorsiva un LOG_SEARCH_ROOT vuoto
+    # o inesistente produce zero file, e senza il path il messaggio sarebbe
+    # indistinguibile da "il nodo esiste ma non ha log" — lo stesso falso
+    # negativo silenzioso corretto in LOGSEL-1.
+    if [[ "$_multi_node" -eq 1 ]]; then
+        echo "Nessun log disponibile da cercare in ${ACTIVE_ENV} (nessun nodo con log)."
+    else
+        echo "Nessun log disponibile da cercare sotto ${LOG_SEARCH_ROOT:-<LOG_SEARCH_ROOT non impostata>}."
+    fi
     rm -rf "$tmp_dir"
     exit 0
 fi
@@ -212,6 +238,7 @@ for (( i=0; i<total_files; i++ )); do
         lbl="${all_labels[$i]}"
         pth="${all_paths[$i]}"
         nod="${all_nodes[$i]}"
+        apl="${all_apps[$i]:-}"
         hits=0 first_ts="" last_ts=""
 
         # Due passate gawk sullo STESSO file (search_all_logs.awk: FNR==NR):
@@ -265,7 +292,7 @@ for (( i=0; i<total_files; i++ )); do
             IFS='|' read -r hits first_ts last_ts <<< "$_result"
         fi
 
-        printf "%s|%s|%s|%s|%s\n" "$lbl" "${hits:-0}" "${first_ts:-}" "${last_ts:-}" "${nod:-}" \
+        printf "%s|%s|%s|%s|%s|%s\n" "$lbl" "${hits:-0}" "${first_ts:-}" "${last_ts:-}" "${nod:-}" "${apl:-}" \
             > "$tmp_dir/$(printf '%05d' "$i")"
     ) &
     _running=$(( _running + 1 ))
@@ -286,21 +313,22 @@ progress_clear
 _t_search_ms=$(( $(date +%s%3N 2>/dev/null || echo 0) - _t_search_start ))
 
 # ── Raccoglie e analizza risultati ────────────────────────────────────────────
-res_labels=() res_hits=() res_ts=() res_last=() res_nodes=()
+res_labels=() res_hits=() res_ts=() res_last=() res_nodes=() res_apps=()
 max_hits=0 max_lbl=8 total_hits=0 matched_files=0
 
 for (( i=0; i<total_files; i++ )); do
     _f="$tmp_dir/$(printf '%05d' "$i")"
     if [[ -f "$_f" ]]; then
-        IFS='|' read -r rl rh rt rlast rn < "$_f"
+        IFS='|' read -r rl rh rt rlast rn ra < "$_f"
     else
-        rl="${all_labels[$i]}" rh=0 rt="" rlast="" rn="${all_nodes[$i]:-}"
+        rl="${all_labels[$i]}" rh=0 rt="" rlast="" rn="${all_nodes[$i]:-}" ra="${all_apps[$i]:-}"
     fi
     res_labels+=("${rl:-?}")
     res_hits+=("${rh:-0}")
     res_ts+=("${rt:-}")
     res_last+=("${rlast:-}")
     res_nodes+=("${rn:-}")
+    res_apps+=("${ra:-}")
     [[ "${rh:-0}" -gt "$max_hits" ]] && max_hits="${rh:-0}"
     [[ "${#rl}"   -gt "$max_lbl"  ]] && max_lbl="${#rl}"
     total_hits=$(( total_hits + ${rh:-0} ))
@@ -353,16 +381,49 @@ fi
 _node_col_w=0
 [[ "$_multi_node" -eq 1 ]] && _node_col_w=$(( 5 + _node_w + 2 ))
 
+# Colonna APP: presente solo se i match provengono da più di una applicazione,
+# stesso criterio condizionale di _multi_node. Se tutti i risultati sono della
+# stessa app non c'è nulla da disambiguare, e una colonna col medesimo valore su
+# ogni riga sarebbe solo rumore — la ragione per cui _node_col_w è 0 in nodo
+# singolo. Calcolato sui match EFFETTIVI (res_apps delle righe con hits > 0),
+# non sulla lunghezza di AVAILABLE_APPS: un nodo può avere due app configurate
+# ma match in una sola.
+# _multi_app è l'unica fonte di verità per header, separatore e righe — nel 2026-08-05
+# un criterio duplicato con logiche diverse fra header e righe ha prodotto un
+# disallineamento reale su questa stessa tabella.
+_multi_app=0 _first_app="" _app_w=0
+for (( i=0; i<total_files; i++ )); do
+    [[ "${res_hits[$i]:-0}" -gt 0 ]] || continue
+    _ra="${res_apps[$i]:-}"
+    [[ "${#_ra}" -gt "$_app_w" ]] && _app_w="${#_ra}"
+    if [[ -z "$_first_app" ]]; then
+        _first_app="$_ra"
+    elif [[ "$_ra" != "$_first_app" ]]; then
+        _multi_app=1
+    fi
+done
+# Il placeholder "-" per un path non attribuibile occupa 1 carattere: se è il
+# valore più lungo (tutte le app ignote) la colonna resta larga 1.
+[[ "$_app_w" -lt 1 ]] && _app_w=1
+_app_col_w=0
+# A differenza del nodo non serve un prefisso testuale: "ClaimCenter" si spiega
+# da sé, "04" no (da cui "nodo 04"). Quindi solo il gutter di 2 spazi.
+[[ "$_multi_app" -eq 1 ]] && _app_col_w=$(( _app_w + 2 ))
+log_debug "tabella: multi_node=$_multi_node multi_app=$_multi_app app_col_w=$_app_col_w"
+
 # Header — colonna nodo presente solo in modalità multi-nodo, stessa larghezza
 # usata sotto per le righe dati (_node_col_w), non più duplicata a mano.
 # I separatori │ precedono le colonne timestamp sia nell'header che nei dati.
 _node_hdr_str=""
 [[ "$_node_col_w" -gt 0 ]] && _node_hdr_str=$(printf "${_D}%-${_node_col_w}s${_X}" "NODO")
-printf "  %s${_D}%-${max_lbl}s  %-12s  %6s  │  %-19s  │  %-19s${_X}\n" \
-    "$_node_hdr_str" "LOG" "" "MATCH" "PRIMO MATCH" "ULTIMO MATCH"
-# Larghezza separatore = colonna nodo (0 se nodo singolo)
+_app_hdr_str=""
+[[ "$_app_col_w" -gt 0 ]] && _app_hdr_str=$(printf "${_D}%-${_app_col_w}s${_X}" "APP")
+printf "  %s%s${_D}%-${max_lbl}s  %-12s  %6s  │  %-19s  │  %-19s${_X}\n" \
+    "$_node_hdr_str" "$_app_hdr_str" "LOG" "" "MATCH" "PRIMO MATCH" "ULTIMO MATCH"
+# Larghezza separatore = colonna nodo (0 se nodo singolo) + colonna app (0 se
+# una sola app nei match)
 #   + max_lbl + 2 + 12 + 2 + 6 + (2+│+2) + 19 + (2+│+2) + 19 = max_lbl + 70
-_sep_w=$(( max_lbl + 70 + _node_col_w ))
+_sep_w=$(( max_lbl + 70 + _node_col_w + _app_col_w ))
 printf "  ${_D}%s${_X}\n" "$(printf '─%.0s' $(seq 1 "$_sep_w"))"
 
 for (( i=0; i<total_files; i++ )); do
@@ -373,6 +434,7 @@ for (( i=0; i<total_files; i++ )); do
     _t="${res_ts[$i]}"
     _tlast="${res_last[$i]:-}"
     _n="${res_nodes[$i]:-}"
+    _a="${res_apps[$i]:-}"
 
     # Alternanza colore per gruppo nodo: solo in modalità multi-nodo, altrimenti
     # $_n è costante su tutte le righe (nodo singolo) e la prima riga flipperebbe
@@ -437,11 +499,21 @@ for (( i=0; i<total_files; i++ )); do
         node_col=$(printf "${_FG}nodo ${_RR}${C_BOLD}${C_VAL}%${_node_w}s${_RR}  " "$_n")
     fi
 
+    # Colonna app: stessa larghezza (_app_w) usata nell'header via _app_col_w,
+    # così "LOG" resta allineato fra header e righe per costruzione. "-" quando
+    # il path non è attribuibile a nessuna AVAILABLE_APPS — il file è comunque
+    # nei risultati (principio 5), non si finge di sapere da dove viene.
+    # _RR e non _X: un reset pieno spegnerebbe lo sfondo alternato a metà riga.
+    app_col=""
+    if [[ "$_multi_app" -eq 1 ]]; then
+        app_col=$(printf "${_FG}%-${_app_w}s${_RR}  " "${_a:--}")
+    fi
+
     # Il nome del log usa _FG: sulla riga con sfondo è il foreground del tema,
     # altrove è vuoto (colore di default del terminale), come prima.
     _l_fg=""
     [[ "$_row_dim" -eq 1 && -n "${C_ROW_ALT_FG:-}" ]] && _l_fg="${C_ROW_ALT_FG}"
-    printf "  ${_RL}${node_col}${_l_fg}%-${max_lbl}s${_RR}  ${bc}%s${_RR}%s  %6d" \
+    printf "  ${_RL}${node_col}${app_col}${_l_fg}%-${max_lbl}s${_RR}  ${bc}%s${_RR}%s  %6d" \
         "$_l" "$bar" "$bar_pad" "$_h"
     printf "  ${_FG}│${_RR}  ${_l_fg}%-19s" "${_t:--}"
     printf "  ${_FG}│${_RR}  ${_l_fg}%-19s${_X}\n" "${_tlast:--}"

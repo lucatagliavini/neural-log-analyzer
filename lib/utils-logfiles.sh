@@ -306,6 +306,77 @@ _is_system_log_base() {
     return 1
 }
 
+# discover_log_dirs ROOT
+# Stampa (una per riga, deduplicata e ordinata) le directory che CONTENGONO
+# file di log sotto ROOT, a qualsiasi profondità.
+#
+# Perché esiste: il contratto del profilo si ferma alla directory del nodo
+# (LOG_SEARCH_ROOT, principio 6 di CLAUDE.md). Sotto quella, la struttura è
+# ignota e va SCOPERTA, non enumerata da APP_SUBPATH/CUSTOM_LOG_SUBPATH — un
+# profilo può organizzare i log diversamente, o non avere log applicativi
+# custom affatto.
+#
+# Contratto: emette DIRECTORY, non file. Chi la chiama passa ogni directory a
+# select_log_files_grouped, che resta flat (-maxdepth 1) di proposito: le
+# rotazioni stanno sempre accanto al file che ruotano, quindi si raggruppano
+# dalla directory del file, non dalla root. **Ricorsione per la scoperta, flat
+# per le rotazioni** — la regola stabilita in LOGDISC-1.
+#
+# Funzione sorella di _log_names_in_dir() in dispatch.sh, che sullo stesso
+# principio emette NOMI LOGICI invece di directory: contratti diversi, stessa
+# idea. Se serve una terza variante, estendere una di queste due invece di
+# scriverne un'altra (principio 8).
+#
+# -iname '*.log*' e non '*.log': una directory che contiene SOLO rotazioni
+# compresse (BASENAME.log-DATE-EPOCH.gz, BASENAME.DATE.log.gz) va scoperta
+# comunque — escluderla sarebbe un falso negativo, cioè un bug di correttezza
+# (principio 5: in caso di dubbio, includere).
+#
+# \( -type f -o -type l \) PRIMA del match sul nome: una directory chiamata
+# 'archive.log/' non è un log, ed è una trappola reale già coperta dalle
+# fixture di test-log-discovery.sh. Va scoperta solo se contiene file veri.
+discover_log_dirs() {
+    local root="$1"
+    [[ -z "$root" || ! -d "$root" ]] && return
+    local -a dirs=()
+    while IFS= read -r _d; do
+        [[ -n "$_d" ]] && dirs+=("$_d")
+    done < <(find "$root" \( -type f -o -type l \) -iname '*.log*' 2>/dev/null \
+             | sed 's|/[^/]*$||' | sort -u)
+    log_debug "discover_log_dirs: root=$root directory_con_log=${#dirs[@]}"
+    local _x
+    for _x in "${dirs[@]}"; do
+        echo "$_x"
+    done
+}
+
+# resolve_app_from_path PATH
+# Restituisce il nome dell'applicazione a cui appartiene PATH, riconoscendolo
+# come segmento di directory (/<app>/) fra quelle dichiarate in AVAILABLE_APPS
+# (system.conf). Nessun output e return 1 se il path non è attribuibile.
+#
+# Data-driven per principio: AVAILABLE_APPS cambia per profilo (liquido ne ha 2,
+# usnext 3 completamente diverse), quindi nessun nome concreto vive nel codice
+# (principio 7).
+#
+# Un path non attribuibile NON è un errore e non va escluso dai risultati: un
+# log può vivere in una directory che non nomina alcuna app (principio 5). Il
+# chiamante lo etichetta come sconosciuto e lo mostra comunque.
+#
+# Centralizzata qui perché la stessa logica esisteva inline in
+# _find_named_log_elsewhere() (dispatch.sh), che ora la chiama: un solo punto di
+# verità invece di due copie che possono divergere (principio 8 — è l'errore che
+# ha prodotto i bug di LOGDISC-3).
+resolve_app_from_path() {
+    local path="$1"
+    [[ -z "$path" ]] && return 1
+    local _app
+    for _app in "${AVAILABLE_APPS[@]:-}"; do
+        [[ -n "$_app" && "$path" == *"/${_app}/"* ]] && { echo "$_app"; return 0; }
+    done
+    return 1
+}
+
 # Risolve un glob in un singolo file "rappresentante", disambiguando quando il
 # pattern matcha log logicamente diversi (es. "*cc*.log" → cc, ccJBatch, ccCanaliz).
 #
