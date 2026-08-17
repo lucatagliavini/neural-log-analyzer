@@ -17,7 +17,6 @@
 # Test standalone non inclusi qui (eseguirli separatamente):
 #   tests/test-normalize-query.sh     unit test della normalizzazione entità
 #   tests/test-normalize-parity.sh    parità bash/Python (vedi --parity)
-#   tests/test-train-regression.sh    determinismo dei pesi di train.py
 #   tests/smoke-tools.sh              smoke test sul server, richiede log reali
 #
 
@@ -272,7 +271,8 @@ run_unit_tests() {
     for _t in test-utils-logfiles.sh test-param-extract.sh test-search-all-logs.sh \
               test-correlate-gc-slow.sh test-slow-requests.sh test-dispatch-perf.sh \
               test-theme.sh test-filter-ip.sh test-srch-named-log.sh test-log-discovery.sh \
-              test-logdisc-4.sh test-access-format.sh test-profile-config.sh; do
+              test-logdisc-4.sh test-access-format.sh test-profile-config.sh \
+              test-train-regression.sh; do
         if bash "$SCRIPT_DIR/$_t"; then
             pass=$(( pass + 1 ))
             printf "  ${GREEN}PASS${RESET}  %s\n" "$_t"

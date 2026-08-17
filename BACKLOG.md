@@ -8,15 +8,60 @@ Aggiornato: 2026-08-17
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
-| NLP-1 | **Vocabolario, dataset e modello vanno nel FRAMEWORK, non nel profilo** (indicazione utente 2026-08-17). Verificato: `unigrams.txt`+`bigrams.txt` sono **196 righe con ZERO nomi concreti** di applicazioni o log — descrivono come parla un utente in italiano, con i placeholder `<APP>`/`<LOGFILE>`/`<ENV>`/`<NODE>`, non cosa contiene un'installazione. Lo stesso vale per `dataset/queries_labeled.txt` e, di conseguenza, per `models/`. Oggi vivono in `profiles/liquido/` con tre symlink da `usnext`: la struttura suggerisce l'inverso della realtà, e **la prova che è un errore di collocazione è che montare il secondo profilo ha richiesto dei symlink**. Struttura scelta: default nel framework (es. `nlp/`), **override nel profilo** se un giorno servisse un vocabolario diverso (cliente non italiano, gergo aziendale) — stesso schema di `system.local.conf`. Impatto: i path sono in 20+ punti (`train.sh`, `setup.sh`, `build-dataset.sh`, `lib/train.py`, `lib/build_dataset.py`, `domain.conf`, i test), quindi è un refactoring meccanico ma esteso, da fare con verifica completa | **Prossima** |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
-| PROF-2 | **Struttura del profilo da documentare in `CLAUDE.md`**: l'audit del 2026-08-17 ha stabilito quali file servono davvero — obbligatori `system.conf`, `domain.conf`, `entities.conf`, `models/intent_classifier/`; necessari per addestrare `unigrams.txt`, `bigrams.txt`, `dataset/queries_labeled.txt` (che con NLP-1 si spostano nel framework); opzionali `system.local.conf` (override per-installazione, non deployato) ed `examples.sh`. Il criterio che li separa: **il profilo contiene coordinate, non capacità** — dove sono i log, come si chiamano le cose, quale tecnologia; non il vocabolario né il modello. Da scrivere in CLAUDE.md dopo NLP-1, che cambia la collocazione di metà di questi file | Dopo NLP-1 |
 
-**Le voci aperte in mattinata sono tutte chiuse.** Restano tre voci nate dall'audit di
-flessibilità di fine giornata: NLP-1 (la sola con priorità), GCFMT-1 (in attesa di un secondo
-formato GC reale) e PROF-2 (documentazione, dipende da NLP-1).
+**Resta una sola voce**, GCFMT-1, in attesa di un secondo formato GC reale da supportare:
+con un solo caso l'interfaccia non è validabile. Tutto il resto aperto il 2026-08-17 è
+stato chiuso nella stessa giornata.
 
-### NLP-1 — struttura decisa (2026-08-17, con l'utente)
+### NLP-1 + PROF-2 — **FATTO** (2026-08-17)
+
+**Struttura realizzata**: `nlp/` con `unigrams.txt`, `bigrams.txt`, `tools.conf` (nuovo,
+estratto da `domain.conf`), `dataset/` e `models/intent_classifier/`. I profili scendono a
+**4 file di coordinate**: `system.conf`, `entities.conf`, `domain.conf` ridotto (146→125
+righe), `examples.sh`. I tre symlink di `usnext` sono spariti.
+
+**`lib/nlp-paths.sh` → `nlp_resolve_paths()`**: punto unico, precedenza profilo→framework
+per singolo artefatto. Tre scelte di design con la loro ragione:
+1. **non può stare in `domain.conf`** (che si auto-localizzava con `_DOMAIN_DIR`): i test
+   creano profili in `mktemp -d`, fuori dal repo. Effetto collaterale positivo: la fixture
+   di `test-profile-config.sh` si è *semplificata*, non complicata
+2. **`export` su tutto**: `query-to-features.sh`, `infer.sh`, `infer-dry.sh` sono
+   subprocessi, e un figlio eredita solo ciò che è esportato
+3. **`MODEL_DIR` derivato da `NLP_CUSTOM`**: un profilo che sovrascrive
+   vocabolario/topologia/dataset ottiene pesi propri per conseguenza, non per
+   configurazione — un flag separato permetterebbe di configurare l'incoerenza
+
+**Corretto un ordine sbagliato preesistente** in `infer.sh`/`infer-dry.sh`: sourciavano
+`domain.conf` prima di calcolare `ANALYZER_DIR`. Funzionava per caso.
+
+**Rimossi**: `dataset/` e `models/` alla radice del repo (topologia `72,48,12`, zero
+consumatori, commit separato per non confonderli con quelli da spostare) e il backup non
+tracciato.
+
+**DIFETTO PREESISTENTE TROVATO durante la verifica**: `test-train-regression.sh` aveva
+checksum **obsoleti dal 2026-08-07** — LOGSEL-1b aveva aggiunto 16 esempi al dataset e i
+valori non erano stati rigenerati, perché **il test non era nella suite di default e
+nessuno lo eseguiva**. Verificato che il dataset è bit-identico da inizio giornata (md5
+`5ceb52ae…`) e che `neural-bash`/`train.py` sono fermi al 3 agosto: il disallineamento era
+preesistente, non causato dallo spostamento. Checksum rigenerati (riproducibilità
+confermata su 3 run bit-identici) e **test aggiunto alla suite**: un checksum verificato
+solo a mano è documentazione di uno stato passato, non una rete di sicurezza. È la stessa
+classe dei "falsi verdi" di `test-utils-logfiles.sh` — un test che non gira è
+indistinguibile da un test che passa.
+
+**Verifica**: md5 dei pesi identici prima/dopo il `git mv`; dataset rigenerato
+**bit-identico**; parità 1086/1086 su **entrambi** i profili (per `usnext` è la prova che
+il fallback funziona senza symlink); **90 PASS / 0 FAIL**; `grep` sui path vecchi a zero;
+`deploy --dry-run` con `nlp/dataset/` escluso e `nlp/models/` incluso; in produzione
+`filter_errors` al 97% su entrambi i profili e `Pass.log` al 100% su `usnext`.
+
+**PROF-2**: `CLAUDE.md` riscritta con la distinzione capacità/coordinate; `README.md`
+corretto — citava `vocab.sh`, rimosso dal progetto il 2026-07-29.
+
+---
+
+### La struttura decisa prima dell'implementazione (2026-08-17, con l'utente)
 
 **Criterio: il profilo contiene COORDINATE, non CAPACITÀ.** Dove sono i log, come si
 chiamano le cose, quale tecnologia — non il vocabolario, non il dataset, non il modello.

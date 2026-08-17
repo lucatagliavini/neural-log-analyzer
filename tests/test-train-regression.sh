@@ -39,9 +39,18 @@ trap 'rm -rf "$WORK"' EXIT
 
 RED="\033[31m"; GREEN="\033[32m"; RESET="\033[0m"
 
-# Checksum di riferimento — rigenerati il 2026-08-05 dopo l'aggiunta del tool list_logs
-# (NEXT-1): 2 unigram + 1 bigram nuovi (108 → 111 feature) e una nuova classe di output
-# (15 → 16 tool), quindi i valori precedenti non sono più raggiungibili.
+# Checksum di riferimento — rigenerati il 2026-08-17 (NLP-1).
+#
+# Erano OBSOLETI dal 2026-08-07: LOGSEL-1b aveva aggiunto 16 esempi al dataset
+# (1070 → 1086) e i checksum non erano stati rigenerati, perché questo test NON era
+# nella suite di default e nessuno lo eseguiva. Verificato durante NLP-1 che il
+# dataset è bit-identico da inizio giornata (md5 5ceb52ae…) e che neural-bash e
+# lib/train.py sono fermi al 3 agosto: il disallineamento era preesistente, non
+# causato dallo spostamento in nlp/.
+#
+# Da allora il test è NELLA SUITE (run-tests.sh): un checksum pinnato verificato solo
+# a mano è documentazione di uno stato passato, non una rete di sicurezza — un test
+# che non gira è indistinguibile da un test che passa.
 # Prodotti e verificati con OMP_NUM_THREADS=1 (3 run bit-identici) — vedi la nota sui
 # thread in testa al file: i valori multi-thread NON sono stabili.
 #
@@ -49,8 +58,8 @@ RED="\033[31m"; GREEN="\033[32m"; RESET="\033[0m"
 # Qualsiasi modifica al vocabolario o a queries_labeled.txt li invalida per costruzione —
 # in quel caso rigenerarli, non "aggiustarli", e verificare che la riproducibilità regga
 # su almeno 3 run consecutivi.
-EXPECTED_L1="29ad3a62474da4804b808e59ecf58263"
-EXPECTED_L2="5415c8077c393a3957d66935bb652df5"
+EXPECTED_L1="9d7667a94c977a272c6e96cd230ecdd1"
+EXPECTED_L2="33b82d5740dc1fa76a92490384f46759"
 
 # La topologia deve combaciare con NUM_FEATURES del profilo: train.py scarta le righe
 # con un numero di colonne diverso da num_features+num_outputs, e con dataset e topologia
