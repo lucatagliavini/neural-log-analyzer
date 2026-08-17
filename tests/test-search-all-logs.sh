@@ -64,7 +64,9 @@ export SEARCH_PATTERN="searchhub"
 export SEARCH_PARALLEL_JOBS=2
 export ACCESS_LOG_BASE="undertow_access_log" SERVER_LOG_BASE="server" GC_LOG_BASE="gc"
 export CUSTOM_LOG_SUBPATH='$APP/Guidewire'
-export APP_SUBPATH='$ENV_NAME/$APP'
+# APP_SUBPATH non è più esportata: dopo LOGDISC-2 il tool scopre le directory
+# sotto il nodo e non costruisce path da template. Tenerla qui darebbe
+# l'impressione che serva ancora al contratto (CLEAN-1).
 export NODE_NAME_TEMPLATE='lx${ENV_CODE}jbliq${NODE_NUM}'
 export ACTIVE_ENV="prod" ACTIVE_APP="ClaimCenter"
 export PROFILE_DIR="$ROOT_DIR/profiles/liquido"

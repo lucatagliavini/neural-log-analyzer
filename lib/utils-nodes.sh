@@ -3,7 +3,7 @@
 # utils-nodes.sh — scoperta dinamica dei nodi per ambiente dal filesystem.
 #
 # Richiede che siano già definite (via system.conf):
-#   LOG_BASE_DIR, NODE_NAME_TEMPLATE, ENV_NODE_CODE, APP_SUBPATH
+#   LOG_BASE_DIR, NODE_NAME_TEMPLATE, ENV_NODE_CODE
 #
 # Funzioni esportate:
 #   node_num_from_dir DIR
@@ -14,9 +14,13 @@
 #     Stampa (una per riga) i path NODE_DIR di tutti i nodi presenti su disco
 #     per l'ambiente dato. Non emette nulla se l'ambiente è sconosciuto.
 #
-#   list_env_app_dirs ENV_NAME APP
-#     Stampa (una per riga) i path APP_DIR validi (NODE_DIR + APP_SUBPATH)
-#     per tutti i nodi trovati. Un nodo è incluso solo se la sua APP_DIR esiste.
+# Il contratto si ferma alla directory del NODO (principio 6): non esiste più una
+# funzione che costruisca il path dell'app da un template. `list_env_app_dirs`,
+# che lo faceva con APP_SUBPATH, è stata rimossa con CLEAN-1 (2026-08-17) — aveva
+# zero chiamanti ed era l'ultimo consumatore reale di quella variabile. Chi deve
+# raggiungere i log sotto un nodo usa la scoperta: `resolve_system_log_dir` per
+# access/server/gc, `resolve_log_glob` per i named log, `discover_log_dirs` per
+# enumerare le directory con log.
 #
 
 # node_num_from_dir DIR
@@ -46,13 +50,3 @@ list_env_node_dirs() {
     find "$env_base" -maxdepth 1 -type d -name "${prefix}*" 2>/dev/null | sort
 }
 
-# list_env_app_dirs ENV_NAME APP
-list_env_app_dirs() {
-    local env_name="$1"
-    local app="${2:-${DEFAULT_APP:-}}"
-
-    while IFS= read -r node_dir; do
-        local app_dir="${node_dir}/$(eval echo "$APP_SUBPATH")"
-        [[ -d "$app_dir" ]] && echo "$app_dir"
-    done < <(list_env_node_dirs "$env_name")
-}
