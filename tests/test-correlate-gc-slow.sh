@@ -38,7 +38,9 @@ assert_eq() {
 
 section() { printf "\n${BOLD}── %s ${RESET}${DIM}%s${RESET}\n" "$1" "────────────────────────────"; }
 
-_UTILS="-f $LIB/utils-time.awk -f $LIB/utils-colors.awk -f $LIB/utils-jboss.awk -f $LIB/utils-dedup.awk"
+# utils-access-undertow.awk: dopo ACCESS-1 le estrazioni access vengono dalle
+# funzioni condivise. Deve rispecchiare i -f che dispatch.sh passa in produzione.
+_UTILS="-f $LIB/utils-time.awk -f $LIB/utils-colors.awk -f $LIB/utils-jboss.awk -f $LIB/utils-access-undertow.awk -f $LIB/utils-dedup.awk"
 _TOOL="$LIB/tools/correlate_gc_slow.awk"
 _strip() { sed 's/\x1b\[[0-9;]*m//g'; }
 

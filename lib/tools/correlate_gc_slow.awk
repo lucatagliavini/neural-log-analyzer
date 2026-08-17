@@ -58,8 +58,8 @@ BEGIN {
 # Pattern di contenuto (non FILENAME, vedi nota Fase 1): una riga GC non ha mai il
 # gruppo status/bytes/time tra virgolette dell'access log, quindi resta esclusa.
 !/Pause (Young|Full|Mixed)/ {
-    if (!match($0, /" [0-9]+ [0-9-]+ ([0-9]+) /, a)) next
-    resp_ms = a[1] + 0
+    resp_ms = access_time_ms()
+    if (resp_ms < 0) next
 
     req_epoch = access_ts()
     if (req_epoch == 0) next
@@ -81,8 +81,8 @@ BEGIN {
     if (correlated) correlated_count++
 
     if (correlated && correlated_count <= 20) {
-        if (match($0, /"([A-Z]+) ([^ ]+) HTTP/, c)) {
-            method = c[1]
+        method = access_method()
+        if (method != "") {
             # Il metodo HTTP è una CATEGORIA, non una gravità: GET non è più "positivo"
             # di POST. Usa C_TAG, che un tema può differenziare da C_OK/C_ACCENT —
             # con C_OK, in un tema dove il verde è "esito positivo", GET sembrerebbe
@@ -90,7 +90,7 @@ BEGIN {
             method_color = C_TAG
             color = (resp_ms >= REQ_CRIT) ? C_CRIT : C_WARN
             printf "%sCORRELATA%s  %s%d ms%s  %s%s%s %s\n", \
-                color, C_RESET, color, resp_ms, C_RESET, method_color, method, C_RESET, c[2]
+                color, C_RESET, color, resp_ms, C_RESET, method_color, method, C_RESET, access_url()
         }
     }
 }
