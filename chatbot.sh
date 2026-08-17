@@ -95,6 +95,33 @@ source "$PROFILE_DIR/domain.conf"
 # Dizionario entità (APP alias, ENV synonyms, NODE patterns) per normalize-query.sh
 [[ -f "$PROFILE_DIR/entities.conf" ]] && source "$PROFILE_DIR/entities.conf"
 
+# ─── Completezza del profilo ─────────────────────────────────────────────────
+# Un profilo incompleto è un errore di CONFIGURAZIONE, e va detto all'avvio con
+# l'elenco di cosa manca — non scoperto alla prima query, dove emergerebbe come
+# un messaggio parziale da resolve-logs.sh su una sola variabile per volta.
+#
+# Trovato con PROF-1 (2026-08-17): profiles/usnext esisteva nel repo definendo
+# AVAILABLE_APPS, APP_SUBPATH e 11 TOOL_DESC — quindi SEMBRAVA completo — ma senza
+# i tre *_LOG_BASE, quindi ogni query moriva su `[ERROR] ACCESS_LOG_BASE non
+# impostato`. Un profilo scheletro indistinguibile da uno funzionante suggerisce
+# una generalizzazione dichiarata e non verificata.
+_missing_cfg=()
+for _req in LOG_BASE_DIR ACCESS_LOG_BASE SERVER_LOG_BASE GC_LOG_BASE \
+            SERVER_LOG_FORMAT NODE_NAME_TEMPLATE DEFAULT_APP; do
+    [[ -z "${!_req:-}" ]] && _missing_cfg+=("$_req")
+done
+# Gli array associativi/indicizzati non si testano con -z: si verifica che siano
+# dichiarati e non vuoti.
+declare -p ENV_NODE_CODE &>/dev/null || _missing_cfg+=("ENV_NODE_CODE")
+[[ "$(declare -p AVAILABLE_APPS 2>/dev/null)" == *"("*")"* ]] || _missing_cfg+=("AVAILABLE_APPS")
+if [[ "${#_missing_cfg[@]}" -gt 0 ]]; then
+    echo "[ERROR] Profilo incompleto: $PROFILE_DIR" >&2
+    echo "        Mancano in system.conf: ${_missing_cfg[*]}" >&2
+    echo "        Confronta con profiles/liquido/system.conf, che è il riferimento." >&2
+    exit 1
+fi
+unset _missing_cfg _req
+
 # ─── Tema colore ─────────────────────────────────────────────────────────────
 # Precedenza: --theme > BOT_THEME dall'ambiente > BOT_THEME da system.conf /
 # system.local.conf > "mono".

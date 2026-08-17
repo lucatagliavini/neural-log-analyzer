@@ -470,16 +470,25 @@ con 11 tool (senza `search_all_logs`) — quindi **sembra** un profilo alternati
 nulla segnala che non lo sia. È il rischio: un profilo scheletro indistinguibile da uno
 funzionante suggerisce una generalizzazione **dichiarata ma non verificata**.
 
-**Da decidere** (serve contesto che non è nel repo):
-- **completarlo** — richiede i nomi log reali di quel middleware, e sarebbe la prova più
-  forte che il contratto non è liquido-specifico: oggi la generalità è argomentata
-  leggendo il codice, non dimostrata eseguendolo
-- **rimuoverlo** — se è solo uno scheletro dimostrativo, tenerlo costa manutenzione (ogni
-  modifica al contratto dovrebbe aggiornarlo) e dà una falsa sicurezza
+**Decisione (utente, 2026-08-17): completarlo quando i log saranno montati.** `usnext` verrà
+montato su `lxprworkerlana01` accanto a `liquido` (il nuovo `LOG_BASE_DIR` è
+`/unipol/logs/farmlog/<profilo>/`, predisposto per il multi-profilo). I nomi dei log si
+leggeranno **dal filesystem reale**, non ipotizzati — è l'unico modo di completarlo con dati
+verificati. A quel punto diventa anche la prova più forte che il contratto non è
+liquido-specifico: oggi la generalità è argomentata leggendo il codice, non dimostrata
+eseguendolo.
 
-Nel frattempo vale la pena un **guard esplicito**: `chatbot.sh` o `setup.sh` che verifica la
-completezza di un profilo e dice cosa manca, invece di far scoprire il problema alla prima
-query. Un profilo incompleto è un errore di configurazione, non un incidente di runtime.
+**Fatto intanto — guard di completezza** (`chatbot.sh`, 2026-08-17): all'avvio verifica le 9
+variabili che il contratto richiede (`LOG_BASE_DIR`, i tre `*_LOG_BASE`,
+`SERVER_LOG_FORMAT`, `NODE_NAME_TEMPLATE`, `DEFAULT_APP`, `ENV_NODE_CODE`,
+`AVAILABLE_APPS`) ed elenca **tutte** quelle mancanti in un messaggio solo, indicando
+`profiles/liquido/system.conf` come riferimento. Prima il problema emergeva alla prima
+query, una variabile per volta, dal punto di vista di `resolve-logs.sh`. Su `usnext` oggi
+dice: `Mancano in system.conf: ACCESS_LOG_BASE SERVER_LOG_BASE GC_LOG_BASE
+SERVER_LOG_FORMAT NODE_NAME_TEMPLATE`.
+
+Un profilo incompleto è un errore di **configurazione**, non un incidente di runtime — e va
+detto all'avvio, non a metà di una risposta.
 
 ---
 
