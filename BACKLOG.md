@@ -8,6 +8,7 @@ Aggiornato: 2026-08-17
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
+| LOGDISC-4 | **I 11 tool di sistema assumono ancora che i log stiano in una directory calcolata da un template** (`APP_SUBPATH`), l'assunzione che LOGDISC-1 ha rimosso dai named log e LOGDISC-2 dalla ricerca. Ultima area che viola il principio 6. **Da fare prima dell'integrazione del framework C** (decisione utente 2026-08-17). Vedi sezione dedicata sotto per l'audit completo e il vincolo che lo rende diverso dai due precedenti | **Prossima** |
 | DEPLOY-1 | **`deploy.sh` non ha `--delete`, e non può averlo senza una verifica di identità della directory target** (deciso 2026-08-17). Conseguenza attuale: i file rimossi in locale, o trasferiti per errore da un deploy passato, **restano** in produzione — oggi `CLAUDE.md` e `.claude/` copiati prima che le esclusioni esistessero (inerti, nessuno script del bot li legge). La rimozione manuale è stata **esplicitamente rifiutata dall'utente**: un `rsync --delete`, o un `rm` su `${HOST}:${DEST}`, cancella ricorsivamente qualunque directory gli venga passata — un `--dest` sbagliato, un `DEST` vuoto o un typo diventano una cancellazione in produzione, e il dry-run non protegge chi lancia il comando senza. Prerequisito per implementarlo: un **sentinel di identità** — `deploy.sh` verifica sul target la presenza di un marcatore noto (es. `chatbot.sh` + `profiles/`, o un file `.lana-bot-root` scritto dal deploy stesso) e rifiuta di procedere se manca, *prima* di qualsiasi operazione distruttiva. Finché non c'è, il deploy resta additivo per scelta: file residui sono rumore, una cancellazione sbagliata è un incidente | Da valutare |
 **Chiuso il 2026-08-17**: LOGDISC-2 (ricorsione in `search_all_logs` + colonna APP, vedi
 sezione dedicata).
@@ -214,6 +215,84 @@ completo in `docs/sessions/2026-08-07-03.md`.
 (D1) e, anche a scelta corretta di un tool diverso dall'atteso, nessuno lo segnalava (D2).
 Due livelli diversi della stessa pipeline: risoluzione file vs. classificazione intent vs.
 trasparenza dell'output.
+
+---
+
+## LOGDISC-4 — I tool di sistema al contratto "fino al nodo" (aperta 2026-08-17)
+
+Ultima area che viola il **principio 6**. Dopo LOGDISC-1 (named log) e LOGDISC-2
+(`search_all_logs`), gli 11 tool che leggono i log di **sistema** (access/server/gc)
+ricevono ancora path calcolati da un template di layout invece di scoprirli.
+
+**Da fare PRIMA dell'integrazione del framework C in `../neural-c`** (decisione utente
+2026-08-17): quel lavoro è grosso ma affidabile, questo tocca il percorso di risoluzione
+file su cui il C non incide — meglio non sovrapporli.
+
+### Audit (2026-08-17, verificato non stimato)
+
+L'assunzione ha **un solo punto di origine** e converge in **3 helper**:
+
+- `resolve-logs.sh:69` — `APP_DIR="$NODE_DIR/$(eval echo "$APP_SUBPATH")"`
+- `resolve-logs.sh:124-131` — emette `ACCESS_LOG_DIR`, `SERVER_LOG_DIR`, `GC_LOG_DIR`
+  **tutti e tre uguali a `APP_DIR`**
+- `dispatch.sh:69-71` — `open_logs()`, `open_gc_logs()`, `open_server_logs()` leggono
+  quelle tre variabili
+- `dispatch.sh:104-105` — `open_current_logs()`, `open_current_server_logs()` (il ramo
+  "log corrente" di `tail_log`, che bypassa il filtro temporale)
+
+**15 call site in 11 tool**: `count_status`, `distribute_status`, `slow_requests`,
+`traffic_volume`, `service_times`, `filter_ip` (via `open_logs`); `filter_errors`,
+`filter_app_errors` (via `open_server_logs`); `gc_stats` (via `open_gc_logs`);
+`correlate_gc_slow` (due sorgenti); `tail_log` (4 rami). Nessun tool costruisce path da
+sé — **tutto passa dai 3 helper**, quindi la superficie di modifica è piccola.
+
+### Il vincolo che rende questo caso DIVERSO dai due precedenti
+
+Misurato sul nodo 4 di produzione — **ogni log di sistema esiste in due copie omonime**,
+una per app:
+
+| basename | `prod/ClaimCenter` | `prod/ContactManager` |
+|---|---|---|
+| `undertow_access_log*` | 55 file | 55 file |
+| `server*` | 22 | 22 |
+| `gc*` | 16 | 16 |
+
+Quindi **una scoperta ricorsiva ingenua sarebbe un bug, non un miglioramento**: `gc_stats`
+sommerebbe le pause GC di due JVM diverse in un'unica statistica, `filter_errors`
+mescolerebbe stack trace di due applicazioni. È l'opposto di `search_all_logs`, dove
+"cerca in tutte le app" è la semantica voluta e la colonna APP basta a dichiararla: qui il
+tool deve leggere **un** log, e la molteplicità richiede una **scelta**, non un'etichetta.
+
+**La policy esiste già e non va inventata**: il tie-break di `resolve_log_glob()`
+(`utils-logfiles.sh`) — app di sessione (`ACTIVE_APP`) > file non ruotato > path più corto
+> alfabetico — più `require_app` per rifiutare un match che esiste solo sotto un'altra app
+(`skip_named_log_not_found`, LOGDISC-1). La strada è **riusare quella**, non aggiungere un
+ramo condizionale nei 3 helper (principio 2).
+
+### Difetto collaterale trovato durante l'audit
+
+`resolve-logs.sh:101-108` **aborta l'intera sessione** se non trova un access log in
+`APP_DIR`, anche per query che non lo leggono. Incontrato in prima persona il 2026-08-17
+scrivendo il test end-to-end di LOGDISC-2: la fixture non aveva
+`undertow_access_log.log`, e `chatbot.sh` è morto su una query di `search_all_logs`, che
+l'access log non lo usa nemmeno come sorgente privilegiata. Un nodo reale senza access log
+(app che non espone HTTP) rende il bot **completamente** inutilizzabile su quel nodo.
+Da valutare insieme: la validazione dovrebbe essere **per-tool** (chi legge l'access log
+fallisce se manca) invece che globale in fase di risoluzione sessione.
+
+### Da chiarire prima di implementare
+
+1. La scoperta va fatta in `resolve-logs.sh` (che emette i path una volta per sessione) o
+   nei 3 helper di `dispatch.sh` (che girano per query)? La prima è più economica, la
+   seconda più coerente col "scopri quando serve" — e `TIME_FROM`/`TIME_TO` sono noti solo
+   per query.
+2. Quando l'app di sessione **non** ha un certo log di sistema ma un'altra sì: dirlo e
+   fermarsi (come `skip_named_log_not_found`) o leggere quello dell'altra app dichiarandolo?
+   Per i named log la risposta è già "dirlo e fermarsi" — la coerenza suggerisce la stessa,
+   da confermare.
+3. `open_current_log_for` costruisce `"${dir}/${base}.log"` **senza** passare da
+   `select_log_files_grouped` (bypass intenzionale, OBS-3): va portato alla scoperta o
+   resta un percorso diretto?
 
 ---
 
