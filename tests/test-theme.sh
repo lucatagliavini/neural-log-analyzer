@@ -351,6 +351,39 @@ theme_load dark 2>/dev/null
 assert_true "dark: il testo sulla riga con sfondo differisce da C_LBL" \
     "$([[ "$C_ROW_ALT_FG" != "$C_LBL" ]] && echo 1 || echo 0)"
 
+# ─── Scopribilità: il tema deve comparire nell'help (2026-08-17) ────────────
+section "L'opzione --theme è documentata in --help"
+
+# Segnalato dall'utente: "nell'help del chatbot non compare il tema, che era
+# qualcosa che avevamo incluso". Le opzioni c'erano da UI-11 e funzionavano — ma
+# nessuno poteva scoprirle senza leggere il codice. Una feature non documentata è
+# una feature che non esiste per chi la userebbe.
+_help=$("$ROOT_DIR/chatbot.sh" --help 2>&1 || true)
+
+assert_true "--help menziona --theme" \
+    "$([[ "$_help" == *"--theme"* ]] && echo 1 || echo 0)"
+assert_true "--help menziona --list-themes" \
+    "$([[ "$_help" == *"--list-themes"* ]] && echo 1 || echo 0)"
+assert_true "--help spiega la precedenza (CLI > env > system.conf)" \
+    "$([[ "$_help" == *"Precedenza"* && "$_help" == *"BOT_THEME"* ]] && echo 1 || echo 0)"
+assert_true "--help documenta NO_COLOR" \
+    "$([[ "$_help" == *"NO_COLOR"* ]] && echo 1 || echo 0)"
+
+# L'help si delimita da sé con END-HELP: prima era tagliato a `head -16`, un
+# contatore da aggiornare a mano che si è rotto appena l'header è cresciuto —
+# sconfinando nei commenti interni del codice. Questo test lo intercetta.
+assert_true "--help non sconfina nel codice (nessuna sezione interna)" \
+    "$([[ "$_help" != *"─── Parsing CLI"* ]] && echo 1 || echo 0)"
+
+# I temi elencati da --list-themes devono esistere davvero come file: un elenco
+# che nomina un tema assente manderebbe l'utente su un fallback silenzioso.
+_listed=$("$ROOT_DIR/chatbot.sh" --list-themes 2>&1 | grep -oE '^  [a-z-]+$' | tr -d ' ')
+_missing=0
+for _t in $_listed; do
+    [[ -f "$ROOT_DIR/themes/${_t}.conf" ]] || _missing=$(( _missing + 1 ))
+done
+assert_eq "--list-themes elenca solo temi che esistono su disco" "0" "$_missing"
+
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"

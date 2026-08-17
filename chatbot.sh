@@ -15,6 +15,18 @@
 # In modalità interattiva --env è opzionale: il bot lo deduce dalla prima query
 # che menziona l'ambiente (es: "errori 500 in coll nodo 2").
 #
+# Tema colore (UI-11):
+#   --theme <nome>    tema per questa esecuzione
+#   --list-themes     elenca i temi disponibili ed esce
+#
+#   Precedenza: --theme > BOT_THEME dall'ambiente > BOT_THEME in system.conf /
+#   system.local.conf > "mono". Il default mono NON emette ANSI, così l'output
+#   resta pulito quando il bot gira come servizio o viene rediretto su file.
+#   NO_COLOR=1 forza mono (convenzione no-color.org).
+#   Per fissare un tema sulla propria installazione senza passarlo ogni volta:
+#   BOT_THEME=<nome> in profiles/<profilo>/system.local.conf (non deployato).
+#
+# END-HELP
 
 set -euo pipefail
 
@@ -67,7 +79,10 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         -h|--help)
-            grep "^#" "$0" | grep -v "^#!" | head -16 | sed 's/^# \?//'
+            # L'help è l'header del file fino al marcatore END-HELP: prima era `head -16`,
+            # un contatore da aggiornare a mano che si è rotto appena l'header è
+            # cresciuto (aggiunta della sezione sui temi, 2026-08-17).
+            sed -n '2,/^# END-HELP/p' "$0" | grep -v '^# END-HELP' | sed 's/^# \?//'
             exit 0
             ;;
         *) echo "[ERROR] opzione sconosciuta: $1" >&2; exit 1 ;;
