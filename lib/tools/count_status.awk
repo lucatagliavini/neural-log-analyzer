@@ -9,7 +9,7 @@ BEGIN {
 }
 
 {
-    if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
+    if ((time_from != "" || time_to != "") && !in_range(access_ts())) next
     line = $0
     if (match(line, /" ([0-9]{3}) /, a)) {
         status = a[1]

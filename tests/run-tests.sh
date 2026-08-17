@@ -267,7 +267,7 @@ run_unit_tests() {
     for _t in test-utils-logfiles.sh test-param-extract.sh test-search-all-logs.sh \
               test-correlate-gc-slow.sh test-slow-requests.sh test-dispatch-perf.sh \
               test-theme.sh test-filter-ip.sh test-srch-named-log.sh test-log-discovery.sh \
-              test-logdisc-4.sh; do
+              test-logdisc-4.sh test-access-format.sh; do
         if bash "$SCRIPT_DIR/$_t"; then
             pass=$(( pass + 1 ))
             printf "  ${GREEN}PASS${RESET}  %s\n" "$_t"

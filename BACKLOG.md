@@ -8,13 +8,17 @@ Aggiornato: 2026-08-17
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
-| CLEAN-1 | **`list_env_app_dirs()` (`utils-nodes.sh:50-58`) è codice morto**: zero chiamanti (verificato 2026-08-17), ed è l'ultimo consumatore di `APP_SUBPATH` dopo LOGDISC-4. Rimuoverla renderebbe `APP_SUBPATH` config non più usata da alcun percorso di risoluzione — da valutare se togliere anche quella da `system.conf` o tenerla come documentazione del layout tipico. Non fatto in LOGDISC-4 per non mescolare un cleanup con una modifica di comportamento | Da valutare |
-| FORMAT-1 | **Il formato delle righe di access log è cablato nel codice, non in config**: `parse_access($2)` in **8 tool** assume che il timestamp sia il 2° campo. Un middleware con formato *combined* (`%h %l %u %t`, timestamp in `$4`) non darebbe errore — `parse_access` restituirebbe 0, e con `ts=0` il codice è conservativo, quindi **il filtro temporale smetterebbe di filtrare in silenzio**. I *nomi* dei log sono già in `system.conf` (ARCH-6), il *formato* no. Vedi sezione dedicata | Da valutare |
-| PROF-1 | **`profiles/usnext` è nel repo ma non è utilizzabile**: non definisce `ACCESS_LOG_BASE`/`SERVER_LOG_BASE`/`GC_LOG_BASE` (0 occorrenze) né `SYSTEM_LOG_SYNONYMS`, quindi `resolve-logs.sh:81-86` aborta con `[ERROR] ACCESS_LOG_BASE non impostato`. Nulla lo segnala: sembra un profilo alternativo funzionante. Da decidere se **completarlo** (serve conoscere i nomi log reali di quel middleware — informazione che non è nel repo) o **rimuoverlo** per non lasciare codice morto che simula una generalizzazione non verificata. Trovato durante l'audit di LOGDISC-4 | Da valutare |
-| DEPLOY-1 | **`deploy.sh` non ha `--delete`, e non può averlo senza una verifica di identità della directory target** (deciso 2026-08-17). Conseguenza attuale: i file rimossi in locale, o trasferiti per errore da un deploy passato, **restano** in produzione — oggi `CLAUDE.md` e `.claude/` copiati prima che le esclusioni esistessero (inerti, nessuno script del bot li legge). La rimozione manuale è stata **esplicitamente rifiutata dall'utente**: un `rsync --delete`, o un `rm` su `${HOST}:${DEST}`, cancella ricorsivamente qualunque directory gli venga passata — un `--dest` sbagliato, un `DEST` vuoto o un typo diventano una cancellazione in produzione, e il dry-run non protegge chi lancia il comando senza. Prerequisito per implementarlo: un **sentinel di identità** — `deploy.sh` verifica sul target la presenza di un marcatore noto (es. `chatbot.sh` + `profiles/`, o un file `.lana-bot-root` scritto dal deploy stesso) e rifiuta di procedere se manca, *prima* di qualsiasi operazione distruttiva. Finché non c'è, il deploy resta additivo per scelta: file residui sono rumore, una cancellazione sbagliata è un incidente | Da valutare |
-**Chiuso il 2026-08-17**: LOGDISC-4 (log di sistema scoperti sotto il nodo, validazione
-per-tool, bug `require_app` — vedi sezione dedicata), LOGDISC-2 (ricorsione in `search_all_logs` + colonna APP, vedi
-sezione dedicata).
+| PROF-1 | **Completare il profilo `usnext`** quando i suoi log saranno montati su `lxprworkerlana01` (il nuovo `LOG_BASE_DIR` è `/unipol/logs/farmlog/<profilo>/`, già predisposto per il multi-profilo). Mancano i tre `*_LOG_BASE`, `SERVER_LOG_FORMAT`, `NODE_NAME_TEMPLATE` e `SYSTEM_LOG_SYNONYMS`: i valori si leggeranno **dal filesystem reale**, non ipotizzati. Il guard di completezza è già in `chatbot.sh` e li elenca tutti all'avvio. Diventerà anche la prova che il contratto non è liquido-specifico — oggi la generalità è argomentata leggendo il codice, non dimostrata eseguendolo | In attesa dei log |
+
+**Il backlog è esaurito** a meno di PROF-1, che dipende da un montaggio esterno. Tutte le
+voci aperte il 2026-08-17 in mattinata sono state chiuse nella stessa giornata.
+
+**Chiuso il 2026-08-17**: LOGDISC-2 (ricorsione in `search_all_logs` + colonna APP),
+LOGDISC-4 (log di sistema scoperti sotto il nodo, validazione per-tool, bug `require_app`),
+FORMAT-1 (timestamp riconosciuto per forma, non per posizione), DEPLOY-1 + DEPLOY-2
+(sentinel di identità, `--delete`, migrazione al server dedicato ppc64le con 6 ambienti,
+`neural-c` sincronizzato), CLEAN-1 (rimossa `list_env_app_dirs`, ultimo consumatore di
+`APP_SUBPATH`), guard di completezza del profilo (parte di PROF-1). Vedi le sezioni dedicate.
 
 **Chiuso il 2026-08-07**: LOGDISC-1 (ricerca ricorsiva log sotto il nodo, vedi sezione dedicata),
 LOGDISC-3 (bug collegati a LOGDISC-1, vedi sezione dedicata), LOGSEL-1 (misrouting +
@@ -406,7 +410,7 @@ l'implementazione, così è consultabile e non va ridedotta.
 
 ---
 
-## FORMAT-1 — Il formato delle righe è cablato, non configurato (aperta 2026-08-17)
+## FORMAT-1 — Il formato delle righe si riconosce per forma — **FATTO** (2026-08-17)
 
 Sollevato dall'utente durante la revisione di LOGDISC-4: *"I nomi log, come li determiniamo?
 Sono hardcoded? In questo caso avremmo `undertow_access_log`, ma per un websphere potrebbero
@@ -441,17 +445,37 @@ assunzione di formato.
 trovato); cambiare un *formato* fallisce in silenzio. Il primo è configurazione vera, il
 secondo è un'assunzione mascherata da configurazione.
 
-**Direzione da valutare** (non decisa): portare gli indici di campo in `system.conf` — es.
-`ACCESS_TS_FIELD=2` con `parse_access($(ACCESS_TS_FIELD))` — oppure un riconoscimento del
-formato dalla prima riga, come già fa `_logfiles_read_first_ts()` per i timestamp (4 formati
-riconosciuti, nessuno configurato). La seconda strada è più robusta ma più invasiva.
-`parse_access()` è già centralizzata in `utils-time.awk` (principio 2): il problema non è
-la funzione, sono gli **8 indici `$2` nei chiamanti**.
+**RISOLTO** (2026-08-17). Scelta la via del **riconoscimento per forma**, non della config
+(`ACCESS_TS_FIELD=2` in `system.conf` era l'alternativa): un indice da configurare sposta il
+problema su chi installa un profilo nuovo, che deve contare i campi del proprio access log —
+e sbagliare il numero riprodurrebbe lo stesso fallimento silenzioso. Riconoscere la forma è
+la strategia già usata da `_logfiles_read_first_ts()`, che identifica 4 formati di timestamp
+senza che nessuno sia configurato.
 
-**Priorità**: dopo LOGDISC-4 (decisione utente). Sono assi ortogonali — LOGDISC-4 riguarda
-*dove sono i file* (3 helper bash), FORMAT-1 *come si leggono le righe* (8 tool AWK).
-Nessun cliente WebSphere reale oggi, quindi non è urgente; ma è la prossima cosa che si
-rompe se il progetto cambia middleware, e va saputo **prima** di prometterlo a un cliente.
+| ID | Descrizione | Stato |
+|----|-------------|-------|
+| FORMAT-1a | **`access_ts()`** in `utils-time.awk`: scandisce i campi della riga cercando quello con la **forma** `[DD/Mon/YYYY:HH:MM:SS` (pattern abbastanza specifico da non collidere con IP, status o byte count). Il campo trovato è memorizzato in `_ats_field`, quindi la scansione avviene **una volta per file**: dalla seconda riga si va diretti al campo noto. Se il campo memorizzato non produce un timestamp (riga malformata) ri-scandisce invece di restituire 0 — principio 5 | **Fatto** |
+| FORMAT-1b | **Reset per file** (`FNR == 1 { _ats_field = 0 }`): i tool ricevono corrente + rotazioni insieme, e `correlate_gc_slow` due sorgenti di formato diverso. Senza reset il campo del primo file "contaminerebbe" i successivi. Vive in `utils-time.awk`, caricato come primo `-f` da tutti i tool, invece di 8 copie della stessa regola (principio 2) | **Fatto** |
+| FORMAT-1c | **8 tool migrati** da `parse_access($2)` a `access_ts()`: `count_status`, `distribute_status`, `slow_requests`, `traffic_volume`, `service_times`, `filter_ip`, `tail_log`, `correlate_gc_slow`. `parse_access()` resta invariata e memoizzata — il problema non era la funzione ma gli indici nei chiamanti | **Fatto** |
+
+**Il fallimento era peggiore di come era stato descritto.** L'analisi diceva "il filtro
+temporale smetterebbe di filtrare"; misurato, su un log *combined* di 3 righe con una
+finestra che ne copre 2, il vecchio codice rispondeva **«Nessuna richiesta trovata nel
+periodo selezionato»** — non un filtro inattivo ma un **falso negativo pieno**, la stessa
+classe di LOGSEL-1c.
+
+**Costo misurato** (200.000 righe, 15 MB, 5 round): mediana **0.52s → 0.55s**, +6% (~0.03s).
+La scansione avviene una volta per file, non per riga, quindi il costo per riga è invariato.
+Trascurabile contro i ~83s di una query reale (P4).
+
+**Verifica**: 9 asserzioni in `tests/test-access-format.sh` su 3 formati (Undertow reale,
+combined Apache/WebSphere, timestamp in prima posizione) + righe malformate + multi-file con
+formati misti. **Fail-before/pass-after**: 6 FAIL senza il fix, 0 con.
+
+**Lezione di metodo**: 2 delle 9 asserzioni fallivano alla prima stesura, e sembrava un bug
+del codice — erano invece **asserzioni sbagliate** (cercavano `GET /ping` in una tabella che
+separa metodo e URL in colonne). Verificato l'output reale prima di toccare la produzione,
+come prescrive il principio 8: *un test che fallisce non implica un bug nel codice*.
 
 ---
 

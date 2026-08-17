@@ -16,7 +16,7 @@ BEGIN {
 }
 
 {
-    if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
+    if ((time_from != "" || time_to != "") && !in_range(access_ts())) next
 
     if (!match($0, /" [0-9]+ [0-9-]+ ([0-9]+) /, a)) next
     ms = a[1] + 0

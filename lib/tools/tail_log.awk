@@ -47,7 +47,7 @@ function count_level(line) {
                 last_line_in_range = in_range(parse_server(_ts_date, _ts_time))
             # righe senza timestamp (stack frame) mantengono last_line_in_range
         } else {
-            last_line_in_range = in_range(parse_access($2))
+            last_line_in_range = in_range(access_ts())
         }
         if (!last_line_in_range) next
     }

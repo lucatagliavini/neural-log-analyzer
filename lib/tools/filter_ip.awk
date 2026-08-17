@@ -21,7 +21,7 @@ BEGIN {
     # In modalità top-clients (ip_filter vuoto) l'ordine è irrilevante: servono
     # tutte le righe.
     if (ip_filter != "" && index($0, ip_filter) == 0) next
-    if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
+    if ((time_from != "" || time_to != "") && !in_range(access_ts())) next
 
     ip = $1
 

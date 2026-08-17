@@ -61,7 +61,7 @@ BEGIN {
     if (!match($0, /" [0-9]+ [0-9-]+ ([0-9]+) /, a)) next
     resp_ms = a[1] + 0
 
-    req_epoch = parse_access($2)
+    req_epoch = access_ts()
     if (req_epoch == 0) next
     if ((time_from != "" || time_to != "") && !in_range(req_epoch)) next
 

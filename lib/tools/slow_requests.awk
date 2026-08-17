@@ -32,7 +32,7 @@ BEGIN {
 
     if (resp_time < threshold_ms + 0) next
 
-    if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
+    if ((time_from != "" || time_to != "") && !in_range(access_ts())) next
 
     if (!match(line, /"([A-Z]+) ([^ ]+) HTTP[^"]*"/, b)) next
     method = b[1]; url = b[2]

@@ -6,7 +6,7 @@ BEGIN {
 }
 
 {
-    if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
+    if ((time_from != "" || time_to != "") && !in_range(access_ts())) next
     if (!match($0, /\[([0-9]{2}\/[A-Za-z]+\/[0-9]{4}):([0-9]{2}):([0-9]{2})/, a)) next
     hour   = a[2]
     minute = a[3] + 0
