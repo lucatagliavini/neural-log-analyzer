@@ -9,3 +9,6 @@ tmp/
 logs/
 # Contiene host e path dell'ambiente di produzione: resta locale per scelta.
 deploy.sh
+# Configurazione locale di Claude Code: ambiente di sviluppo, non del prodotto.
+# Anche escluso da deploy.sh (entrambi i rsync), così non finisce in produzione.
+.claude/
