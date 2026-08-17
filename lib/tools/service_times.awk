@@ -18,12 +18,14 @@ BEGIN {
 {
     if ((time_from != "" || time_to != "") && !in_range(access_ts())) next
 
-    if (!match($0, /" [0-9]+ [0-9-]+ ([0-9]+) /, a)) next
-    ms = a[1] + 0
+    _ms = access_time_ms()
+    if (_ms < 0) next
+    ms = _ms
     if (ms < threshold_ms + 0) next
 
-    if (!match($0, /"[A-Z]+ \/([^/ "]+)/, b)) next
-    svc = b[1]
+    _svc = access_url_root()
+    if (_svc == "") next
+    svc = _svc
 
     svc_count[svc]++
     svc_total[svc] += ms

@@ -37,7 +37,10 @@ assert_eq() {
 
 section() { printf "\n${BOLD}── %s ${RESET}${DIM}%s${RESET}\n" "$1" "────────────────────────────"; }
 
-_UTILS="-f $LIB/utils-time.awk -f $LIB/utils-colors.awk -f $LIB/utils-jboss.awk -f $LIB/utils-dedup.awk"
+# utils-access-undertow.awk: da ACCESS-1 i tool HTTP non contengono piu regex di
+# formato, le estrazioni vengono da queste funzioni. Deve rispecchiare i -f che
+# dispatch.sh passa in produzione, altrimenti il test esercita un ambiente diverso.
+_UTILS="-f $LIB/utils-time.awk -f $LIB/utils-colors.awk -f $LIB/utils-jboss.awk -f $LIB/utils-access-undertow.awk -f $LIB/utils-dedup.awk"
 _TOOL="$LIB/tools/slow_requests.awk"
 _strip() { sed 's/\x1b\[[0-9;]*m//g'; }
 

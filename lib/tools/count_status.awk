@@ -11,8 +11,9 @@ BEGIN {
 {
     if ((time_from != "" || time_to != "") && !in_range(access_ts())) next
     line = $0
-    if (match(line, /" ([0-9]{3}) /, a)) {
-        status = a[1]
+    _st = access_status()
+    if (_st != "") {
+        status = _st
     } else {
         next
     }

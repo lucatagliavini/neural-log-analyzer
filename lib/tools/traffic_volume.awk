@@ -7,14 +7,15 @@ BEGIN {
 
 {
     if ((time_from != "" || time_to != "") && !in_range(access_ts())) next
-    if (!match($0, /\[([0-9]{2}\/[A-Za-z]+\/[0-9]{4}):([0-9]{2}):([0-9]{2})/, a)) next
-    hour   = a[2]
-    minute = a[3] + 0
+    hour = access_hour()
+    if (hour == "") next
+    minute = access_minute() + 0
     bucket = hour ":" sprintf("%02d", int(minute/10)*10)
     volume[bucket]++
 
-    if (match($0, /" ([0-9]{3}) /, b)) {
-        st = b[1]
+    _st = access_status()
+    if (_st != "") {
+        st = _st
         if (substr(st, 1, 1) == "5") errors5xx[bucket]++
         else if (substr(st, 1, 1) == "4") errors4xx[bucket]++
     }

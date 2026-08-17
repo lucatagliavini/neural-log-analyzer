@@ -23,7 +23,7 @@ BEGIN {
     if (ip_filter != "" && index($0, ip_filter) == 0) next
     if ((time_from != "" || time_to != "") && !in_range(access_ts())) next
 
-    ip = $1
+    ip = access_ip()
 
     # UNA sola estrazione di status e tempo per riga, riusata da entrambi i
     # rami. Prima la regex dello status girava fino a 3 volte sulla stessa riga
@@ -33,10 +33,10 @@ BEGIN {
     # NON venivano usati: i due printf stampavano entrambi `$0` invariato. Il
     # commento diceva "sostituisce il codice status con versione colorata" ma
     # la sostituzione non c'era — codice morto rimosso (2026-08-06).
-    has_st = match($0, /" ([0-9]{3}) /, _a)
-    st = has_st ? _a[1] : ""
-    has_ms = match($0, /" [0-9]+ [0-9-]+ ([0-9]+)/, _b)
-    ms = has_ms ? _b[1]+0 : 0
+    _st = access_status(); has_st = (_st != "")
+    st = has_st ? _st : ""
+    _ms = access_time_ms(); has_ms = (_ms >= 0)
+    ms = has_ms ? _ms : 0
 
     # O6: `count`/`ip_count` contano le RICHIESTE, `ms_count`/`ip_ms_count`
     # solo quelle di cui si è potuto MISURARE il tempo. La media va divisa per

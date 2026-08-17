@@ -64,7 +64,7 @@ EOF
 
 _count() {
     local file="$1" tf="$2" tt="$3"
-    gawk -f "$LIB/utils-time.awk" -f "$LIB/utils-colors.awk" \
+    gawk -f "$LIB/utils-time.awk" -f "$LIB/utils-colors.awk" -f "$LIB/utils-access-undertow.awk" \
          -f "$TOOLS/count_status.awk" \
          -v time_from="$tf" -v time_to="$tt" "$file" 2>/dev/null \
         | sed 's/\x1b\[[0-9;]*m//g' | awk '/^TOTALE/{print $2}'
@@ -120,7 +120,7 @@ EOF
 cat > "$_FIX/b.log" <<'EOF'
 172.30.85.133 - frank [17/Aug/2026:10:30:00 +0200] "GET /b HTTP/1.1" 200 1 0 - -
 EOF
-_multi=$(gawk -f "$LIB/utils-time.awk" -f "$LIB/utils-colors.awk" \
+_multi=$(gawk -f "$LIB/utils-time.awk" -f "$LIB/utils-colors.awk" -f "$LIB/utils-access-undertow.awk" \
      -f "$TOOLS/count_status.awk" \
      -v time_from="2026-08-17T09:00" -v time_to="2026-08-17T11:00" \
      "$_FIX/a.log" "$_FIX/b.log" 2>/dev/null \
@@ -135,7 +135,7 @@ section "La migrazione copre tutti i tool, non solo count_status"
 # tabella separa metodo e URL in colonne, quindi un grep su "GET /ping" non
 # matcherebbe — la prima stesura di questo test sbagliava proprio così, e sembrava
 # un bug del codice mentre era un'assunzione errata dell'asserzione.
-_slow=$(gawk -f "$LIB/utils-time.awk" -f "$LIB/utils-colors.awk" \
+_slow=$(gawk -f "$LIB/utils-time.awk" -f "$LIB/utils-colors.awk" -f "$LIB/utils-access-undertow.awk" \
      -f "$TOOLS/slow_requests.awk" -v threshold_ms=0 \
      -v time_from="2026-08-17T09:00" -v time_to="2026-08-17T11:00" \
      "$_FIX/combined.log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' \
@@ -144,7 +144,7 @@ assert_eq "slow_requests su combined: vede le 2 righe in finestra" "2" "$_slow"
 
 # traffic_volume: aggrega per fascia di 10 minuti (la colonna FASCIA è "HH:MM",
 # non una data completa), quindi il timestamp è essenziale al raggruppamento.
-_traffic=$(gawk -f "$LIB/utils-time.awk" -f "$LIB/utils-colors.awk" \
+_traffic=$(gawk -f "$LIB/utils-time.awk" -f "$LIB/utils-colors.awk" -f "$LIB/utils-access-undertow.awk" \
      -f "$TOOLS/traffic_volume.awk" \
      -v time_from="2026-08-17T09:00" -v time_to="2026-08-17T11:00" \
      "$_FIX/combined.log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' \

@@ -119,8 +119,16 @@ _out=$("$ROOT_DIR/chatbot.sh" --profile "$_p4" --env prod --node 4 \
         --query "errori nel server.log oggi" 2>&1 || true)
 assert_true "tecnologia non supportata: dice quale manca" \
     "$([[ "$_out" == *"SERVER_LOG_FORMAT='tecnologia_inesistente' non supportato"* ]] && echo 1 || echo 0)"
-assert_true "  elenca le tecnologie disponibili" \
-    "$([[ "$_out" == *"Tecnologie disponibili:"*"jboss"* ]] && echo 1 || echo 0)"
+# "Formati disponibili" (non "Tecnologie"): il messaggio è emesso da
+# _require_awk_parser, l'helper condiviso fra SERVER_LOG_FORMAT e
+# ACCESS_LOG_FORMAT introdotto con ACCESS-1.
+assert_true "  elenca i formati disponibili" \
+    "$([[ "$_out" == *"Formati disponibili:"*"jboss"* ]] && echo 1 || echo 0)"
+# L'elenco NON deve includere i parser di un'altra famiglia: prima del filtro sul
+# prefisso, fra le "tecnologie" del server log compariva "access-undertow", che è
+# un parser di access log — un suggerimento sbagliato è peggio di nessuno.
+assert_true "  e non include i parser di access log" \
+    "$([[ "$_out" != *"Formati disponibili:"*"access-"* ]] && echo 1 || echo 0)"
 assert_true "  spiega come aggiungerne una (le due funzioni richieste)" \
     "$([[ "$_out" == *"parse_server_log()"* && "$_out" == *"is_stack_frame()"* ]] && echo 1 || echo 0)"
 assert_true "  NON è il 'gawk: fatal' grezzo" \
@@ -137,6 +145,36 @@ assert_true "jboss (supportata): il tool gira, nessun errore di formato" \
     "$([[ "$_out" != *"non supportato"* ]] && echo 1 || echo 0)"
 assert_true "  e trova l'ERROR nella fixture" \
     "$([[ "$_out" == *"ERROR"* ]] && echo 1 || echo 0)"
+
+# ─── ACCESS_LOG_FORMAT: stesso meccanismo per il parser dell'access log ──────
+section "ACCESS_LOG_FORMAT: plugin del parser access (ACCESS-1)"
+
+# Dopo ACCESS-1 i 6 tool HTTP non contengono più regex di formato: le estrazioni
+# vengono dalle funzioni di utils-access-<formato>.awk, selezionato da
+# ACCESS_LOG_FORMAT. È il meccanismo che rende il bot portabile su un middleware
+# con access log diverso (es. il combined di Apache) senza toccare i tool.
+_p6="$_FIX/access_fmt_ignoto"
+_mk_profile "$_p6"
+sed -i "s#^LOG_BASE_DIR=.*#LOG_BASE_DIR=\"$_FIX/logs\"#" "$_p6/system.conf"
+echo 'ACCESS_LOG_FORMAT="formato_inventato"' >> "$_p6/system.conf"
+_out=$("$ROOT_DIR/chatbot.sh" --profile "$_p6" --env prod --node 4 \
+        --query "quanti errori 500 oggi" 2>&1 || true)
+assert_true "ACCESS_LOG_FORMAT non supportato: messaggio dedicato" \
+    "$([[ "$_out" == *"ACCESS_LOG_FORMAT='formato_inventato' non supportato"* ]] && echo 1 || echo 0)"
+assert_true "  elenca i formati access disponibili (undertow)" \
+    "$([[ "$_out" == *"Formati disponibili:"*"undertow"* ]] && echo 1 || echo 0)"
+assert_true "  elenca le 6 funzioni che un nuovo parser deve fornire" \
+    "$([[ "$_out" == *"access_status()"* && "$_out" == *"access_ip()"* ]] && echo 1 || echo 0)"
+
+# Il default (nessun ACCESS_LOG_FORMAT in system.conf) deve essere "undertow":
+# i profili esistenti non lo dichiarano e devono continuare a funzionare.
+_p7="$_FIX/access_fmt_default"
+_mk_profile "$_p7"
+sed -i "s#^LOG_BASE_DIR=.*#LOG_BASE_DIR=\"$_FIX/logs\"#" "$_p7/system.conf"
+assert_true "ACCESS_LOG_FORMAT assente: default undertow, nessun errore" \
+    "$(_out=$("$ROOT_DIR/chatbot.sh" --profile "$_p7" --env prod --node 4 \
+        --query "quanti errori 500 oggi" 2>&1 || true); \
+      [[ "$_out" != *"non supportato"* ]] && echo 1 || echo 0)"
 
 echo ""
 echo "═══════════════════════════════════════════════════"

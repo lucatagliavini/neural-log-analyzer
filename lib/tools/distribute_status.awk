@@ -12,8 +12,9 @@ BEGIN {
     line = $0
 
     # Estrai status
-    if (!match(line, /" ([0-9]{3}) /, a)) next
-    status = a[1]
+    _st = access_status()
+    if (_st == "") next
+    status = _st
 
     # Filtro status
     if (status_filter != "") {
@@ -29,8 +30,9 @@ BEGIN {
     }
 
     # Estrai URL (terzo campo tra virgolette: METHOD URL PROTO)
-    if (match(line, /"[A-Z]+ ([^ ]+) HTTP/, b)) {
-        url = b[1]
+    _url = access_url()
+    if (_url != "") {
+        url = _url
     } else {
         next
     }

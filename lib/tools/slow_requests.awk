@@ -27,18 +27,21 @@ BEGIN {
     # non ha un contatore su tutte le righe in range, a differenza di
     # count_status, dove all_total serve come denominatore nel summary e
     # obbliga a filtrare per tempo su ogni riga.
-    if (!match(line, /" [0-9]+ [0-9-]+ ([0-9]+) /, a)) next
-    resp_time = a[1] + 0
+    _ms = access_time_ms()
+    if (_ms < 0) next
+    resp_time = _ms
 
     if (resp_time < threshold_ms + 0) next
 
     if ((time_from != "" || time_to != "") && !in_range(access_ts())) next
 
-    if (!match(line, /"([A-Z]+) ([^ ]+) HTTP[^"]*"/, b)) next
-    method = b[1]; url = b[2]
+    _meth = access_method(); _url = access_url()
+    if (_meth == "" || _url == "") next
+    method = _meth; url = _url
 
-    if (!match(line, /" ([0-9]{3}) /, c)) next
-    status = c[1]
+    _st = access_status()
+    if (_st == "") next
+    status = _st
 
     count++
     total_time += resp_time
