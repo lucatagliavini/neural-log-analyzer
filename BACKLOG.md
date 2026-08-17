@@ -8,17 +8,23 @@ Aggiornato: 2026-08-17
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
-| PROF-1 | **Completare il profilo `usnext`** quando i suoi log saranno montati su `lxprworkerlana01` (il nuovo `LOG_BASE_DIR` è `/unipol/logs/farmlog/<profilo>/`, già predisposto per il multi-profilo). Mancano i tre `*_LOG_BASE`, `SERVER_LOG_FORMAT`, `NODE_NAME_TEMPLATE` e `SYSTEM_LOG_SYNONYMS`: i valori si leggeranno **dal filesystem reale**, non ipotizzati. Il guard di completezza è già in `chatbot.sh` e li elenca tutti all'avvio. Diventerà anche la prova che il contratto non è liquido-specifico — oggi la generalità è argomentata leggendo il codice, non dimostrata eseguendolo | In attesa dei log |
+| NLP-1 | **Vocabolario, dataset e modello vanno nel FRAMEWORK, non nel profilo** (indicazione utente 2026-08-17). Verificato: `unigrams.txt`+`bigrams.txt` sono **196 righe con ZERO nomi concreti** di applicazioni o log — descrivono come parla un utente in italiano, con i placeholder `<APP>`/`<LOGFILE>`/`<ENV>`/`<NODE>`, non cosa contiene un'installazione. Lo stesso vale per `dataset/queries_labeled.txt` e, di conseguenza, per `models/`. Oggi vivono in `profiles/liquido/` con tre symlink da `usnext`: la struttura suggerisce l'inverso della realtà, e **la prova che è un errore di collocazione è che montare il secondo profilo ha richiesto dei symlink**. Struttura scelta: default nel framework (es. `nlp/`), **override nel profilo** se un giorno servisse un vocabolario diverso (cliente non italiano, gergo aziendale) — stesso schema di `system.local.conf`. Impatto: i path sono in 20+ punti (`train.sh`, `setup.sh`, `build-dataset.sh`, `lib/train.py`, `lib/build_dataset.py`, `domain.conf`, i test), quindi è un refactoring meccanico ma esteso, da fare con verifica completa | **Prossima** |
+| GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
+| PROF-2 | **Struttura del profilo da documentare in `CLAUDE.md`**: l'audit del 2026-08-17 ha stabilito quali file servono davvero — obbligatori `system.conf`, `domain.conf`, `entities.conf`, `models/intent_classifier/`; necessari per addestrare `unigrams.txt`, `bigrams.txt`, `dataset/queries_labeled.txt` (che con NLP-1 si spostano nel framework); opzionali `system.local.conf` (override per-installazione, non deployato) ed `examples.sh`. Il criterio che li separa: **il profilo contiene coordinate, non capacità** — dove sono i log, come si chiamano le cose, quale tecnologia; non il vocabolario né il modello. Da scrivere in CLAUDE.md dopo NLP-1, che cambia la collocazione di metà di questi file | Dopo NLP-1 |
 
-**Il backlog è esaurito** a meno di PROF-1, che dipende da un montaggio esterno. Tutte le
-voci aperte il 2026-08-17 in mattinata sono state chiuse nella stessa giornata.
+**Le voci aperte in mattinata sono tutte chiuse.** Restano tre voci nate dall'audit di
+flessibilità di fine giornata: NLP-1 (la sola con priorità), GCFMT-1 (in attesa di un secondo
+formato GC reale) e PROF-2 (documentazione, dipende da NLP-1).
 
 **Chiuso il 2026-08-17**: LOGDISC-2 (ricorsione in `search_all_logs` + colonna APP),
 LOGDISC-4 (log di sistema scoperti sotto il nodo, validazione per-tool, bug `require_app`),
 FORMAT-1 (timestamp riconosciuto per forma, non per posizione), DEPLOY-1 + DEPLOY-2
 (sentinel di identità, `--delete`, migrazione al server dedicato ppc64le con 6 ambienti,
 `neural-c` sincronizzato), CLEAN-1 (rimossa `list_env_app_dirs`, ultimo consumatore di
-`APP_SUBPATH`), guard di completezza del profilo (parte di PROF-1). Vedi le sezioni dedicate.
+`APP_SUBPATH`), PROF-1 (profilo usnext operativo: 6 ambienti, 3 app, 12 nodi, con guard di
+completezza), TS-1 (quinto formato timestamp, la data europea di Pass.log), ENTCONF-1 +
+TECH-1 (un profilo mal configurato fallisce con un messaggio parlante), ACCESS-1 (estrazioni
+access centralizzate in 7 funzioni + `ACCESS_LOG_FORMAT` come plugin). Vedi le sezioni dedicate.
 
 **Chiuso il 2026-08-07**: LOGDISC-1 (ricerca ricorsiva log sotto il nodo, vedi sezione dedicata),
 LOGDISC-3 (bug collegati a LOGDISC-1, vedi sezione dedicata), LOGSEL-1 (misrouting +
