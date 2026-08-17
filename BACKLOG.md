@@ -8,7 +8,9 @@ Aggiornato: 2026-08-17
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
-| LOGDISC-4 | **I 11 tool di sistema assumono ancora che i log stiano in una directory calcolata da un template** (`APP_SUBPATH`), l'assunzione che LOGDISC-1 ha rimosso dai named log e LOGDISC-2 dalla ricerca. Ultima area che viola il principio 6. **Da fare prima dell'integrazione del framework C** (decisione utente 2026-08-17). Vedi sezione dedicata sotto per l'audit completo e il vincolo che lo rende diverso dai due precedenti | **Prossima** |
+| LOGDISC-4 | **Pipeline unica di risoluzione log**: oggi ci sono **4 percorsi con 3 comportamenti diversi**, ed è la causa strutturale dei bug LOGDISC-1/3, LOGSEL-1 e LOGDISC-2 — tutti "un percorso corretto e un altro no". Gli 11 tool di sistema assumono ancora che i log stiano in una directory calcolata da `APP_SUBPATH`. **Da fare prima del framework C** (decisione utente 2026-08-17). Vedi sezione dedicata | **Prossima** |
+| FORMAT-1 | **Il formato delle righe di access log è cablato nel codice, non in config**: `parse_access($2)` in **8 tool** assume che il timestamp sia il 2° campo. Un middleware con formato *combined* (`%h %l %u %t`, timestamp in `$4`) non darebbe errore — `parse_access` restituirebbe 0, e con `ts=0` il codice è conservativo, quindi **il filtro temporale smetterebbe di filtrare in silenzio**. I *nomi* dei log sono già in `system.conf` (ARCH-6), il *formato* no. Vedi sezione dedicata | Da valutare |
+| PROF-1 | **`profiles/usnext` è nel repo ma non è utilizzabile**: non definisce `ACCESS_LOG_BASE`/`SERVER_LOG_BASE`/`GC_LOG_BASE` (0 occorrenze) né `SYSTEM_LOG_SYNONYMS`, quindi `resolve-logs.sh:81-86` aborta con `[ERROR] ACCESS_LOG_BASE non impostato`. Nulla lo segnala: sembra un profilo alternativo funzionante. Da decidere se **completarlo** (serve conoscere i nomi log reali di quel middleware — informazione che non è nel repo) o **rimuoverlo** per non lasciare codice morto che simula una generalizzazione non verificata. Trovato durante l'audit di LOGDISC-4 | Da valutare |
 | DEPLOY-1 | **`deploy.sh` non ha `--delete`, e non può averlo senza una verifica di identità della directory target** (deciso 2026-08-17). Conseguenza attuale: i file rimossi in locale, o trasferiti per errore da un deploy passato, **restano** in produzione — oggi `CLAUDE.md` e `.claude/` copiati prima che le esclusioni esistessero (inerti, nessuno script del bot li legge). La rimozione manuale è stata **esplicitamente rifiutata dall'utente**: un `rsync --delete`, o un `rm` su `${HOST}:${DEST}`, cancella ricorsivamente qualunque directory gli venga passata — un `--dest` sbagliato, un `DEST` vuoto o un typo diventano una cancellazione in produzione, e il dry-run non protegge chi lancia il comando senza. Prerequisito per implementarlo: un **sentinel di identità** — `deploy.sh` verifica sul target la presenza di un marcatore noto (es. `chatbot.sh` + `profiles/`, o un file `.lana-bot-root` scritto dal deploy stesso) e rifiuta di procedere se manca, *prima* di qualsiasi operazione distruttiva. Finché non c'è, il deploy resta additivo per scelta: file residui sono rumore, una cancellazione sbagliata è un incidente | Da valutare |
 **Chiuso il 2026-08-17**: LOGDISC-2 (ricorsione in `search_all_logs` + colonna APP, vedi
 sezione dedicata).
@@ -280,19 +282,149 @@ l'access log non lo usa nemmeno come sorgente privilegiata. Un nodo reale senza 
 Da valutare insieme: la validazione dovrebbe essere **per-tool** (chi legge l'access log
 fallisce se manca) invece che globale in fase di risoluzione sessione.
 
-### Da chiarire prima di implementare
+### L'obiettivo vero: una pipeline sola (indicazione utente, 2026-08-17)
 
-1. La scoperta va fatta in `resolve-logs.sh` (che emette i path una volta per sessione) o
-   nei 3 helper di `dispatch.sh` (che girano per query)? La prima è più economica, la
-   seconda più coerente col "scopri quando serve" — e `TIME_FROM`/`TIME_TO` sono noti solo
-   per query.
-2. Quando l'app di sessione **non** ha un certo log di sistema ma un'altra sì: dirlo e
-   fermarsi (come `skip_named_log_not_found`) o leggere quello dell'altra app dichiarandolo?
-   Per i named log la risposta è già "dirlo e fermarsi" — la coerenza suggerisce la stessa,
-   da confermare.
-3. `open_current_log_for` costruisce `"${dir}/${base}.log"` **senza** passare da
-   `select_log_files_grouped` (bypass intenzionale, OBS-3): va portato alla scoperta o
-   resta un percorso diretto?
+> *"Tutto il funzionamento dei tool deve seguire la stessa pipeline, che deve essere unica
+> e funzionante perfettamente, così abbiamo un comportamento atteso riproducibile."*
+
+Oggi ci sono **4 percorsi con 3 comportamenti diversi**:
+
+| percorso | usato da | scoperta | selezione rotazioni |
+|---|---|---|---|
+| `open_logs_for` | 11 tool di sistema | ❌ path da template | ✅ `select_log_files_grouped` |
+| `open_current_log_for` | `tail_log` a riposo | ❌ path da template | ❌ **bypassa** (`"${dir}/${base}.log"`) |
+| `resolve_named_log_path` | `tail_named_log`, `grep_named_log` | ✅ ricorsiva | ✅ |
+| `discover_log_dirs` | `search_all_logs` | ✅ ricorsiva | ✅ |
+
+**Questa tabella è la causa strutturale dei bug della settimana**: LOGDISC-1, LOGDISC-3,
+LOGSEL-1 e LOGDISC-2 sono tutti della forma "un percorso è stato corretto, un altro no".
+Il principio 8 lo dice già, ma come regola di *processo* (ricordarsi di migrare i
+chiamanti). L'obiettivo qui è renderlo una proprietà **strutturale**: un motore solo,
+attraversato da tutti, così il quinto bug della famiglia non può esistere.
+
+Non è quindi "porta 11 tool alla ricorsione", è **unifica i 4 percorsi in 1**.
+
+### Le due fasi sono distinte e hanno bisogni diversi (chiarito con l'utente)
+
+| fase | cosa fa | serve `TIME_FROM`/`TIME_TO`? | costo misurato |
+|---|---|---|---|
+| **scoperta** | trova le directory che contengono log | **no** — è topologia del filesystem | 0.01 s |
+| **selezione** | scegle quali rotazioni leggere | **sì** — è il walk temporale | 6.5 s su 51 file |
+
+Conseguenza: **la scoperta non ha bisogno del filtro temporale**, quindi può stare in
+`resolve-logs.sh` (una volta per sessione). La selezione resta per-query dov'è già. La
+domanda "dove metterla" era mal posta: presupponeva che le due fasi dovessero convivere.
+
+**Il prefiltro sulla prima riga esiste già** e non va reinventato:
+`_logfiles_read_first_ts()` legge `head -1` (o i primi 4 KB per i `.gz`, con SIGPIPE al
+decompressore) e riconosce 4 formati di timestamp. È esattamente la strategia
+"estrai i percorsi, poi prefiltra con la prima riga" — leggere 4 KB invece di decomprimere
+60 MB. Indicazione utente: **pragmatico prima che ottimizzato** — i numeri lo confermano,
+ottimizzare la scoperta (0.01 s) è irrilevante contro la selezione (6.5 s).
+
+### Cross-app: una politica sola, formulata una volta (indicazione utente)
+
+L'utente chiede che il comportamento sia **prevedibile**: una politica, non due. La regola
+invariante è **mai dati di un'app diversa da quella attesa senza dirlo** (principio 6), e
+si declina secondo la natura del tool:
+
+- un tool che analizza **una sorgente** (`gc_stats`, `filter_errors`, `count_status`…) usa
+  l'app di sessione; se il log esiste solo sotto un'altra app **lo dice e si ferma**, come
+  già fa `skip_named_log_not_found` per i named log
+- un tool che **aggrega su più sorgenti** (`search_all_logs`) le include tutte e **dichiara
+  la provenienza** (colonna APP, LOGDISC-2)
+
+Non sono due politiche ma la stessa regola con esito diverso, e la ragione è misurabile:
+una media di pause GC su due JVM distinte è priva di senso, un elenco di occorrenze su due
+app è una risposta legittima. **Da scrivere come principio in CLAUDE.md** durante
+l'implementazione, così è consultabile e non va ridedotta.
+
+### Da chiarire prima di implementare (residue)
+
+1. `open_current_log_for` costruisce `"${dir}/${base}.log"` **senza** passare da
+   `select_log_files_grouped` (bypass intenzionale, OBS-3: `tail_log` senza tempo esplicito
+   vuole il file corrente, non il walk). Nella pipeline unica: la scoperta lo riguarda
+   (serve trovare *quale* file corrente), la selezione no. Va quindi diviso in due, non
+   unificato del tutto — da confermare in fase di design.
+2. La validazione dell'access log in `resolve-logs.sh:101-108` (vedi difetto collaterale
+   sopra) va resa per-tool nello stesso intervento o separatamente?
+
+---
+
+## FORMAT-1 — Il formato delle righe è cablato, non configurato (aperta 2026-08-17)
+
+Sollevato dall'utente durante la revisione di LOGDISC-4: *"I nomi log, come li determiniamo?
+Sono hardcoded? In questo caso avremmo `undertow_access_log`, ma per un websphere potrebbero
+essere `access_log` o anche `combined_log`."*
+
+**I nomi sono a posto.** Vivono in `system.conf` (`ACCESS_LOG_BASE`, `SERVER_LOG_BASE`,
+`GC_LOG_BASE`, `SERVER_LOG_FORMAT`), `resolve-logs.sh` valida la loro presenza e aborta se
+mancano (ARCH-6, nessun default implicito). Un WebSphere con `access_log`/`SystemOut`/
+`native_stderr` si supporta cambiando **tre righe di config**, senza toccare codice.
+
+**Il formato no.** L'audit (2026-08-17) trova l'assunzione posizionale in **8 tool**:
+
+```awk
+if ((time_from != "" || time_to != "") && !in_range(parse_access($2))) next
+```
+
+`count_status:12`, `distribute_status:11`, `slow_requests:35`, `traffic_volume:9`,
+`service_times:19`, `filter_ip:24`, `tail_log:50`, `correlate_gc_slow:64` — tutti assumono
+che il timestamp sia il **secondo campo** nel formato `[DD/Mon/YYYY:HH:MM:SS`. Il formato
+*combined* di Apache/WebSphere (`%h %l %u %t ...`) ha tre campi prima del timestamp, quindi
+lo mette in `$4`.
+
+**Perché è più grave di un errore di config.** Con formato combined, `parse_access($2)`
+riceve un campo che non è un timestamp e restituisce 0. Il codice tratta `ts=0` come
+"ignoto" e per il **principio 5** (pruning conservativo) *include* la riga — quindi il
+filtro temporale **smette silenziosamente di filtrare** invece di dare errore. Stessa
+famiglia di LOGSEL-1: dati plausibili, domanda diversa da quella posta. E `match(line, /"
+([0-9]{3}) /)` per lo status HTTP dipende dalle virgolette della request line, altra
+assunzione di formato.
+
+**Distinzione da tenere presente**: cambiare un *nome* fallisce rumorosamente (file non
+trovato); cambiare un *formato* fallisce in silenzio. Il primo è configurazione vera, il
+secondo è un'assunzione mascherata da configurazione.
+
+**Direzione da valutare** (non decisa): portare gli indici di campo in `system.conf` — es.
+`ACCESS_TS_FIELD=2` con `parse_access($(ACCESS_TS_FIELD))` — oppure un riconoscimento del
+formato dalla prima riga, come già fa `_logfiles_read_first_ts()` per i timestamp (4 formati
+riconosciuti, nessuno configurato). La seconda strada è più robusta ma più invasiva.
+`parse_access()` è già centralizzata in `utils-time.awk` (principio 2): il problema non è
+la funzione, sono gli **8 indici `$2` nei chiamanti**.
+
+**Priorità**: dopo LOGDISC-4 (decisione utente). Sono assi ortogonali — LOGDISC-4 riguarda
+*dove sono i file* (3 helper bash), FORMAT-1 *come si leggono le righe* (8 tool AWK).
+Nessun cliente WebSphere reale oggi, quindi non è urgente; ma è la prossima cosa che si
+rompe se il progetto cambia middleware, e va saputo **prima** di prometterlo a un cliente.
+
+---
+
+## PROF-1 — `profiles/usnext` non è utilizzabile (trovata 2026-08-17)
+
+Trovata durante l'audit di FORMAT-1, verificando se un secondo profilo confermasse la
+generalità del contratto. **Non la conferma: quel profilo non funziona.**
+
+`profiles/usnext/system.conf` ha **0 occorrenze** di `ACCESS_LOG_BASE`, `SERVER_LOG_BASE`,
+`GC_LOG_BASE` e **0** di `SYSTEM_LOG_SYNONYMS`. Poiché `resolve-logs.sh:81-86` valida la
+presenza dei tre basename e aborta se mancano (ARCH-6), qualunque query su quel profilo
+muore con `[ERROR] resolve-logs: ACCESS_LOG_BASE non impostato in system.conf`.
+
+Definisce `AVAILABLE_APPS` (3 app), `APP_SUBPATH`, `CUSTOM_LOG_SUBPATH=''` e un `TOOL_DESC`
+con 11 tool (senza `search_all_logs`) — quindi **sembra** un profilo alternativo completo, e
+nulla segnala che non lo sia. È il rischio: un profilo scheletro indistinguibile da uno
+funzionante suggerisce una generalizzazione **dichiarata ma non verificata**.
+
+**Da decidere** (serve contesto che non è nel repo):
+- **completarlo** — richiede i nomi log reali di quel middleware, e sarebbe la prova più
+  forte che il contratto non è liquido-specifico: oggi la generalità è argomentata
+  leggendo il codice, non dimostrata eseguendolo
+- **rimuoverlo** — se è solo uno scheletro dimostrativo, tenerlo costa manutenzione (ogni
+  modifica al contratto dovrebbe aggiornarlo) e dà una falsa sicurezza
+
+Nel frattempo vale la pena un **guard esplicito**: `chatbot.sh` o `setup.sh` che verifica la
+completezza di un profilo e dice cosa manca, invece di far scoprire il problema alla prima
+query. Un profilo incompleto è un errore di configurazione, non un incidente di runtime.
 
 ---
 
