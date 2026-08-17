@@ -193,13 +193,36 @@ specifico:
    ovunque sotto il nodo, il tool deve cercarlo ovunque sotto il nodo.
    Ricorsione per la *scoperta*, selezione flat (`select_log_files_grouped`)
    per le *rotazioni* — che stanno sempre accanto al file che ruotano, quindi
-   si raggruppano dalla directory del file scelto, non dalla root. Quando più
-   app coesistono sotto lo stesso nodo con file omonimi, l'app della sessione
-   corrente (`ACTIVE_APP`) vince nel tie-break; se il log esiste solo sotto
-   un'altra app, non va aperto silenziosamente — va detto "non trovato" e
-   suggerita l'app dove si trova (mai mescolare dati di app diverse senza
-   dirlo). `search_all_logs.sh` è ancora enumerativo (asimmetria nota, vedi
-   BACKLOG.md).
+   si raggruppano dalla directory del file scelto, non dalla root.
+   Dal 2026-08-17 il contratto vale per **tutti** i percorsi: named log
+   (LOGDISC-1), `search_all_logs` (LOGDISC-2) e i log di sistema
+   access/server/gc (LOGDISC-4, `resolve_system_log_dir`). Nessun tool
+   costruisce più path da `APP_SUBPATH`.
+
+   **Politica cross-app: una sola, formulata una volta** (indicazione utente
+   2026-08-17 — «conviene avere una politica sola, in modo che l'utente sappia
+   sempre come si comporta il programma»). La regola invariante è **mai dati di
+   un'app diversa da quella attesa senza dirlo**, e si declina secondo cosa fa
+   il tool:
+   - un tool che analizza **una sorgente** (`gc_stats`, `filter_errors`,
+     `count_status`, …) usa l'app di sessione (`ACTIVE_APP` vince nel
+     tie-break); se il log esiste **solo** sotto un'altra app **lo dice e si
+     ferma** — `skip_named_log_not_found` per i named log,
+     `skip_system_log_not_found` per quelli di sistema;
+   - un tool che **aggrega su più sorgenti** (`search_all_logs`) le include
+     tutte e **dichiara la provenienza** (colonna APP).
+
+   Non sono due politiche ma la stessa con esito diverso, e la ragione è
+   misurabile: una media di pause GC su due JVM distinte è priva di senso
+   (misurato sul nodo 4: 127 eventi per un'app, 141 per l'altra), un elenco di
+   occorrenze su due app è una risposta legittima. Quindi **la molteplicità
+   richiede una scelta quando il tool analizza, un'etichetta quando aggrega**.
+
+   Corollario sul vincolo `require_app` (bug corretto il 2026-08-17): «non
+   appartiene a nessuna app» **non** è «appartiene all'app sbagliata». Un log in
+   una directory che non nomina alcuna app va **accettato** — non c'è nulla da cui
+   proteggersi, e rifiutarlo è un falso negativo (principio 5). Il confronto si fa
+   con `resolve_app_from_path`, non verificando se il path contiene `/$ACTIVE_APP/`.
 7. **Naming generico nel contratto, concreto solo nella prosa** (deciso
    2026-08-07): variabili, funzioni e directory che fanno parte del contratto
    generico del progetto non devono nominare un middleware o cliente

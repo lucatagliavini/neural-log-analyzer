@@ -302,6 +302,69 @@ skip_named_log_not_found() {
     fi
 }
 
+# skip_system_log_not_found SEARCH_ROOT BASE LABEL
+# Messaggio di skip per un log di SISTEMA (access/server/gc) non disponibile.
+# Distingue "non esiste sul nodo" da "esiste ma sotto un'altra app", esattamente
+# come skip_named_log_not_found fa per i log nominati: una politica sola per tutto
+# il progetto, così l'utente sa sempre come si comporta il bot (indicazione utente
+# 2026-08-17). Mai aprire il log di un'altra app in silenzio — la regola invariante
+# del principio 6 è "mai dati di un'app diversa da quella attesa senza dirlo".
+#
+# LABEL è il termine con cui l'utente nomina il log ("access log", non
+# "undertow_access_log"): il basename su disco è un dettaglio di configurazione,
+# coerente con list_available_logs e con SYSTEM_LOG_SYNONYMS.
+skip_system_log_not_found() {
+    local search_root="$1" base="$2" label="$3"
+    # Seconda ricerca SENZA require_app, per sapere se il log esiste altrove.
+    # Costa una find in più solo qui, nel ramo di fallimento — già il caso raro.
+    local elsewhere_dir elsewhere=""
+    elsewhere_dir=$(resolve_system_log_dir "$search_root" "$base") || elsewhere_dir=""
+    [[ -n "$elsewhere_dir" ]] && elsewhere=$(resolve_app_from_path "$elsewhere_dir/") || true
+    if [[ -n "$elsewhere" && "$elsewhere" != "${ACTIVE_APP:-}" ]]; then
+        skip_msg "${label} non trovato sotto ${ACTIVE_APP:-app corrente} — esiste sotto ${elsewhere}"
+    else
+        skip_msg "${label} non disponibile in ${search_root:-<search_root non impostata>}"
+    fi
+}
+
+# require_system_log KIND TOOL
+# Guard di disponibilità per un log di sistema, da chiamare nel ramo del tool che
+# ne ha bisogno: emette il messaggio e ritorna 1 se quel log non è disponibile
+# per l'app di sessione.
+#
+# Esiste perché da LOGDISC-4 la validazione è PER-TOOL e non più globale: prima
+# resolve-logs.sh abortiva l'intera sessione se mancava l'access log, quindi
+# nessun ramo doveva controllarlo (e infatti gli 8 tool che lo leggono non
+# avevano guard). Rimosso quell'abort, senza questi controlli
+# `open_logs_for "" BASE` cercherebbe nella directory corrente — in silenzio.
+#
+# Un helper invece di 9 blocchi ripetuti (principio 2): il messaggio e la
+# decisione di cosa conta come "disponibile" vivono in un punto solo.
+#
+# Controlla la DIRECTORY, non il path del file corrente: una directory trovata
+# con il solo file corrente già ruotato è un caso legittimo — i dati ci sono,
+# select_log_files li seleziona. I guard preesistenti su server/gc controllavano
+# il file, quindi saltavano un tool su un nodo appena ruotato pur avendo i dati:
+# effetto collaterale positivo di questa centralizzazione, non un cambio voluto
+# di semantica (principio 5, non escludere per ignoranza).
+require_system_log() {
+    local kind="$1" tool="$2"
+    local dir base label
+    case "$kind" in
+        access) dir="${ACCESS_LOG_DIR:-}"; base="${ACCESS_LOG_BASE:-}"; label="access log" ;;
+        server) dir="${SERVER_LOG_DIR:-}"; base="${SERVER_LOG_BASE:-}"; label="server log" ;;
+        gc)     dir="${GC_LOG_DIR:-}";     base="${GC_LOG_BASE:-}";     label="gc log"     ;;
+        *)      echo "[ERROR] require_system_log: kind sconosciuto '$kind'" >&2; return 1 ;;
+    esac
+    [[ -n "$dir" ]] && return 0
+    # Non disponibile: distingue "non c'è sul nodo" da "c'è sotto un'altra app".
+    # Il nome del tool nel messaggio dice PERCHÉ la query non ha prodotto nulla —
+    # senza, "access log non trovato" su una query che ne usa due (correlate_gc_slow)
+    # non direbbe quale sorgente manca.
+    skip_system_log_not_found "${LOG_SEARCH_ROOT:-}" "$base" "${label} per ${tool}"
+    return 1
+}
+
 # Quando un log richiesto non esiste, elenca quelli realmente presenti sul nodo.
 # L'avviso di param-extract.sh mostra gli ALIAS noti da entities.conf, che possono
 # divergere dal disco (es. "plugin" in whitelist contro "plugins" reale): qui si
@@ -512,10 +575,13 @@ dispatch_tool() {
 
 _dispatch_tool_run() {
     local tool="$1"
-    local access="$ACCESS_LOG"
-    local server="${SERVER_LOG:-}"
-    local gc="${GC_LOG:-}"
     local logs_expr
+    # Le locali access/server/gc (copie di ACCESS_LOG/SERVER_LOG/GC_LOG) sono state
+    # rimosse con LOGDISC-4: erano lette solo dai guard `[[ -z "$x" ]]`, ora
+    # centralizzati in require_system_log, che verifica la DIRECTORY scoperta.
+    # Tenerle sarebbe una seconda fonte di verità sulla disponibilità di un log
+    # (principio 2) — e quella sbagliata, perché il path del file corrente è vuoto
+    # anche quando esistono solo rotazioni, cioè quando i dati ci sono.
 
     # Utility AWK caricati come -f fissi in ogni invocazione gawk.
     # SERVER_LOG_FORMAT seleziona il parser del log applicativo (da system.conf).
@@ -550,6 +616,7 @@ _dispatch_tool_run() {
 
     case "$tool" in
         count_status)
+            require_system_log access count_status || return
             logs_expr="$(open_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/count_status.awk" \
@@ -557,6 +624,7 @@ _dispatch_tool_run() {
                 "$logs_expr"
             ;;
         distribute_status)
+            require_system_log access distribute_status || return
             logs_expr="$(open_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/distribute_status.awk" \
@@ -564,6 +632,7 @@ _dispatch_tool_run() {
                 "$logs_expr"
             ;;
         slow_requests)
+            require_system_log access slow_requests || return
             logs_expr="$(open_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/slow_requests.awk" \
@@ -571,33 +640,37 @@ _dispatch_tool_run() {
                 "$logs_expr"
             ;;
         traffic_volume)
+            require_system_log access traffic_volume || return
             logs_expr="$(open_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/traffic_volume.awk" \
                 "$logs_expr"
             ;;
         filter_errors)
-            [[ -z "$server" ]] && { skip_msg "server.log non disponibile per filter_errors"; return; }
+            require_system_log server filter_errors || return
             logs_expr="$(open_server_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/filter_errors.awk" \
                 "$logs_expr"
             ;;
         service_times)
+            require_system_log access service_times || return
             logs_expr="$(open_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/service_times.awk" \
                 "$logs_expr"
             ;;
         gc_stats)
-            [[ -z "$gc" ]] && { skip_msg "gc.log non disponibile per gc_stats"; return; }
+            require_system_log gc gc_stats || return
             logs_expr="$(open_gc_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/gc_stats.awk" \
                 "$logs_expr"
             ;;
         correlate_gc_slow)
-            [[ -z "$gc" ]] && { skip_msg "gc.log non disponibile per correlate_gc_slow"; return; }
+            # Due sorgenti: entrambe necessarie, e il messaggio dice quale manca.
+            require_system_log gc correlate_gc_slow || return
+            require_system_log access correlate_gc_slow || return
             local gc_expr access_expr
             gc_expr="$(open_gc_logs)"
             access_expr="$(open_logs)"
@@ -616,7 +689,7 @@ _dispatch_tool_run() {
             # finestra ma ts_end nel presente farebbe comunque tail delle righe più
             # recenti, fuori dalla finestra richiesta.
             if [[ "${LOG_TYPE:-}" == "server" ]]; then
-                [[ -z "$server" ]] && { skip_msg "server.log non disponibile"; return; }
+                require_system_log server tail_log || return
                 if [[ "${TIME_EXPLICIT:-0}" == "1" ]]; then
                     logs_expr="$(open_server_logs)"
                     print_log_source "$logs_expr"
@@ -637,6 +710,9 @@ _dispatch_tool_run() {
                         "$logs_expr"
                 fi
             else
+                # Un solo guard per entrambi i rami temporali: la disponibilità
+                # dell'access log non dipende da TIME_EXPLICIT.
+                require_system_log access tail_log || return
                 if [[ "${TIME_EXPLICIT:-0}" == "1" ]]; then
                     logs_expr="$(open_logs)"
                     print_log_source "$logs_expr"
@@ -659,6 +735,7 @@ _dispatch_tool_run() {
             fi
             ;;
         filter_ip)
+            require_system_log access filter_ip || return
             logs_expr="$(open_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/filter_ip.awk" \
@@ -667,7 +744,7 @@ _dispatch_tool_run() {
                 "$logs_expr"
             ;;
         filter_app_errors)
-            [[ -z "$server" ]] && { skip_msg "server.log non disponibile per filter_app_errors"; return; }
+            require_system_log server filter_app_errors || return
             logs_expr="$(open_server_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/filter_app_errors.awk" \

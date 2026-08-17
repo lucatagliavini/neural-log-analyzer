@@ -8,11 +8,12 @@ Aggiornato: 2026-08-17
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
-| LOGDISC-4 | **Pipeline unica di risoluzione log**: oggi ci sono **4 percorsi con 3 comportamenti diversi**, ed è la causa strutturale dei bug LOGDISC-1/3, LOGSEL-1 e LOGDISC-2 — tutti "un percorso corretto e un altro no". Gli 11 tool di sistema assumono ancora che i log stiano in una directory calcolata da `APP_SUBPATH`. **Da fare prima del framework C** (decisione utente 2026-08-17). Vedi sezione dedicata | **Prossima** |
+| CLEAN-1 | **`list_env_app_dirs()` (`utils-nodes.sh:50-58`) è codice morto**: zero chiamanti (verificato 2026-08-17), ed è l'ultimo consumatore di `APP_SUBPATH` dopo LOGDISC-4. Rimuoverla renderebbe `APP_SUBPATH` config non più usata da alcun percorso di risoluzione — da valutare se togliere anche quella da `system.conf` o tenerla come documentazione del layout tipico. Non fatto in LOGDISC-4 per non mescolare un cleanup con una modifica di comportamento | Da valutare |
 | FORMAT-1 | **Il formato delle righe di access log è cablato nel codice, non in config**: `parse_access($2)` in **8 tool** assume che il timestamp sia il 2° campo. Un middleware con formato *combined* (`%h %l %u %t`, timestamp in `$4`) non darebbe errore — `parse_access` restituirebbe 0, e con `ts=0` il codice è conservativo, quindi **il filtro temporale smetterebbe di filtrare in silenzio**. I *nomi* dei log sono già in `system.conf` (ARCH-6), il *formato* no. Vedi sezione dedicata | Da valutare |
 | PROF-1 | **`profiles/usnext` è nel repo ma non è utilizzabile**: non definisce `ACCESS_LOG_BASE`/`SERVER_LOG_BASE`/`GC_LOG_BASE` (0 occorrenze) né `SYSTEM_LOG_SYNONYMS`, quindi `resolve-logs.sh:81-86` aborta con `[ERROR] ACCESS_LOG_BASE non impostato`. Nulla lo segnala: sembra un profilo alternativo funzionante. Da decidere se **completarlo** (serve conoscere i nomi log reali di quel middleware — informazione che non è nel repo) o **rimuoverlo** per non lasciare codice morto che simula una generalizzazione non verificata. Trovato durante l'audit di LOGDISC-4 | Da valutare |
 | DEPLOY-1 | **`deploy.sh` non ha `--delete`, e non può averlo senza una verifica di identità della directory target** (deciso 2026-08-17). Conseguenza attuale: i file rimossi in locale, o trasferiti per errore da un deploy passato, **restano** in produzione — oggi `CLAUDE.md` e `.claude/` copiati prima che le esclusioni esistessero (inerti, nessuno script del bot li legge). La rimozione manuale è stata **esplicitamente rifiutata dall'utente**: un `rsync --delete`, o un `rm` su `${HOST}:${DEST}`, cancella ricorsivamente qualunque directory gli venga passata — un `--dest` sbagliato, un `DEST` vuoto o un typo diventano una cancellazione in produzione, e il dry-run non protegge chi lancia il comando senza. Prerequisito per implementarlo: un **sentinel di identità** — `deploy.sh` verifica sul target la presenza di un marcatore noto (es. `chatbot.sh` + `profiles/`, o un file `.lana-bot-root` scritto dal deploy stesso) e rifiuta di procedere se manca, *prima* di qualsiasi operazione distruttiva. Finché non c'è, il deploy resta additivo per scelta: file residui sono rumore, una cancellazione sbagliata è un incidente | Da valutare |
-**Chiuso il 2026-08-17**: LOGDISC-2 (ricorsione in `search_all_logs` + colonna APP, vedi
+**Chiuso il 2026-08-17**: LOGDISC-4 (log di sistema scoperti sotto il nodo, validazione
+per-tool, bug `require_app` — vedi sezione dedicata), LOGDISC-2 (ricorsione in `search_all_logs` + colonna APP, vedi
 sezione dedicata).
 
 **Chiuso il 2026-08-07**: LOGDISC-1 (ricerca ricorsiva log sotto il nodo, vedi sezione dedicata),
@@ -220,7 +221,40 @@ trasparenza dell'output.
 
 ---
 
-## LOGDISC-4 — I tool di sistema al contratto "fino al nodo" (aperta 2026-08-17)
+## LOGDISC-4 — I tool di sistema al contratto "fino al nodo" — **FATTO** (2026-08-17)
+
+| ID | Descrizione | Stato |
+|----|-------------|-------|
+| LOGDISC-4a | **`resolve_system_log_dir SEARCH_ROOT BASE [REQUIRE_APP]`** (`utils-logfiles.sh`): scopre ricorsivamente la directory del log di sistema, riusando `resolve_log_glob` per ricorsione e tie-break. Cascata a **due** livelli (`${BASE}.log`, poi `${BASE}*`) e non tre come i named log: qui il nome viene da `system.conf` ed è esatto per contratto, un livello fuzzy aggiungerebbe solo falsi positivi. Il 2° livello copre la directory con **sole rotazioni** — escluderla darebbe "non disponibile" su un nodo che ha i dati (principio 5). Emette la directory, non il file: è ciò che i tre `*_LOG_DIR` significano | **Fatto** |
+| LOGDISC-4b | **`resolve-logs.sh` riscritta**: `APP_DIR` da template sparisce, con l'abort "app dir non trovata". ⚠️ `ACTIVE_APP="$APP"` **prima** delle chiamate — nello script l'app si chiama `APP`, `resolve_log_glob` legge `ACTIVE_APP`: senza, il vincolo sarebbe un **no-op silenzioso** e `ContactManager` vincerebbe alfabeticamente su `ClaimCenter`, facendo leggere a ogni tool i log dell'app sbagliata con dati coerenti. Sourcia `utils-logfiles.sh` — verificato che non scriva **nulla** su stdout, che è il canale passato a `eval` da `chatbot.sh` | **Fatto** |
+| LOGDISC-4c | **Validazione per-tool** (`require_system_log KIND TOOL` in `dispatch.sh`): rimosso l'abort di sessione su access log mancante. Un helper invece di 9 guard ripetuti (principio 2); ha sostituito anche i 5 guard preesistenti su server/gc, che controllavano il **path del file** invece della **directory** — quindi saltavano un tool su un nodo appena ruotato pur avendo i dati. Rimosse le locali `access`/`server`/`gc` in `_dispatch_tool_run`, diventate una seconda fonte di verità (e quella sbagliata) sulla disponibilità | **Fatto** |
+| LOGDISC-4d | **`skip_system_log_not_found`**: distingue "non c'è sul nodo" da "esiste sotto un'altra app", come già `skip_named_log_not_found` per i named log — una politica sola, scritta come corollario del principio 6 in `CLAUDE.md` | **Fatto** |
+| LOGDISC-4e | **Bug preesistente in `require_app` (da LOGDISC-1) corretto**: confrontava "il path contiene `/$ACTIVE_APP/`" invece di "il file appartiene a un'altra app", quindi **rifiutava un log che non appartiene a nessuna app**. Falso negativo (principio 5) che rendeva irraggiungibili con `tail_named_log`/`grep_named_log` proprio i log in posizione arbitraria che LOGDISC-1 aveva reso scopribili. Ora usa `resolve_app_from_path`: app di sessione → ok, nessuna app → **ok**, altra app → rifiuta | **Fatto** |
+
+**Perché il test di LOGDISC-1 non aveva colto 4e**: la fixture `weird/deep/nested/custom_app.log`
+esisteva già, ma le asserzioni che la usavano chiamavano `resolve_log_glob` **senza**
+`require_app`. Il parametro era stato aggiunto per il caso cross-app e testato su quello; la
+**combinazione** dei due — path senza app *attraverso* `require_app` — non era mai stata
+esercitata. È la firma di un test che verifica la feature nuova invece dell'interazione fra
+le feature.
+
+**Verifica**: `bash tests/run-tests.sh` → **87 PASS / 0 FAIL** (86 + il nuovo file).
+28 asserzioni in `tests/test-logdisc-4.sh`, con **fail-before/pass-after** via `git stash` sul
+solo codice di produzione: **16 FAIL** senza il fix, 0 con.
+
+**Verifica in produzione** (nodo 4, che ha davvero due app) — la prova che il difetto era
+reale, non teorico:
+
+| | ClaimCenter | ContactManager |
+|---|---|---|
+| `filter_errors` (server log) | 1 ERROR, 2 WARN | **9 ERROR, 963 WARN** |
+| `gc_stats` | 127 eventi GC | **141 eventi GC** |
+
+Ogni app legge il proprio log, dichiarato da `print_log_source`. I numeri sono
+clamorosamente diversi: mescolarli avrebbe prodotto una media di pause GC su due JVM
+distinte e un conteggio errori che non corrisponde a nessuna delle due applicazioni.
+
+**Il contesto originale (2026-08-17, prima dell'implementazione)**
 
 Ultima area che viola il **principio 6**. Dopo LOGDISC-1 (named log) e LOGDISC-2
 (`search_all_logs`), gli 11 tool che leggono i log di **sistema** (access/server/gc)
@@ -287,14 +321,34 @@ fallisce se manca) invece che globale in fase di risoluzione sessione.
 > *"Tutto il funzionamento dei tool deve seguire la stessa pipeline, che deve essere unica
 > e funzionante perfettamente, così abbiamo un comportamento atteso riproducibile."*
 
-Oggi ci sono **4 percorsi con 3 comportamenti diversi**:
+**Stato dopo LOGDISC-4** — la scoperta è unificata, la selezione resta a tre politiche
+*dichiarate*:
 
 | percorso | usato da | scoperta | selezione rotazioni |
 |---|---|---|---|
-| `open_logs_for` | 11 tool di sistema | ❌ path da template | ✅ `select_log_files_grouped` |
-| `open_current_log_for` | `tail_log` a riposo | ❌ path da template | ❌ **bypassa** (`"${dir}/${base}.log"`) |
-| `resolve_named_log_path` | `tail_named_log`, `grep_named_log` | ✅ ricorsiva | ✅ |
-| `discover_log_dirs` | `search_all_logs` | ✅ ricorsiva | ✅ |
+| `open_logs_for` | 11 tool di sistema | ✅ `resolve_system_log_dir` | ✅ walk temporale |
+| `open_current_log_for` | `tail_log` a riposo | ✅ (dalla dir scoperta) | ⚙️ solo corrente (voluto) |
+| `resolve_named_log_path` | `tail_named_log`, `grep_named_log` | ✅ ricorsiva | ✅ walk temporale |
+| `discover_log_dirs` | `search_all_logs` | ✅ ricorsiva | ⚙️ tutte le rotazioni |
+
+**Perché la selezione non è unificata, e non deve esserlo.** Verificato:
+`select_log_files` senza finestra temporale restituisce **tutte** le rotazioni (principio 5,
+"nessun vincolo = nessuna esclusione"). `tail_log` a riposo chiede "cosa succede *ora*", non
+"leggi il periodo X" — passarlo dal walk gli farebbe leggere ~500k righe per file per
+scartarle. Forzare un'unica politica di selezione sarebbe un **regresso**, non
+un'unificazione. Quello che conta è che le tre politiche siano **esplicite e dichiarate**
+(la colonna ⚙️ sopra) invece di essere un dettaglio implementativo che ogni percorso decide
+per conto suo — che era la vera causa dei bug.
+
+**Stato precedente, per memoria** — 4 percorsi, 3 comportamenti, causa strutturale di
+LOGDISC-1/3, LOGSEL-1 e LOGDISC-2, tutti della forma "un percorso corretto e un altro no":
+
+| percorso | scoperta | selezione |
+|---|---|---|
+| `open_logs_for` | ❌ path da template | ✅ |
+| `open_current_log_for` | ❌ path da template | ❌ bypassa |
+| `resolve_named_log_path` | ✅ | ✅ |
+| `discover_log_dirs` | ✅ | ✅ |
 
 **Questa tabella è la causa strutturale dei bug della settimana**: LOGDISC-1, LOGDISC-3,
 LOGSEL-1 e LOGDISC-2 sono tutti della forma "un percorso è stato corretto, un altro no".
@@ -339,15 +393,16 @@ una media di pause GC su due JVM distinte è priva di senso, un elenco di occorr
 app è una risposta legittima. **Da scrivere come principio in CLAUDE.md** durante
 l'implementazione, così è consultabile e non va ridedotta.
 
-### Da chiarire prima di implementare (residue)
+### Le due domande aperte in fase di design, risolte
 
-1. `open_current_log_for` costruisce `"${dir}/${base}.log"` **senza** passare da
-   `select_log_files_grouped` (bypass intenzionale, OBS-3: `tail_log` senza tempo esplicito
-   vuole il file corrente, non il walk). Nella pipeline unica: la scoperta lo riguarda
-   (serve trovare *quale* file corrente), la selezione no. Va quindi diviso in due, non
-   unificato del tutto — da confermare in fase di design.
-2. La validazione dell'access log in `resolve-logs.sh:101-108` (vedi difetto collaterale
-   sopra) va resa per-tool nello stesso intervento o separatamente?
+1. **`open_current_log_for` va diviso in due** — confermato: acquisisce la scoperta
+   (riceve la directory scoperta, non più da template) e **mantiene** il bypass della
+   selezione (OBS-3). La funzione non è stata toccata affatto: riceve già la directory
+   dalla variabile di sessione, quindi il cambio in `resolve-logs.sh` la raggiunge senza
+   modifiche. Zero righe cambiate per il beneficio pieno.
+2. **La validazione per-tool è stata fatta nello stesso intervento** (LOGDISC-4c): la
+   scoperta riscriveva comunque quel blocco, e separarla avrebbe richiesto di toccare
+   `resolve-logs.sh` due volte.
 
 ---
 

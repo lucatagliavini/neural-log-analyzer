@@ -470,12 +470,29 @@ resolve_log_glob() {
     local chosen=""
     chosen="${rep[$(head -1 <<< "$_by_pref" | awk '{print $3}')]}"
 
-    # Vincolo (non solo preferenza): il log scelto deve stare sotto l'app di
-    # sessione. Se tutti i candidati sono altrove, non è "il migliore che ho
-    # trovato" — è il log di un'altra app, e apre lo scenario che l'utente ha
-    # chiesto di evitare (mescolare dati di app diverse senza dirlo).
-    if [[ -n "$require_app" && -n "${ACTIVE_APP:-}" && "$chosen" != *"/${ACTIVE_APP}/"* ]]; then
-        return 1
+    # Vincolo (non solo preferenza): il log scelto non deve appartenere a un'app
+    # DIVERSA da quella di sessione — sarebbe lo scenario che l'utente ha chiesto
+    # di evitare (mescolare dati di app diverse senza dirlo).
+    #
+    # Il confronto è su "a quale app appartiene", non su "il path contiene
+    # /ACTIVE_APP/": sono due domande diverse e confonderle era un bug (trovato
+    # 2026-08-17 implementando LOGDISC-4, presente da LOGDISC-1). Un log in
+    # `weird/deep/nested/custom.log` non appartiene a NESSUNA app: non c'è nessun
+    # dato di un'altra app da cui proteggersi, quindi va accettato — escluderlo
+    # è un falso negativo, cioè un bug di correttezza (principio 5), e rendeva
+    # irraggiungibili con tail_named_log/grep_named_log proprio i log in
+    # posizione arbitraria che LOGDISC-1 aveva reso scopribili.
+    #
+    #   app del file == ACTIVE_APP  → ok
+    #   app del file == (nessuna)   → ok — non c'è ambiguità da risolvere
+    #   app del file == altra app   → rifiuta
+    if [[ -n "$require_app" && -n "${ACTIVE_APP:-}" ]]; then
+        local _chosen_app
+        _chosen_app=$(resolve_app_from_path "$chosen") || _chosen_app=""
+        if [[ -n "$_chosen_app" && "$_chosen_app" != "$ACTIVE_APP" ]]; then
+            log_debug "resolve_log_glob: '$chosen' appartiene a $_chosen_app, non a $ACTIVE_APP — rifiutato (require_app)"
+            return 1
+        fi
     fi
 
     # L'ELENCO invece si presenta in ordine alfabetico: è quello che l'utente si
@@ -511,4 +528,51 @@ resolve_log_glob() {
     fi
 
     echo "$chosen"
+}
+
+# resolve_system_log_dir SEARCH_ROOT BASE [REQUIRE_APP]
+#
+# Scopre la DIRECTORY che contiene il log di sistema di basename BASE
+# (ACCESS_LOG_BASE / SERVER_LOG_BASE / GC_LOG_BASE) cercando ricorsivamente sotto
+# SEARCH_ROOT. Emette la directory su stdout; return 1 se non trova nulla.
+#
+# Perché la directory e non il file: le tre variabili che il resto del sistema
+# consuma (ACCESS_LOG_DIR/SERVER_LOG_DIR/GC_LOG_DIR) SONO directory —
+# open_logs_for DIR BASE ricostruisce da lì l'insieme dei file con
+# select_log_files. Emettere il file costringerebbe ogni chiamante a fare dirname.
+#
+# Sostituisce il calcolo da template APP_SUBPATH (principio 6): il contratto del
+# profilo si ferma alla directory del nodo, sotto va scoperto. Prima di LOGDISC-4
+# i log di sistema erano gli ultimi risolti come "NODE_DIR + sotto-path noto".
+#
+# LA MOLTEPLICITÀ RICHIEDE UNA SCELTA, NON UN'ETICHETTA. A differenza di
+# search_all_logs (che aggrega su tutte le app e dichiara la provenienza con la
+# colonna APP), un tool di sistema analizza UNA sorgente: su un nodo reale ogni
+# log di sistema esiste in una copia per app (misurato sul nodo 4: 55+55 access,
+# 22+22 server, 16+16 gc), e leggerne due significherebbe sommare le pause GC di
+# due JVM distinte o mescolare stack trace di due applicazioni. Per questo si
+# riusa il tie-break di resolve_log_glob (ACTIVE_APP > non ruotato > path più
+# corto > alfabetico) e, con REQUIRE_APP, il rifiuto del match cross-app.
+#
+# Cascata a DUE livelli, non tre come resolve_named_log_path: là il nome è
+# digitato dall'utente e può essere approssimativo, qui viene da system.conf ed è
+# esatto per contratto — un terzo livello fuzzy aggiungerebbe solo il rischio di
+# falsi positivi senza un caso d'uso.
+resolve_system_log_dir() {
+    local search_root="$1" base="$2" require_app="${3:-}"
+    [[ -z "$search_root" || -z "$base" ]] && return 1
+
+    local chosen=""
+    # 1) il file corrente, nome esatto
+    chosen=$(resolve_log_glob "$search_root" "${base}.log" "$base" "$require_app") || true
+    # 2) solo rotazioni presenti (.gz, .log.N, BASENAME.DATE.log): il log esiste,
+    #    è solo già ruotato. Escluderlo qui darebbe "non disponibile" su un nodo
+    #    che ha i dati (principio 5).
+    if [[ -z "$chosen" ]]; then
+        chosen=$(resolve_log_glob "$search_root" "${base}*" "$base" "$require_app") || true
+    fi
+
+    [[ -z "$chosen" ]] && { log_debug "resolve_system_log_dir: '$base' non risolto sotto $search_root (require_app='${require_app}')"; return 1; }
+    log_debug "resolve_system_log_dir: '$base' → $(dirname "$chosen")"
+    dirname "$chosen"
 }

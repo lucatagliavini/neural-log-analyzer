@@ -15,12 +15,19 @@
 # Uso: eval "$(./lib/resolve-logs.sh <base_dir> <env> <nodo_num> [<app>])"
 #
 # Struttura attesa:
-#   <base_dir>/<env>/<NODE_NAME_TEMPLATE>/<APP_SUBPATH>/
-#     ${SERVER_LOG_BASE}.log, ${GC_LOG_BASE}.log, ${ACCESS_LOG_BASE}.*.log
+#   <base_dir>/<env>/<NODE_NAME_TEMPLATE>/     ← il contratto si ferma QUI
 #
-# NODE_NAME_TEMPLATE, APP_SUBPATH, CUSTOM_LOG_SUBPATH e i tre *_LOG_BASE sono
-# definiti in system.conf — niente hardcoded qui (ARCH-6, "nessun default
-# implicito nel codice", consolidato 2026-08-06 rimuovendo la duplicazione
+# Sotto la directory del nodo la struttura è IGNOTA per contratto e i log di
+# sistema vengono SCOPERTI ricorsivamente da resolve_system_log_dir()
+# (utils-logfiles.sh), non costruiti da APP_SUBPATH. Prima di LOGDISC-4 questo
+# script calcolava APP_DIR="$NODE_DIR/$(eval echo "$APP_SUBPATH")" e cercava i
+# tre log lì dentro: erano l'ultima area a violare il principio 6, dopo che
+# LOGDISC-1 (named log) e LOGDISC-2 (search_all_logs) avevano già rimosso la
+# stessa assunzione.
+#
+# NODE_NAME_TEMPLATE, CUSTOM_LOG_SUBPATH e i tre *_LOG_BASE sono definiti in
+# system.conf — niente hardcoded qui (ARCH-6, "nessun default implicito nel
+# codice", consolidato 2026-08-06 rimuovendo la duplicazione
 # 'undertow_access_log'/'server'/'gc' che c'era prima in questo file).
 #
 
@@ -31,6 +38,11 @@ if [[ -z "${PROFILE_DIR:-}" ]]; then
 fi
 source "$PROFILE_DIR/system.conf"
 source "$(dirname "${BASH_SOURCE[0]}")/utils-nodes.sh"
+# utils-logfiles.sh per resolve_system_log_dir(). Verificato che il sourcing non
+# scriva NULLA su stdout: questo script comunica col chiamante emettendo
+# assegnazioni che chatbot.sh passa a `eval` (resolve_session_logs), quindi un
+# byte di troppo su stdout diventerebbe codice eseguito.
+source "$(dirname "${BASH_SOURCE[0]}")/utils-logfiles.sh"
 
 BASE_DIR="${1:-$LOG_BASE_DIR}"
 ENV_NAME="${2:-}"
@@ -65,18 +77,10 @@ if [[ ! -d "$NODE_DIR" ]]; then
     NODE_NUM=$(node_num_from_dir "$NODE_DIR")
 fi
 
-# ─── Risoluzione app dir (espande il template APP_SUBPATH) ───────────────────
-APP_DIR="$NODE_DIR/$(eval echo "$APP_SUBPATH")"
-
-if [[ ! -d "$APP_DIR" ]]; then
-    echo "echo '[ERROR] resolve-logs: app dir non trovata: $APP_DIR' >&2" >&2
-    exit 1
-fi
-
 # ─── Validazione *_LOG_BASE ────────────────────────────────────────────────────
 # Nessun default implicito (ARCH-6): un profilo che non li definisce deve
-# fallire qui in modo esplicito, non produrre path come "${APP_DIR}/.log"
-# con basename vuoto. Stesso pattern di guard di SERVER_LOG_FORMAT in
+# fallire qui in modo esplicito, non cercare un glob con basename vuoto (".log*",
+# che matcherebbe qualunque cosa). Stesso pattern di guard di SERVER_LOG_FORMAT in
 # dispatch.sh.
 for _b in ACCESS_LOG_BASE SERVER_LOG_BASE GC_LOG_BASE; do
     if [[ -z "${!_b:-}" ]]; then
@@ -84,6 +88,26 @@ for _b in ACCESS_LOG_BASE SERVER_LOG_BASE GC_LOG_BASE; do
         exit 1
     fi
 done
+
+# ─── Scoperta delle directory dei log di sistema ─────────────────────────────
+# ACTIVE_APP deve essere impostata PRIMA delle chiamate: resolve_log_glob, che
+# resolve_system_log_dir usa internamente, legge ACTIVE_APP per il tie-break e
+# per il vincolo require_app. Qui l'app della sessione si chiama $APP (parametro
+# posizionale $4) — senza questa riga il vincolo sarebbe un NO-OP SILENZIOSO
+# (la sua condizione richiede `-n "${ACTIVE_APP:-}"`) e su un nodo con più app la
+# scelta cadrebbe sui criteri successivi: "ContactManager" vincerebbe
+# alfabeticamente su "ClaimCenter", facendo leggere a ogni tool i log dell'app
+# sbagliata con un path plausibile e dati coerenti. È il rischio principale di
+# questo percorso, da cui il test dedicato in tests/test-logdisc-4.sh.
+ACTIVE_APP="$APP"
+
+# require_app=1 su tutte e tre: se il log esiste solo sotto un'altra app la
+# variabile resta VUOTA e il tool che ne ha bisogno lo dice via
+# skip_system_log_not_found (dispatch.sh) — mai aprire cross-app in silenzio
+# (principio 6, politica unica del progetto).
+ACCESS_LOG_DIR=$(resolve_system_log_dir "$NODE_DIR" "$ACCESS_LOG_BASE" 1) || ACCESS_LOG_DIR=""
+SERVER_LOG_DIR=$(resolve_system_log_dir "$NODE_DIR" "$SERVER_LOG_BASE" 1) || SERVER_LOG_DIR=""
+GC_LOG_DIR=$(resolve_system_log_dir "$NODE_DIR" "$GC_LOG_BASE" 1)         || GC_LOG_DIR=""
 
 # ─── File di log ─────────────────────────────────────────────────────────────
 resolve_log_file() {
@@ -94,21 +118,29 @@ resolve_log_file() {
     fi
 }
 
-SERVER_LOG_PATH=$(resolve_log_file "$APP_DIR/${SERVER_LOG_BASE}.log")
-
-# Access log: path del file corrente (usato solo per validazione esistenza)
-ACCESS_LOG_PATH=$(resolve_log_file "$APP_DIR/${ACCESS_LOG_BASE}.log")
-if [[ -z "$ACCESS_LOG_PATH" ]]; then
-    # fallback: qualsiasi file undertow presente
-    ACCESS_LOG_PATH=$(find "$APP_DIR" -maxdepth 1 -name "${ACCESS_LOG_BASE}*" 2>/dev/null | sort -r | head -1)
-fi
-if [[ -z "$ACCESS_LOG_PATH" ]]; then
-    echo "echo '[ERROR] resolve-logs: nessun ${ACCESS_LOG_BASE} in $APP_DIR' >&2" >&2
-    exit 1
-fi
-
-# GC log: path del file corrente (usato solo per validazione esistenza)
-GC_LOG_PATH=$(resolve_log_file "$APP_DIR/${GC_LOG_BASE}.log")
+# I tre path del file CORRENTE, derivati dalle directory appena scoperte. Sono
+# usati per validare la disponibilità (i guard per-tool in dispatch.sh) e per
+# mostrarli in context_line — non per leggere: i tool passano da
+# open_logs_for DIR BASE, che ricostruisce l'insieme dei file con select_log_files.
+#
+# Un path VUOTO non è un errore ed è la differenza principale introdotta da
+# LOGDISC-4: prima questo script abortiva l'INTERA sessione se non trovava un
+# access log, anche per query che non lo leggono (un nodo la cui app non espone
+# HTTP rendeva il bot inutilizzabile del tutto, e un test e2e di search_all_logs
+# è morto per questo). Ora la sessione si risolve se il NODO esiste, e il singolo
+# tool dice "non disponibile" solo se ha bisogno di quel log — validazione
+# per-tool invece che globale.
+#
+# Nota: *_LOG_DIR non vuota non implica *_LOG_PATH non vuoto. La directory è stata
+# scelta perché conteneva un file del gruppo, ma quel file può essere una rotazione
+# (.gz, BASENAME.DATE.log) senza che esista il corrente. I consumatori lo gestiscono
+# già: open_current_log_for verifica `-f`, open_logs_for passa da select_log_files.
+ACCESS_LOG_PATH=""
+SERVER_LOG_PATH=""
+GC_LOG_PATH=""
+[[ -n "$ACCESS_LOG_DIR" ]] && ACCESS_LOG_PATH=$(resolve_log_file "$ACCESS_LOG_DIR/${ACCESS_LOG_BASE}.log")
+[[ -n "$SERVER_LOG_DIR" ]] && SERVER_LOG_PATH=$(resolve_log_file "$SERVER_LOG_DIR/${SERVER_LOG_BASE}.log")
+[[ -n "$GC_LOG_DIR"     ]] && GC_LOG_PATH=$(resolve_log_file "$GC_LOG_DIR/${GC_LOG_BASE}.log")
 
 # ─── Directory log applicativi custom (opzionale, vuota se CUSTOM_LOG_SUBPATH è vuoto) ─
 # "Custom" = cartella flat, formato non standard JBoss (server/gc/access):
@@ -120,14 +152,19 @@ if [[ -n "${CUSTOM_LOG_SUBPATH:-}" ]]; then
 fi
 
 # ─── Output ──────────────────────────────────────────────────────────────────
+# Le tre *_LOG_DIR conservano nome e semantica ("la directory che contiene quel
+# tipo di log"): cambia solo COME sono calcolate — scoperte invece che dedotte da
+# APP_SUBPATH. È ciò che permette a dispatch.sh di restare invariato, con i suoi
+# 3 helper (open_logs/open_server_logs/open_gc_logs) e 15 call site intatti.
+# Possono essere vuote: vedi la nota sulla validazione per-tool sopra.
 echo "ACCESS_LOG='${ACCESS_LOG_PATH}'"
-echo "ACCESS_LOG_DIR='${APP_DIR}'"
+echo "ACCESS_LOG_DIR='${ACCESS_LOG_DIR}'"
 echo "ACCESS_LOG_BASE='${ACCESS_LOG_BASE}'"
 echo "SERVER_LOG='${SERVER_LOG_PATH}'"
-echo "SERVER_LOG_DIR='${APP_DIR}'"
+echo "SERVER_LOG_DIR='${SERVER_LOG_DIR}'"
 echo "SERVER_LOG_BASE='${SERVER_LOG_BASE}'"
 echo "GC_LOG='${GC_LOG_PATH:-}'"
-echo "GC_LOG_DIR='${APP_DIR}'"
+echo "GC_LOG_DIR='${GC_LOG_DIR}'"
 echo "GC_LOG_BASE='${GC_LOG_BASE}'"
 echo "ACTIVE_NODE='${NODE_NUM}'"
 echo "ACTIVE_ENV='${ENV_NAME}'"
