@@ -16,6 +16,43 @@ Aggiornato: 2026-08-17
 flessibilità di fine giornata: NLP-1 (la sola con priorità), GCFMT-1 (in attesa di un secondo
 formato GC reale) e PROF-2 (documentazione, dipende da NLP-1).
 
+### NLP-1 — struttura decisa (2026-08-17, con l'utente)
+
+**Criterio: il profilo contiene COORDINATE, non CAPACITÀ.** Dove sono i log, come si
+chiamano le cose, quale tecnologia — non il vocabolario, non il dataset, non il modello.
+
+**Nel framework** (es. `nlp/`), condivisi da tutti i profili con possibilità di override:
+
+| Cosa | Perché non è del profilo |
+|---|---|
+| `unigrams.txt`, `bigrams.txt` | 196 righe, **zero nomi concreti**: descrivono come parla un utente in italiano, con i placeholder `<APP>`/`<LOGFILE>` |
+| `dataset/queries_labeled.txt` | query in italiano con placeholder, non specifiche del cliente |
+| `models/intent_classifier/` | **conseguenza deterministica** di vocabolario + dataset + iperparametri: se gli input sono condivisi, il modello lo è per costruzione. Prova: i pesi di liquido e usnext hanno md5 identico (`8c442f2c…`) |
+| `NUM_TOOLS`, `TOOL_THRESHOLD`, `MODEL_TOPOLOGY`, `TOOL_NAMES` | identici nei due profili — e `TOOL_NAMES` **deve** corrispondere all'ordine degli output nei pesi condivisi: duplicarlo per profilo significa che una divergenza produce misrouting silenzioso |
+
+**Nel profilo** — `system.conf`, `entities.conf` e un `domain.conf` ridotto alle sole
+stringhe che l'utente legge: `TOOL_DESC`, `TOOL_EXAMPLE`, `HELP_CATEGORIES`,
+`TOOL_CATEGORY`. Nominano i log reali (`cc.log` vs `Pass.log`) e i nodi che esistono
+davvero, quindi sono coordinate: l'help deve restare **concreto e copiabile**
+(«ultime 100 righe del console.log sul nodo 2»), non generico.
+
+**Override**: un profilo che mettesse il proprio `unigrams.txt` (cliente non italiano,
+gergo aziendale) lo sovrascrive — stesso schema di `system.local.conf`. Nessuno dei due
+profili attuali ne ha bisogno: i tre symlink spariscono.
+
+**Da ripulire nello stesso intervento**: `profiles/liquido/models/intent_classifier.backup/`
+(174 KB, non tracciata — `.gitignore` riga 3 — residuo di un training passato) e la
+duplicazione `best/`, che è il checkpoint di early stopping di `train.py` e oggi coincide
+coi pesi promossi.
+
+**Verifica**: md5 del modello identico prima/dopo lo spostamento, `./train.sh` che gira
+end-to-end, suite completa, e il chatbot che risponde su **entrambi** i profili in
+produzione. Se un path sfugge il sintomo è netto (bot che non parte) tranne in un caso
+da presidiare: `build-dataset.sh` che scrive nel posto sbagliato e `train.sh` che
+addestra su un dataset vuoto o vecchio.
+
+---
+
 **Chiuso il 2026-08-17**: LOGDISC-2 (ricorsione in `search_all_logs` + colonna APP),
 LOGDISC-4 (log di sistema scoperti sotto il nodo, validazione per-tool, bug `require_app`),
 FORMAT-1 (timestamp riconosciuto per forma, non per posizione), DEPLOY-1 + DEPLOY-2
