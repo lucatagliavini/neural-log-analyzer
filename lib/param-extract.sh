@@ -96,7 +96,15 @@ elif echo "$query" | grep -qE "\berror[ei]?\b|\bERROR\b"; then
 fi
 
 # Nome log applicativo specifico — la lista viene dal profilo (entities.conf: APP_LOG_NAMES).
-# Fallback su array vuoto se il profilo non definisce APP_LOG_NAMES.
+#
+# La guardia `-f` resta, ma NON perché il file sia opzionale: è obbligatorio e i
+# due chiamanti a monte lo verificano con un messaggio parlante (chatbot.sh sui
+# file del profilo, normalize-query.sh in testa). Qui il test evita solo che
+# un'invocazione diretta senza PROFILE_DIR — come fanno alcuni test unitari —
+# fallisca su `source` invece di procedere con APP_LOG_NAMES vuoto, che per questo
+# script è un degrado accettabile (nessun NAMED_LOG risolto, non un errore).
+# Prima questa guardia era la ragione per cui il file *sembrava* opzionale in due
+# punti su tre (ENTCONF-1).
 NAMED_LOG=""
 if [[ -n "${PROFILE_DIR:-}" && -f "$PROFILE_DIR/entities.conf" ]]; then
     source "$PROFILE_DIR/entities.conf"

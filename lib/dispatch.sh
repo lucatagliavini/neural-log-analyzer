@@ -592,6 +592,27 @@ _dispatch_tool_run() {
         return 1
     fi
     local fmt="$SERVER_LOG_FORMAT"
+    # Il parser è caricato DINAMICAMENTE dal nome della tecnologia: per aggiungere
+    # WebSphere basta creare utils-websphere.awk con le stesse due funzioni
+    # (parse_server_log, is_stack_frame) e impostare SERVER_LOG_FORMAT=websphere —
+    # nessuna modifica ai tool né al codice di dispatch.
+    #
+    # Ma l'esistenza va verificata PRIMA di passarlo a gawk: con un valore non
+    # supportato l'utente vedeva `gawk: fatal: cannot open source file` a metà
+    # risposta, dopo l'header e il path del log (verificato il 2026-08-17). È un
+    # errore di configurazione e va detto come tale, elencando le tecnologie
+    # realmente disponibili invece di lasciarle dedurre (TECH-1).
+    if [[ ! -f "$LIB_DIR/utils-${fmt}.awk" ]]; then
+        local _avail
+        _avail=$(find "$LIB_DIR" -maxdepth 1 -name 'utils-*.awk' -printf '%f\n' 2>/dev/null \
+                 | sed -E 's/^utils-//; s/\.awk$//' \
+                 | grep -vxE 'time|colors|dedup' | sort | tr '\n' ' ')
+        echo "[ERROR] SERVER_LOG_FORMAT='$fmt' non supportato: manca $LIB_DIR/utils-${fmt}.awk" >&2
+        echo "        Tecnologie disponibili: ${_avail:-nessuna}" >&2
+        echo "        Per aggiungerne una: creare utils-${fmt}.awk con le funzioni" >&2
+        echo "        parse_server_log() e is_stack_frame() (vedi utils-jboss.awk)." >&2
+        return 1
+    fi
     local common_f="-f '$LIB_DIR/utils-time.awk' -f '$LIB_DIR/utils-colors.awk' -f '$LIB_DIR/utils-${fmt}.awk' -f '$LIB_DIR/utils-dedup.awk'"
     # Tema colore: i valori arrivano da lib/utils-theme.sh (già caricato da
     # chatbot.sh) e vengono passati a gawk come -v. utils-colors.awk li mappa

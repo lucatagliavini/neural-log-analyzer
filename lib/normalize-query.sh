@@ -18,6 +18,23 @@ if [[ -z "${PROFILE_DIR:-}" ]]; then
     exit 1
 fi
 
+# entities.conf è OBBLIGATORIO: senza la mappa APP/ENV/NODE non esiste la
+# normalizzazione delle entità, cioè il passo che rende il modello indipendente
+# dai nomi del cliente. Il controllo è esplicito perché questo script è invocato
+# anche fuori da chatbot.sh (build-dataset.sh, i test, invocazione diretta), dove
+# il guard sui file del profilo non è passato: senza, `source` su un file assente
+# dà "No such file or directory" senza dire quale profilo né cosa serve
+# (ENTCONF-1, 2026-08-17).
+#
+# L'errore è emesso nella forma `echo '...' >&2` perché lo stdout di questo script
+# viene passato a `eval` dal chiamante: un messaggio in chiaro diventerebbe codice.
+for _req_f in system.conf entities.conf; do
+    if [[ ! -f "$PROFILE_DIR/$_req_f" ]]; then
+        echo "echo '[ERROR] normalize-query: $_req_f mancante in $PROFILE_DIR — file obbligatorio del profilo' >&2"
+        exit 1
+    fi
+done
+
 source "$PROFILE_DIR/system.conf"
 source "$PROFILE_DIR/entities.conf"
 source "$(dirname "${BASH_SOURCE[0]}")/utils-logfiles.sh"

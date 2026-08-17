@@ -87,13 +87,44 @@ fi
 # Esporta PROFILE_DIR per tutti i lib (infer, normalize-query, query-to-features, resolve-logs)
 export PROFILE_DIR
 
+# ─── File obbligatori del profilo ────────────────────────────────────────────
+# Verificati PRIMA di sourciarli, così un file mancante produce un messaggio che
+# dice quale e a cosa serve, invece dell'errore del primo consumatore che ci
+# inciampa.
+#
+# entities.conf era trattato in tre modi diversi (ENTCONF-1, 2026-08-17):
+# obbligatorio in normalize-query.sh (`source` senza guardia), opzionale qui e in
+# param-extract.sh (`[[ -f ]] &&`). Su un profilo che non lo aveva, la query
+# moriva con "No such file or directory" dal punto di vista di normalize-query —
+# un messaggio che non dice cosa fare. È obbligatorio: senza di esso non esistono
+# né la mappa APP/ENV/NODE né i pattern dei nodi, quindi la normalizzazione delle
+# entità (il passo che rende il modello indipendente dai nomi del cliente) non può
+# funzionare.
+declare -A _PROFILE_FILES=(
+    [system.conf]="path dei log, ambienti, basename dei log di sistema"
+    [domain.conf]="tool disponibili, soglia di confidenza, topologia della rete"
+    [entities.conf]="mappa APP/ENV/NODE per la normalizzazione delle entità"
+)
+_missing_files=()
+for _f in "${!_PROFILE_FILES[@]}"; do
+    [[ -f "$PROFILE_DIR/$_f" ]] || _missing_files+=("$_f — ${_PROFILE_FILES[$_f]}")
+done
+if [[ "${#_missing_files[@]}" -gt 0 ]]; then
+    echo "[ERROR] Profilo incompleto: $PROFILE_DIR" >&2
+    echo "        File obbligatori mancanti:" >&2
+    printf '          %s\n' "${_missing_files[@]}" >&2
+    echo "        Confronta con profiles/liquido/, che è il profilo di riferimento." >&2
+    exit 1
+fi
+unset _PROFILE_FILES _missing_files _f
+
 # Carica configurazione di sistema e dominio
 source "$PROFILE_DIR/system.conf"
 # Override locale (non deployato) — per variabili specifiche dell'ambiente di produzione
 [[ -f "$PROFILE_DIR/system.local.conf" ]] && source "$PROFILE_DIR/system.local.conf"
 source "$PROFILE_DIR/domain.conf"
 # Dizionario entità (APP alias, ENV synonyms, NODE patterns) per normalize-query.sh
-[[ -f "$PROFILE_DIR/entities.conf" ]] && source "$PROFILE_DIR/entities.conf"
+source "$PROFILE_DIR/entities.conf"
 
 # ─── Completezza del profilo ─────────────────────────────────────────────────
 # Un profilo incompleto è un errore di CONFIGURAZIONE, e va detto all'avvio con
