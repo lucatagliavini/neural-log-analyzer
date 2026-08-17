@@ -1,6 +1,6 @@
 # Backlog — neural-log-analyzer
 
-Aggiornato: 2026-08-07
+Aggiornato: 2026-08-17
 
 ---
 
@@ -8,6 +8,7 @@ Aggiornato: 2026-08-07
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
+| DEPLOY-1 | **`deploy.sh` non ha `--delete`, e non può averlo senza una verifica di identità della directory target** (deciso 2026-08-17). Conseguenza attuale: i file rimossi in locale, o trasferiti per errore da un deploy passato, **restano** in produzione — oggi `CLAUDE.md` e `.claude/` copiati prima che le esclusioni esistessero (inerti, nessuno script del bot li legge). La rimozione manuale è stata **esplicitamente rifiutata dall'utente**: un `rsync --delete`, o un `rm` su `${HOST}:${DEST}`, cancella ricorsivamente qualunque directory gli venga passata — un `--dest` sbagliato, un `DEST` vuoto o un typo diventano una cancellazione in produzione, e il dry-run non protegge chi lancia il comando senza. Prerequisito per implementarlo: un **sentinel di identità** — `deploy.sh` verifica sul target la presenza di un marcatore noto (es. `chatbot.sh` + `profiles/`, o un file `.lana-bot-root` scritto dal deploy stesso) e rifiuta di procedere se manca, *prima* di qualsiasi operazione distruttiva. Finché non c'è, il deploy resta additivo per scelta: file residui sono rumore, una cancellazione sbagliata è un incidente | Da valutare |
 | LOGDISC-2 | **`search_all_logs.sh` non segue il contratto "fino al nodo"** (vedi principio 6 in CLAUDE.md, e LOGDISC-1 sotto). Enumera ancora 4 directory fisse via `APP_SUBPATH`/`CUSTOM_LOG_SUBPATH` (`search_all_logs.sh:132-148`) e chiama `select_log_files_grouped`, che è flat (`find -maxdepth 1`). Dopo LOGDISC-1, `tail_named_log`/`grep_named_log` raggiungono qualunque log sotto il nodo per nome o glob; `search_all_logs` no — un log in una directory arbitraria (es. `weird/deep/nested/custom.log`) è nominabile ma non cercabile con "in quali log c'è X". Asimmetria nota, non ancora valutata in dettaglio se/come estendere la ricorsione qui: il volume di dati da scansionare cambia (oggi 4 directory note, potenzialmente l'intero nodo), quindi l'impatto su tempo/rumore va misurato prima di decidere. | Da valutare |
 
 **Chiuso il 2026-08-07**: LOGDISC-1 (ricerca ricorsiva log sotto il nodo, vedi sezione dedicata),
