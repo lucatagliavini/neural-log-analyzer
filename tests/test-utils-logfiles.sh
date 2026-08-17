@@ -39,6 +39,19 @@ assert_true() {
     fi
 }
 
+# assert_eq mostra atteso/avuto quando falliscono: su un confronto di epoch o di
+# conteggi, "FAIL" da solo non dice se il valore era 0, sbagliato di un'ora o di
+# un anno. assert_true resta per le condizioni booleane.
+assert_eq() {
+    local desc="$1" expected="$2" actual="$3"
+    if [[ "$expected" == "$actual" ]]; then
+        printf "  ${GREEN}PASS${RESET}  %s\n" "$desc"; pass=$(( pass + 1 ))
+    else
+        printf "  ${RED}${BOLD}FAIL${RESET}  %s\n        atteso: '%s'\n        avuto:  '%s'\n" \
+            "$desc" "$expected" "$actual"; fail=$(( fail + 1 ))
+    fi
+}
+
 section() { printf "\n${BOLD}── %s ${RESET}${DIM}%s${RESET}\n" "$1" "────────────────────────────"; }
 
 _contains() {
@@ -253,6 +266,52 @@ else
     printf "  ${DIM}SKIP  test con TTY simulato: 'script' non disponibile${RESET}\n"
 fi
 rm -rf "$_PROG_FIX"
+
+# ─── _logfiles_read_first_ts: i formati timestamp riconosciuti ───────────────
+section "_logfiles_read_first_ts: 5 formati (TS-1, 2026-08-17)"
+
+# Il timestamp del primo record decide se un file rientra nella finestra
+# temporale: un formato non riconosciuto dà ts=0, e il pruning conservativo
+# (principio 5) include TUTTE le rotazioni — nessun dato perso, ma nessun filtro.
+# Trovato montando usnext, dove Pass.log usa la data europea DD-MM-YYYY.
+_TS_FIX="$(mktemp -d)"
+printf '172.30.85.133 [17/Aug/2026:10:00:00 +0200] "GET / HTTP/1.1" 200 1 0 - -\n' > "$_TS_FIX/access.log"
+printf '[2026-08-17T10:00:00.527+0200][1486515.012s][info][gc,start] GC(1) Pause\n'  > "$_TS_FIX/gc.log"
+printf '2026-08-17 10:00:00,303 INFO  [classe] messaggio\n'                          > "$_TS_FIX/server.log"
+printf '[thread] USER 2026-08-17T10:00:00,443 INFO messaggio\n'                      > "$_TS_FIX/custom_iso.log"
+printf '17-08-2026 10:00:00.071 INFO  HttpRestClient chiamata\n'                     > "$_TS_FIX/custom_eu.log"
+
+# Tutti e cinque descrivono lo STESSO istante: se un formato è riconosciuto
+# correttamente l'epoch deve coincidere, non solo essere diverso da zero.
+_expect_ts=$(date -d "2026-08-17 10:00:00" +%s)
+for _f in access gc server custom_iso custom_eu; do
+    assert_eq "$_f.log → epoch del 2026-08-17 10:00" \
+        "$_expect_ts" "$(_logfiles_read_first_ts "$_TS_FIX/$_f.log")"
+done
+
+# Una data DD-MM-YYYY a METÀ riga non è il timestamp del record: in un log
+# assicurativo è più probabilmente un dato applicativo (scadenza polizza, data
+# sinistro). L'ancora ^ nel pattern lo garantisce — senza, la selezione dei file
+# verrebbe falsata da un campo di business.
+printf 'INFO polizza con scadenza 31-12-2027 rinnovata\n' > "$_TS_FIX/business.log"
+assert_eq "data DD-MM-YYYY a metà riga ignorata (non è il timestamp del record)" \
+    "0" "$(_logfiles_read_first_ts "$_TS_FIX/business.log")"
+
+# Formato del tutto sconosciuto → 0, e il chiamante includerà il file per
+# prudenza invece di escluderlo (principio 5).
+printf 'nessun timestamp qui\n' > "$_TS_FIX/ignoto.log"
+assert_eq "formato ignoto → 0 (il chiamante include per prudenza)" \
+    "0" "$(_logfiles_read_first_ts "$_TS_FIX/ignoto.log")"
+
+# Il pruning ora discrimina: con una finestra interamente coperta dal file
+# corrente, la rotazione non va aperta. Prima del 5° pattern ne selezionava 2.
+printf '17-08-2026 10:00:00.000 riga di oggi\n' > "$_TS_FIX/Pass.log"
+printf '01-08-2026 10:00:00.000 riga vecchia\n' | gzip -c > "$_TS_FIX/Pass.log-2026-08-01-1785000000.gz"
+_sel=$(select_log_files_grouped "$_TS_FIX" "2026-08-17T10:30" "2026-08-17T11:00" "Pass*")
+assert_eq "finestra coperta dal corrente: la rotazione non viene aperta" \
+    "1" "$(echo "$_sel" | tr '|' '\n' | grep -c . )"
+
+rm -rf "$_TS_FIX"
 
 # ─── discover_log_dirs: scoperta ricorsiva delle directory con log ────────────
 section "discover_log_dirs (LOGDISC-2)"

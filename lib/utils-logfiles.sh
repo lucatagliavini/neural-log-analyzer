@@ -90,6 +90,19 @@ _logfiles_read_first_ts() {
         # sulle rotazioni (2026-08-04). Va ULTIMO: il ramo GC sopra è più specifico
         # (richiede la parentesi quadra) e deve avere precedenza.
         ts=$(date -d "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}:${BASH_REMATCH[3]}:00" +%s 2>/dev/null || echo "")
+    elif [[ "$line" =~ ^([0-9]{2})-([0-9]{2})-([0-9]{4})\ ([0-9]{2}):([0-9]{2}) ]]; then
+        # Data EUROPEA giorno-mese-anno: "17-08-2026 13:06:21.071 INFO HttpRestClient…"
+        # Formato di Pass.log nel profilo usnext, letto dal filesystem il 2026-08-17.
+        # Senza questo ramo ts_start restava 0 su ~40 MB di log per nodo: il pruning
+        # conservativo (principio 5) includeva TUTTE le rotazioni invece di
+        # selezionarle — nessun dato perso, ma nessun filtro utile.
+        #
+        # Non è ambiguo con i rami ISO sopra: qui l'anno a 4 cifre è in TERZA
+        # posizione, negli ISO è in prima. L'ancora `^` è deliberata — un
+        # DD-MM-YYYY a metà riga in un log assicurativo è più probabilmente un
+        # dato applicativo (scadenza polizza, data sinistro) che il timestamp
+        # della riga, e interpretarlo come tale falserebbe la selezione dei file.
+        ts=$(date -d "${BASH_REMATCH[3]}-${BASH_REMATCH[2]}-${BASH_REMATCH[1]} ${BASH_REMATCH[4]}:${BASH_REMATCH[5]}:00" +%s 2>/dev/null || echo "")
     fi
     echo "${ts:-0}"
 }
