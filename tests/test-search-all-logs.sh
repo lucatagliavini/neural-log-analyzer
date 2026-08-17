@@ -226,6 +226,71 @@ _log_first=0
 echo "$_out_oneapp" | grep -qE '^\s*LOG\s+MATCH' && _log_first=1
 assert_true "una sola app: 'LOG' resta la prima colonna dell'header" "$_log_first"
 
+# ─── Intervallo dei match su log NON ordinato cronologicamente ───────────────
+section "PRIMO/ULTIMO MATCH: minimo e massimo, non primo e ultimo incontrati"
+
+# Segnalato dall'utente il 2026-08-17: sulla tabella di `cerca "exception" in
+# produzione` alcune righe mostravano ULTIMO MATCH *precedente* a PRIMO MATCH —
+# es. `Pass.log.2026-08-17.2` con 12:31:14 │ 10:55:59, impossibile per costruzione.
+#
+# Causa: il codice prendeva "il primo e l'ultimo timestamp INCONTRATI", assumendo
+# righe in ordine cronologico. Vero per access log e server log (append-only
+# sequenziali), NON per un log applicativo multi-thread come Pass.log di usnext,
+# dove thread concorrenti scrivono nell'ordine in cui il buffer viene svuotato.
+#
+# Difetto latente da sempre: si è manifestato solo quando è stato montato il primo
+# profilo con un log di quel tipo.
+_FIX10="$(mktemp -d)"
+_node10="$_FIX10/prod/lxprjbliq04"
+mkdir -p "$_node10/prod/ClaimCenter"
+
+# Righe deliberatamente FUORI ordine, come le scrive un logger multi-thread.
+cat > "$_node10/prod/ClaimCenter/server.log" <<'EOF'
+2026-08-17 12:31:14,000 ERROR exception tardiva scritta prima
+2026-08-17 10:55:59,000 ERROR exception precoce scritta dopo
+2026-08-17 11:20:00,000 ERROR exception intermedia
+EOF
+
+export LOG_BASE_DIR="$_FIX10" LOG_SEARCH_ROOT="$_node10"
+export DETECTED_NODE="04" ACTIVE_NODE="04" ACTIVE_APP="ClaimCenter"
+export SEARCH_PATTERN="exception"
+unset TIME_FROM TIME_TO
+
+_out_unord=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+_row=$(echo "$_out_unord" | grep -E '^\s+server\.log' | head -1)
+
+# Il PRIMO match deve essere il più ANTICO (10:55:59), non quello incontrato prima.
+assert_true "log non ordinato: PRIMO MATCH è il timestamp minimo (10:55:59)" \
+    "$([[ "$_row" == *"10:55:59"* ]] && echo 1 || echo 0)"
+
+# E l'intervallo deve essere coerente: primo <= ultimo, sempre.
+_first=$(echo "$_row" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}' | head -1)
+_last=$(echo "$_row"  | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}' | tail -1)
+assert_true "log non ordinato: PRIMO MATCH <= ULTIMO MATCH ($_first <= $_last)" \
+    "$([[ "$_first" < "$_last" || "$_first" == "$_last" ]] && echo 1 || echo 0)"
+assert_true "  e l'ULTIMO è il massimo (12:31:14), non l'ultimo incontrato" \
+    "$([[ "$_last" == *"12:31:14"* ]] && echo 1 || echo 0)"
+
+# Su un log ORDINATO il risultato deve restare identico: il fix non cambia il caso
+# comune (access log, server log), altrimenti sarebbe una regressione.
+cat > "$_node10/prod/ClaimCenter/server.log" <<'EOF'
+2026-08-17 09:00:00,000 ERROR exception A
+2026-08-17 10:00:00,000 ERROR exception B
+2026-08-17 11:00:00,000 ERROR exception C
+EOF
+_out_ord=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+_row_ord=$(echo "$_out_ord" | grep -E '^\s+server\.log' | head -1)
+assert_true "log ordinato: intervallo invariato (09:00:00 → 11:00:00)" \
+    "$([[ "$_row_ord" == *"09:00:00"* && "$_row_ord" == *"11:00:00"* ]] && echo 1 || echo 0)"
+
+rm -rf "$_FIX10"
+unset LOG_SEARCH_ROOT
+# Ripristina lo stato per le sezioni successive: questa ha cambiato
+# SEARCH_PATTERN, e la prossima si aspetta ancora "searchhub" — il test seguente
+# è fallito alla prima stesura proprio per questo (stato non isolato, lo stesso
+# tipo di leakage già corretto nelle fixture di LOGDISC-1/2).
+export SEARCH_PATTERN="searchhub"
+
 # ─── Filtro temporale riga per riga ────────────────────────────────────────
 section "Filtro temporale (TIME_FROM/TIME_TO applicato riga per riga)"
 

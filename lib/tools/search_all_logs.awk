@@ -83,8 +83,30 @@ FNR == NR && !single_pass {
 
     hits++
     if (eff_ts != "") {
-        if (first_ts == "") first_ts = eff_ts
-        last_ts = eff_ts
+        # MINIMO e MASSIMO, non "il primo e l'ultimo incontrati".
+        #
+        # Il codice precedente assumeva che le righe fossero in ordine
+        # cronologico — vero per access log e server log, che sono append-only
+        # sequenziali. NON vero per un log applicativo multi-thread: in Pass.log
+        # del profilo usnext le righe sono scritte da thread concorrenti e
+        # finiscono nel file nell'ordine in cui il buffer viene svuotato, non di
+        # timestamp. Risultato: la tabella mostrava ULTIMO MATCH *precedente* a
+        # PRIMO MATCH — segnalato dall'utente il 2026-08-17 su
+        # `Pass.log.2026-08-17.2` (12:31:14 → 10:55:59, impossibile).
+        #
+        # Difetto latente da quando search_all_logs esiste: si è manifestato solo
+        # ora perché usnext è il primo profilo con un log di questo tipo — lo
+        # stesso Pass.log che ha già richiesto il quinto formato di timestamp
+        # (TS-1). Su un log ordinato il risultato è identico a prima, quindi
+        # nessuna regressione su access/server.
+        #
+        # Confronto lessicografico e non numerico: il formato è
+        # "YYYY-MM-DD HH:MM:SS", a campi di larghezza fissa e dal più
+        # significativo al meno, quindi l'ordine delle stringhe coincide con
+        # quello temporale — ed è lo stesso confronto già usato dal filtro
+        # tf/tt sopra.
+        if (first_ts == "" || eff_ts < first_ts) first_ts = eff_ts
+        if (eff_ts > last_ts)                    last_ts  = eff_ts
     }
 }
 
