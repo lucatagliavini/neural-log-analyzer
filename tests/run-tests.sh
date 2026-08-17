@@ -45,6 +45,11 @@ done
 
 export PROFILE_DIR
 
+# Risoluzione degli artefatti NLP (vocabolario, dataset, modello): un solo punto
+# di verità in lib/nlp-paths.sh. Va PRIMA di domain.conf, che ha bisogno di
+# TOOLS_CONF_FILE (NLP-1).
+source "$LIB_DIR/nlp-paths.sh"
+nlp_resolve_paths || exit 1
 source "$PROFILE_DIR/domain.conf"
 
 # ─── Colori ──────────────────────────────────────────────────────────────────

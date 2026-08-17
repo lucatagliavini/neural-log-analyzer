@@ -37,13 +37,18 @@ if [[ -x "$VENV_PYTHON" && -f "$BUILD_PY" ]]; then
 fi
 echo "[INFO] Backend: bash (venv non trovato in $SCRIPT_DIR/.venv)"
 
+# Risoluzione degli artefatti NLP (vocabolario, dataset, modello): un solo punto
+# di verità in lib/nlp-paths.sh. Va PRIMA di domain.conf, che ha bisogno di
+# TOOLS_CONF_FILE (NLP-1).
+source "$LIB_DIR/nlp-paths.sh"
+nlp_resolve_paths || exit 1
 source "$PROFILE_DIR/domain.conf"   # carica vocabolario e configurazione dominio
 
 # Pre-carica entities.conf se disponibile per la normalizzazione degli esempi
 _ENTITIES_CONF="$PROFILE_DIR/entities.conf"
 
-LABELED="$PROFILE_DIR/dataset/queries_labeled.txt"
-DATASET_FILE="$PROFILE_DIR/dataset/queries.txt"
+LABELED="$LABELED_FILE"
+# DATASET_FILE già esportata da nlp_resolve_paths
 
 if [[ ! -f "$LABELED" ]]; then
     echo "[ERROR] File sorgente non trovato: $LABELED" >&2

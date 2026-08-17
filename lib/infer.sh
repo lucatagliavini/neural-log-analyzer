@@ -12,11 +12,22 @@ if [[ -z "${PROFILE_DIR:-}" ]]; then
     exit 1
 fi
 
+# ANALYZER_DIR va calcolato PRIMA di sourciare domain.conf: da NLP-1 quel file ha
+# bisogno di TOOLS_CONF_FILE, che è risolto da lib/nlp-paths.sh — a sua volta
+# raggiungibile solo da ANALYZER_DIR. L'ordine precedente (domain.conf prima)
+# funzionava per caso, perché domain.conf non aveva dipendenze esterne.
+#
+# nlp_resolve_paths() è chiamata in proprio e non si affida al chiamante: questo
+# script è invocato sia come subprocesso da chatbot.sh (che l'ha già chiamata) sia
+# direttamente dai test. È idempotente — pochi stat — quindi chiamarla comunque è
+# la scelta robusta.
+ANALYZER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ANALYZER_DIR/lib/nlp-paths.sh"
+nlp_resolve_paths || exit 1
+
 source "$PROFILE_DIR/domain.conf"
 
-ANALYZER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NNET_RUN="$ANALYZER_DIR/../neural-bash/nnet-run.sh"
-MODEL_DIR="$PROFILE_DIR/models/intent_classifier"
 LIB_DIR="$ANALYZER_DIR/lib"
 
 query="$1"

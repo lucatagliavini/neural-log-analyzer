@@ -119,18 +119,60 @@ queries_labeled.txt
 | `lib/utils-colors.awk`, `lib/utils-jboss.awk`, `lib/utils-dedup.awk` | Utility AWK condivise, caricate con `-f` multipli da `dispatch.sh` |
 | `lib/tools/` | 14 tool AWK di analisi log (vedi README per la lista completa) |
 
-### Struttura profilo (`profiles/<nome>/`)
+### Capacità nel framework, coordinate nel profilo
 
-- **`system.conf`** — path log, timezone, ambienti disponibili. Modificabile senza
-  riaddestrare.
-- **`domain.conf`** — `TOOL_THRESHOLD`, `MODEL_TOPOLOGY` (auto-calcolato da
-  `NUM_FEATURES`), `TOOL_NAMES`/`TOOL_DESC`. Modifiche richiedono `./train.sh`.
-- **`entities.conf`** — mappa alias APP/ENV/NODE, sinonimi, risoluzione inversa.
-  Aggiungere una nuova applicazione richiede solo una riga qui, non un retrain.
-- **`unigrams.txt`/`bigrams.txt`** — pattern con peso, letti da `domain.conf` che calcola
-  `NUM_FEATURES` automaticamente. Modifiche richiedono `./build-dataset.sh` + `./train.sh`.
-- **`examples.sh`** — generatori di esempi specifici del profilo.
+**Il criterio** (NLP-1, 2026-08-17): il profilo contiene **coordinate** — dove sono i
+log, come si chiamano le cose, quale tecnologia — non **capacità**. Vocabolario,
+dataset e modello descrivono come parla un utente italiano e cosa il bot sa fare:
+non dipendono dal cliente, quindi vivono nel framework.
+
+La prova che la collocazione precedente era sbagliata: montare il secondo profilo
+(`usnext`) aveva richiesto tre symlink verso `liquido`.
+
+#### `nlp/` — condiviso da tutti i profili
+
+- **`unigrams.txt`/`bigrams.txt`** — vocabolario, pattern con peso. **Zero nomi
+  concreti**: solo linguaggio naturale e i placeholder `<APP>`/`<LOGFILE>`/`<ENV>`/
+  `<NODE>` (LOGF-3). Modifiche richiedono `./build-dataset.sh` + `./train.sh`.
+- **`tools.conf`** — `NUM_TOOLS`, `TOOL_THRESHOLD`, `MODEL_TOPOLOGY` (auto-calcolata da
+  `NUM_FEATURES`) e `TOOL_NAMES`. **L'ordine di `TOOL_NAMES` è il contratto**: è
+  l'indice del neurone di output nei pesi condivisi, quindi sta qui e non nel profilo —
+  duplicarlo significa che una divergenza produce misrouting **silenzioso**.
 - **`dataset/`** — `queries_labeled.txt` → `queries.txt` (generato).
+- **`models/intent_classifier/`** — i pesi. Sono la **conseguenza deterministica** di
+  vocabolario + dataset + iperparametri: se gli input sono condivisi, il modello lo è
+  per costruzione (prova: i pesi dei due profili avevano md5 identico già prima di
+  questo lavoro).
+
+#### `profiles/<nome>/` — per cliente
+
+- **`system.conf`** — path log, timezone, ambienti, basename dei log di sistema, quale
+  tecnologia (`SERVER_LOG_FORMAT`, `ACCESS_LOG_FORMAT`). Modificabile senza riaddestrare.
+- **`entities.conf`** — mappa alias APP/ENV/NODE, sinonimi, risoluzione inversa.
+  Aggiungere un'applicazione richiede una riga qui, non un retrain. **Obbligatorio**:
+  senza, non esiste la normalizzazione delle entità (ENTCONF-1).
+- **`domain.conf`** — solo le stringhe che l'utente legge (`TOOL_DESC`,
+  `TOOL_EXAMPLE`, `HELP_CATEGORIES`, `TOOL_CATEGORY`) e le soglie di severità (UI-13,
+  tarabili per ambiente). Sourcia `nlp/tools.conf` via `$TOOLS_CONF_FILE`. Gli esempi
+  devono restare **concreti e copiabili** (nomi di log reali, nodi che esistono).
+- **`examples.sh`** — generatori di esempi per `gen-examples.sh` (opzionale).
+- **`system.local.conf`** — override per-installazione, non deployato (opzionale).
+
+#### Override e risoluzione
+
+`lib/nlp-paths.sh` → `nlp_resolve_paths()` è il **punto unico** che risolve i path, con
+precedenza **profilo → framework per singolo artefatto**: un profilo può avere un
+proprio `unigrams.txt` e usare il dataset condiviso. Va chiamata **prima** di sourciare
+`domain.conf`, che ha bisogno di `TOOLS_CONF_FILE`.
+
+Non può stare in `domain.conf` (che si auto-localizzava con `_DOMAIN_DIR`): i test
+creano profili in `mktemp -d`, fuori dall'albero del repo, e un file copiato là non può
+sapere dove sta `nlp/`.
+
+`MODEL_DIR` è **derivato**, non configurato: un profilo che sovrascrive vocabolario,
+topologia o dataset ottiene automaticamente pesi propri, perché il modello condiviso è
+addestrato su input diversi dai suoi. Renderlo un flag separato permetterebbe di
+configurare quell'incoerenza.
 
 ## Convenzioni critiche
 

@@ -31,20 +31,20 @@ if [[ -z "$PROFILE_DIR" ]]; then
     exit 1
 fi
 
-LABELED="$PROFILE_DIR/dataset/queries_labeled.txt"
-if [[ ! -f "$LABELED" ]]; then
-    echo "[ERROR] Dataset non trovato: $LABELED" >&2; exit 1
-fi
-if [[ ! -f "$PROFILE_DIR/unigrams.txt" || ! -f "$PROFILE_DIR/bigrams.txt" ]]; then
-    echo "[ERROR] unigrams.txt o bigrams.txt non trovati in $PROFILE_DIR" >&2; exit 1
-fi
+# Risoluzione degli artefatti NLP: un solo punto di verità (NLP-1). Questo script
+# non sourcia domain.conf (legge i .txt direttamente), ma ha bisogno degli stessi
+# path — e nlp_resolve_paths già emette un errore esplicito se un artefatto manca
+# in entrambe le posizioni, quindi i due check che c'erano qui sono ridondanti.
+source "$SCRIPT_DIR/lib/nlp-paths.sh"
+nlp_resolve_paths || exit 1
+LABELED="$LABELED_FILE"
 
 # ─── Costruisce regex combinata da tutti i pattern del vocab ──────────────────
 # Legge direttamente dai file .txt — più semplice di sourceare domain.conf
 COMBINED_RE=$(
     grep -hv '^[[:space:]]*#\|^[[:space:]]*$' \
-        "$PROFILE_DIR/unigrams.txt" \
-        "$PROFILE_DIR/bigrams.txt" \
+        "$UNIGRAMS_FILE" \
+        "$BIGRAMS_FILE" \
     | awk -F'::' '{
         # unigram: colonna 1 = pattern
         # bigram:  colonna 1 = patA, colonna 2 = patB (colonna 3 = peso opzionale)

@@ -20,8 +20,8 @@ sys.path.insert(0, LIB_DIR)
 import build_dataset as bd
 
 
-def load_queries(profile_dir):
-    path = os.path.join(profile_dir, 'dataset', 'queries_labeled.txt')
+def load_queries(labeled_path):
+    path = labeled_path
     queries = []
     with open(path) as f:
         for raw in f:
@@ -71,13 +71,24 @@ def main():
 
     profile_dir = os.path.realpath(args.profile)
     cfg = bd.load_profile(profile_dir)
-    queries = load_queries(profile_dir)
 
-    unigrams = bd.load_unigrams(os.path.join(profile_dir, 'unigrams.txt'))
-    bigrams  = bd.load_bigrams(os.path.join(profile_dir, 'bigrams.txt'))
+    # Riusa la risoluzione di build_dataset (NLP-1): niente terza implementazione
+    # della precedenza profilo→framework — sarebbe il difetto che il test stesso
+    # esiste per intercettare.
+    paths = bd.resolve_nlp_paths(profile_dir)
+    queries = load_queries(paths['labeled_file'])
 
+    unigrams = bd.load_unigrams(paths['unigrams_file'])
+    bigrams  = bd.load_bigrams(paths['bigrams_file'])
+
+    # I subprocessi bash (normalize-query.sh, query-to-features.sh) sourciano
+    # domain.conf → tools.conf, quindi hanno bisogno dei path risolti nel loro env:
+    # un figlio eredita solo ciò che è esportato.
     env = os.environ.copy()
-    env['PROFILE_DIR'] = profile_dir
+    env['PROFILE_DIR']     = profile_dir
+    env['UNIGRAMS_FILE']   = paths['unigrams_file']
+    env['BIGRAMS_FILE']    = paths['bigrams_file']
+    env['TOOLS_CONF_FILE'] = paths['tools_conf_file']
 
     norm_mismatches = []
     feat_mismatches = []

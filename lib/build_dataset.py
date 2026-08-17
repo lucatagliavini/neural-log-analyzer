@@ -81,6 +81,47 @@ def posix_to_python(pat):
     return pat
 
 
+# ─── Risoluzione degli artefatti NLP ────────────────────────────────────────
+# Replica in Python di lib/nlp-paths.sh (NLP-1, 2026-08-17): vocabolario, dataset e
+# modello vivono nel framework (nlp/), con override per-artefatto nel profilo.
+#
+# La duplicazione bash/Python è INTENZIONALE ed è lo stesso pattern già usato per
+# normalize_query()/vectorize() contro normalize-query.sh/query-to-features.sh, con
+# tests/test-normalize-parity.py come rete contro la divergenza. Qui la logica è
+# molto più semplice (solo esistenza di file), ma il principio resta: una singola
+# fonte di verità in Python, riusata da build_dataset.py e dal test di parità.
+
+def resolve_nlp_paths(profile_dir):
+    nlp_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'nlp')
+    if not os.path.isdir(nlp_dir):
+        raise RuntimeError(f"resolve_nlp_paths: directory del framework non trovata: {nlp_dir}")
+
+    def resolve_file(rel):
+        for base in (profile_dir, nlp_dir):
+            p = os.path.join(base, rel)
+            if os.path.isfile(p):
+                return p
+        # ARCH-6, nessun default implicito: errore con entrambi i path controllati.
+        raise RuntimeError(
+            f"resolve_nlp_paths: '{rel}' non trovato\n"
+            f"        cercato in: {os.path.join(profile_dir, rel)}\n"
+            f"                    {os.path.join(nlp_dir, rel)}")
+
+    prof_dataset = os.path.join(profile_dir, 'dataset')
+    dataset_dir = prof_dataset if os.path.isdir(prof_dataset) else os.path.join(nlp_dir, 'dataset')
+
+    return {
+        'nlp_dir':         nlp_dir,
+        'unigrams_file':   resolve_file('unigrams.txt'),
+        'bigrams_file':    resolve_file('bigrams.txt'),
+        'tools_conf_file': resolve_file('tools.conf'),
+        'dataset_dir':     dataset_dir,
+        'labeled_file':    os.path.join(dataset_dir, 'queries_labeled.txt'),
+        'dataset_file':    os.path.join(dataset_dir, 'queries.txt'),
+    }
+
+
 # ─── Caricamento configurazione profilo ─────────────────────────────────────
 
 def load_profile(profile_dir):
@@ -90,10 +131,16 @@ def load_profile(profile_dir):
 
     system   = read('system.conf')
     entities = read('entities.conf')
-    domain   = read('domain.conf')
+
+    # TOOL_NAMES è passato al framework con NLP-1: domain.conf non lo contiene più.
+    # Il file è risolto con la stessa precedenza profilo→framework degli altri
+    # artefatti, così un profilo con tools.conf proprio viene rispettato.
+    paths = resolve_nlp_paths(profile_dir)
+    with open(paths['tools_conf_file']) as f:
+        tools_conf = f.read()
 
     cfg = {}
-    cfg['tool_names']      = parse_simple_array(domain, 'TOOL_NAMES')
+    cfg['tool_names']      = parse_simple_array(tools_conf, 'TOOL_NAMES')
     cfg['available_apps']  = parse_simple_array(system, 'AVAILABLE_APPS')
 
     entity_app = parse_assoc_array(entities, 'ENTITY_APP')
@@ -349,12 +396,13 @@ def main():
     cfg        = load_profile(profile_dir)
     tool_names = cfg['tool_names']
 
-    unigrams = load_unigrams(os.path.join(profile_dir, 'unigrams.txt'))
-    bigrams  = load_bigrams(os.path.join(profile_dir, 'bigrams.txt'))
+    paths = resolve_nlp_paths(profile_dir)
+    unigrams = load_unigrams(paths['unigrams_file'])
+    bigrams  = load_bigrams(paths['bigrams_file'])
     num_features = len(unigrams) + len(bigrams)
 
-    labeled_path = os.path.join(profile_dir, 'dataset', 'queries_labeled.txt')
-    out_path     = os.path.join(profile_dir, 'dataset', 'queries.txt')
+    labeled_path = paths['labeled_file']
+    out_path     = paths['dataset_file']
 
     count     = 0
     zero_vecs = []

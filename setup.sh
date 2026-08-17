@@ -25,9 +25,13 @@ if [[ -z "$PROFILE_DIR" ]]; then
 fi
 
 source "$PROFILE_DIR/system.conf"
+# Risoluzione degli artefatti NLP (vocabolario, dataset, modello): un solo punto
+# di verità in lib/nlp-paths.sh. Va PRIMA di domain.conf, che ha bisogno di
+# TOOLS_CONF_FILE (NLP-1).
+source "$SCRIPT_DIR/lib/nlp-paths.sh"
+nlp_resolve_paths || exit 1
 source "$PROFILE_DIR/domain.conf"
 
-MODEL_DIR="$PROFILE_DIR/models/intent_classifier"
 
 echo "[INFO] neural-log-analyzer setup — profilo: $(basename "$PROFILE_DIR")"
 echo "[INFO] Topologia: $MODEL_TOPOLOGY"

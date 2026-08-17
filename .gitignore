@@ -1,7 +1,11 @@
 .venv/
 __pycache__/
-profiles/*/models/*.backup/
-profiles/*/models/*.backup2/
+# Backup automatici creati da nnet-init.sh a ogni reinizializzazione del modello.
+# Pattern generalizzato con NLP-1: i pesi vivono in nlp/models/, ma un profilo
+# "custom" (che sovrascrive vocabolario o topologia) ha i propri in
+# profiles/<nome>/models/ — la regola deve valere per entrambi.
+**/models/*.backup/
+**/models/*.backup2/
 tmp/
 # Log di utilizzo e performance (chatbot-YYYY-MM-DD.log): dati di runtime,
 # specifici dell'installazione. Anche escluso da deploy.sh, così i log

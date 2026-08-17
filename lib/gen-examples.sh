@@ -34,9 +34,14 @@ if [[ -z "${PROFILE_DIR:-}" ]]; then
     exit 1
 fi
 
+# Risoluzione degli artefatti NLP (vocabolario, dataset, modello): un solo punto
+# di verità in lib/nlp-paths.sh. Va PRIMA di domain.conf, che ha bisogno di
+# TOOLS_CONF_FILE (NLP-1).
+source "$SCRIPT_DIR/nlp-paths.sh"
+nlp_resolve_paths || exit 1
 source "$PROFILE_DIR/domain.conf"
 
-DATASET="$PROFILE_DIR/dataset/queries_labeled.txt"
+DATASET="$LABELED_FILE"
 
 # Conta esempi nel dataset per un tool (considera anche multi-label)
 current_count() {

@@ -52,11 +52,13 @@ if [[ "$LOSS" != "mse" && "$LOSS" != "bce" ]]; then
     exit 1
 fi
 
+# Risoluzione degli artefatti NLP (vocabolario, dataset, modello): un solo punto
+# di verità in lib/nlp-paths.sh. Va PRIMA di domain.conf, che ha bisogno di
+# TOOLS_CONF_FILE (NLP-1).
+source "$SCRIPT_DIR/lib/nlp-paths.sh"
+nlp_resolve_paths || exit 1
 source "$PROFILE_DIR/domain.conf"
 
-MODEL_DIR="$PROFILE_DIR/models/intent_classifier"
-DATASET_FILE="$PROFILE_DIR/dataset/queries.txt"
-LABELED_FILE="$PROFILE_DIR/dataset/queries_labeled.txt"
 
 if [[ ! -d "$MODEL_DIR" ]]; then
     echo "[ERROR] Modello non inizializzato. Esegui prima: ./setup.sh --profile $PROFILE_DIR" >&2

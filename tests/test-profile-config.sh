@@ -46,13 +46,10 @@ _mk_profile() {
     cp "$ROOT_DIR/profiles/liquido/system.conf"   "$dir/"
     cp "$ROOT_DIR/profiles/liquido/domain.conf"   "$dir/"
     cp "$ROOT_DIR/profiles/liquido/entities.conf" "$dir/"
-    cp "$ROOT_DIR/profiles/liquido/unigrams.txt"  "$dir/"
-    cp "$ROOT_DIR/profiles/liquido/bigrams.txt"   "$dir/"
-    # Il modello serve perché chatbot.sh verifica la sua presenza PRIMA di
-    # dispatchare: senza, si fermerebbe su "Modello non trovato" e i test sul
-    # parser di tecnologia non arriverebbero mai al punto che devono esercitare.
-    mkdir -p "$dir/models"
-    cp -r "$ROOT_DIR/profiles/liquido/models/intent_classifier" "$dir/models/"
+    # unigrams.txt/bigrams.txt/models NON si copiano più: da NLP-1 vivono nel
+    # framework (nlp/) e lib/nlp-paths.sh li risolve lì anche per un PROFILE_DIR in
+    # mktemp — la sua auto-locazione punta sempre al repo reale. È la conferma che
+    # la risoluzione NON poteva stare in domain.conf, che una fixture copia altrove.
 }
 
 # ─── ENTCONF-1: file obbligatori del profilo ─────────────────────────────────

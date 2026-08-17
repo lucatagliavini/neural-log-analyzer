@@ -122,6 +122,11 @@ unset _PROFILE_FILES _missing_files _f
 source "$PROFILE_DIR/system.conf"
 # Override locale (non deployato) — per variabili specifiche dell'ambiente di produzione
 [[ -f "$PROFILE_DIR/system.local.conf" ]] && source "$PROFILE_DIR/system.local.conf"
+# Risoluzione degli artefatti NLP (vocabolario, dataset, modello): un solo punto
+# di verità in lib/nlp-paths.sh. Va PRIMA di domain.conf, che ha bisogno di
+# TOOLS_CONF_FILE (NLP-1).
+source "$LIB_DIR/nlp-paths.sh"
+nlp_resolve_paths || exit 1
 source "$PROFILE_DIR/domain.conf"
 # Dizionario entità (APP alias, ENV synonyms, NODE patterns) per normalize-query.sh
 source "$PROFILE_DIR/entities.conf"
@@ -187,7 +192,6 @@ QUERY_LOG_DIR="${QUERY_LOG_DIR:-$SCRIPT_DIR/logs}"
 [[ -z "$ACTIVE_APP" ]] && ACTIVE_APP="$DEFAULT_APP"
 
 # Path del modello addestrato
-MODEL_DIR="$PROFILE_DIR/models/intent_classifier"
 TOOLS_DIR="$SCRIPT_DIR/lib/tools"
 
 # Carica dispatch (open_log + dispatch_tool)

@@ -37,10 +37,15 @@ if [[ -z "$PROFILE_DIR" ]]; then
     exit 1
 fi
 
+# Risoluzione degli artefatti NLP (vocabolario, dataset, modello): un solo punto
+# di verità in lib/nlp-paths.sh. Va PRIMA di domain.conf, che ha bisogno di
+# TOOLS_CONF_FILE (NLP-1).
+source "$SCRIPT_DIR/lib/nlp-paths.sh"
+nlp_resolve_paths || exit 1
 source "$PROFILE_DIR/domain.conf"
 
-DATASET_NUM="$PROFILE_DIR/dataset/queries.txt"
-LABELED="$PROFILE_DIR/dataset/queries_labeled.txt"
+DATASET_NUM="$DATASET_FILE"
+LABELED="$LABELED_FILE"
 
 if [[ ! -f "$DATASET_NUM" ]]; then
     echo "[SKIP] gap-report: dataset numerico non trovato ($DATASET_NUM)" >&2
@@ -105,7 +110,7 @@ else
 fi
 
 # ─── Sezione 2: gap vocabolario ───────────────────────────────────────────────
-if [[ ! -f "$LABELED" || ! -f "$PROFILE_DIR/unigrams.txt" ]]; then
+if [[ ! -f "$LABELED" || ! -f "$UNIGRAMS_FILE" ]]; then
     printf "\n  ${DIM}(vocab-gap non disponibile — unigrams.txt mancante)${RESET}\n\n"
     exit 0
 fi

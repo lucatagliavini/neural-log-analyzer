@@ -29,7 +29,8 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 NNET_INIT="$ROOT_DIR/../neural-bash/nnet-init.sh"
 TRAIN_PY="$ROOT_DIR/lib/train.py"
 VENV_PYTHON="$ROOT_DIR/.venv/bin/python3"
-DATASET="$ROOT_DIR/profiles/liquido/dataset/queries.txt"
+# Il dataset vive nel framework da NLP-1 (2026-08-17), non più nel profilo.
+DATASET="$ROOT_DIR/nlp/dataset/queries.txt"
 
 WORK="$ROOT_DIR/tmp/train-regression-$$"
 rm -rf "$WORK"

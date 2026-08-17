@@ -69,13 +69,18 @@ neural-log-analyzer/
 ├── setup.sh            # Inizializza il modello per un profilo
 ├── train.sh            # Addestra il classificatore di intent
 ├── build-dataset.sh    # Genera il dataset di training dai labeled examples
-├── profiles/
+├── nlp/                    # Capacità del bot, condivise da tutti i profili
+│   ├── unigrams.txt        # Vocabolario: pattern con peso (zero nomi concreti)
+│   ├── bigrams.txt         # Vocabolario: coppie di co-presenza
+│   ├── tools.conf          # NUM_TOOLS, soglia, topologia, TOOL_NAMES
+│   ├── dataset/            # queries_labeled.txt → queries.txt (generato)
+│   └── models/             # Pesi della rete addestrata
+├── profiles/               # Coordinate per cliente
 │   └── liquido/
-│       ├── system.conf     # Path log, timezone, ambienti disponibili
-│       ├── domain.conf     # Tool, topologia rete, soglia confidenza
-│       ├── vocab.sh        # Vocabolario NLP (unigram + bigram)
-│       ├── examples.sh     # Generatori di esempi specifici del profilo
-│       └── dataset/        # queries_labeled.txt → queries.txt (generato)
+│       ├── system.conf     # Path log, ambienti, nodi, tecnologia
+│       ├── entities.conf   # Alias APP/ENV/NODE (obbligatorio)
+│       ├── domain.conf     # Descrizioni, esempi, soglie di severità
+│       └── examples.sh     # Generatori di esempi (opzionale)
 ├── lib/
 │   ├── infer.sh            # Feature vector → rete → nomi tool attivati
 │   ├── dispatch.sh         # Tool name → invocazione AWK
@@ -129,14 +134,28 @@ queries_labeled.txt
 - `DEFAULT_APP`, `AVAILABLE_APPS`
 - `NODE_PATTERN`, `APP_SUBPATH`, `CUSTOM_LOG_SUBPATH`
 
-**`domain.conf`** — modifiche richiedono `./train.sh`:
-- `TOOL_THRESHOLD` — soglia confidenza per attivare un tool (default: 0.25)
-- `MODEL_TOPOLOGY` — dimensioni rete (es: `74,48,13`)
-- `TOOL_NAMES`, `TOOL_DESC`
+**`entities.conf`** — obbligatorio, non richiede riaddestramento:
+- `ENTITY_APP`, `APP_CANONICAL` — alias delle applicazioni → `<APP>`
+- `APP_LOG_NAMES` — nomi dei log applicativi custom
+- `NODE_PATTERNS` — come l'utente nomina i nodi
 
-**`vocab.sh`** — modifiche richiedono `./build-dataset.sh` + `./train.sh`:
-- `UNIGRAMS` — pattern regex con peso (es: `"errore :: 2"`)
-- `BIGRAMS` — coppie co-presenza (es: `"exception :: ultim"`)
+**`domain.conf`** — solo ciò che nomina cose reali del cliente:
+- `TOOL_DESC`, `TOOL_EXAMPLE`, `HELP_CATEGORIES` — le stringhe che l'utente legge
+- soglie di severità (`GC_PAUSE_*`, `SVC_TIME_*`, …) — tarabili per ambiente
+
+**`nlp/tools.conf`** (framework) — modifiche richiedono `./setup.sh` + `./train.sh`:
+- `TOOL_THRESHOLD` — soglia confidenza per attivare un tool (default: 0.25)
+- `MODEL_TOPOLOGY` — dimensioni rete, auto-calcolata da `NUM_FEATURES`
+- `TOOL_NAMES` — l'ordine **è** l'indice del neurone di output nei pesi
+
+**`nlp/unigrams.txt`/`nlp/bigrams.txt`** (framework) — modifiche richiedono
+`./build-dataset.sh` + `./train.sh`:
+- unigram: pattern regex con peso (es: `"errore :: 2"`)
+- bigram: coppie di co-presenza (es: `"exception :: ultim"`)
+
+Il vocabolario non contiene nomi di applicazioni o di log: il classificatore
+riconosce la *forma* `<nome>.log` tramite i placeholder, non i nomi concreti —
+così lo stesso modello vale per profili diversi.
 - `NUM_FEATURES` — totale feature (deve essere coerente con `MODEL_TOPOLOGY`)
 
 ## Dipendenze
