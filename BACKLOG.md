@@ -9,16 +9,19 @@ Aggiornato: 2026-08-19
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
+| SRCH-4 | **Gap in QUOTE-1: nome di log di sistema quotato senza `*` viene assorbito in `<PATTERN>`, non resta letterale.** Segnalato dall'utente nel secondo test manuale di SRCH-2/SRCH-3: `sul nodo 3 di produzione trova "No HeadersTranscoder provided" nel "server.log" di oggi` instrada a `search_all_logs` (87%) invece di `grep_named_log`. Confermato per ispezione diretta di `NORM_QUERY`: `sul <NODE> di <ENV> trova <PATTERN> nel <PATTERN> di oggi` — **entrambe** le stringhe quotate diventano `<PATTERN>` in `normalize-query.sh`, perché `"server.log"` senza `*` non è glob-like per la regola QUOTE-1 (serve `*` **e** `.log` insieme) e quindi non produce `<LOGFILE>`, ma sparisce anche come testo letterale. Il bigramma che discrimina SRCH-2 (`nlp/bigrams.txt`: `server.log\|gc.log\|access.log :: <pattern>\|cerca\b\|trova\b\|...`) matcha la sottostringa **letterale** "server.log"/"gc.log"/"access.log" nella query — con quella sostituita da `<PATTERN>`, il bigramma non si attiva e la rete ricade sul marcatore di totalità che spinge verso `search_all_logs`. **Non è errore dell'utente**: senza virgolette (`trova "..." nel server.log`) la query instrada correttamente, come verificato nei test SRCH-2/SRCH-3 esistenti — il gap è specifico alla combinazione "nome di log di sistema" + "quotato" + "senza wildcard". Direzione plausibile (da validare, non decisa): estendere la disambiguazione per forma di QUOTE-1 perché una stringa quotata che combacia esattamente con un sinonimo di log di sistema (già riconosciuto da `system_log_kind_of()`/`_is_system_log_base()`, `lib/utils-logfiles.sh`) resti letterale o diventi `<LOGFILE>` anche senza `*` — simmetrico al caso named già gestito. Richiede verifica di non-regressione sulle 5 query quotate esistenti nel dataset e su `--parity`. **Da implementare, non ancora iniziato** | Da fare |
 
 GCFMT-1 resta aperta in attesa di un secondo formato GC reale da supportare: con un solo
 caso l'interfaccia non è validabile — non è urgente nonostante il tono, tant'è che qui è
 segnata "Quando serve". **USNEXT-2 e HELP-1 chiuse il 2026-08-19** (sotto, sezioni
 dedicate). **NCLOCAL-1, l'unica voce che era ad alta priorità, è stata chiusa il
 2026-08-19** (sotto, sezione USNEXT-1) — il deploy in produzione resta comunque una
-decisione dell'utente, non ancora presa. **SRCH-2 e QUOTE-1 chiuse il 2026-08-19**
+decisione dell'utente, non ancora presa. **SRCH-2, QUOTE-1 e SRCH-3 chiuse il 2026-08-19**
 (sezione `SRCH` sotto) — il gap emerso dal test manuale in produzione è stato implementato,
 riaddestrato e verificato su entrambi i profili nella stessa sessione in cui è stato
-segnalato.
+segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manuale
+(nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
+implementato su richiesta esplicita dell'utente ("implementiamo domani").
 
 ### NLP-1 + PROF-2 — **FATTO** (2026-08-17)
 
