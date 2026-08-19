@@ -833,6 +833,35 @@ grep_named_log	altri warning nel cc.log
 grep_named_log	altri errori nello stesso log guidewire
 grep_named_log	warning nel log guidewire corrente
 
+# ─── SRCH-2: ricerca testuale in un log di sistema (server/access/gc) ────────
+# <pattern> + server.log|gc.log|access.log → grep_named_log, non filter_errors
+# (che non ha ricerca testuale) né search_all_logs (che cerca su tutti i log
+# del nodo, non su uno solo). Tre log di sistema, i due ordini "nel X.log" e
+# "nel X log" (senza punto — il bigramma matcha comunque, il "." ERE non
+# escapato copre anche lo spazio), con e senza virgolette: senza virgolette
+# param-extract.sh non estrae SEARCH_PATTERN, ma resta comunque un intento di
+# ricerca da instradare a grep_named_log, non a filter_errors/search_all_logs.
+grep_named_log	cerca "NullPointerException" nel server.log
+grep_named_log	cerca NullPointerException nel server log
+grep_named_log	trova "timeout" nel server.log
+grep_named_log	trova timeout nel server log
+grep_named_log	cerca "OutOfMemory" nell'access log
+grep_named_log	cerca OutOfMemory nell'access.log
+grep_named_log	trova "500" nell'access log
+grep_named_log	trova connection refused nell'access.log
+grep_named_log	cerca "GC pause" nel gc.log
+grep_named_log	cerca GC pause nel gc log
+grep_named_log	trova "full gc" nel gc.log
+grep_named_log	trova full gc nel gc log
+grep_named_log	ricerca "deadlock" nel server.log
+grep_named_log	ricerca deadlock nel server log
+grep_named_log	search "StackOverflow" nel server.log
+grep_named_log	cerca "401" nell'access log
+grep_named_log	cerca "ConcurrentModificationException" nel gc.log
+grep_named_log	trova "credentialToJWT" nel server.log
+grep_named_log	cerca il pattern SIUStatus nel server.log
+grep_named_log	trova il messaggio timeout nell'access log
+
 # ─── bigram [110]: GC + lentezza → correlate_gc_slow vs service_times ─────────
 # Esempi positivi correlate_gc_slow con bigram [110] attivo
 correlate_gc_slow	gc e lentezza delle richieste
@@ -1025,6 +1054,36 @@ search_all_logs	dove è loggato l'ip 172.30.169.1
 search_all_logs	cerca AnnoSinistroPolicySuffix in tutti i log
 search_all_logs	trova il pattern ContactManager nei log
 search_all_logs	dove appare l'errore AFeiDispatcher
+
+# ─── SRCH-2/QUOTE-1: varianti quotate — <pattern> non deve dirottare tutto
+# a grep_named_log ────────────────────────────────────────────────────────────
+# param-extract.sh:180 impone le virgolette per estrarre SEARCH_PATTERN qui:
+# le query reali sono quotate, i 40 esempi sopra no. Affiancate (non sostituite)
+# per non perdere la copertura sulla forma non quotata. Il discriminante da
+# grep_named_log resta il marcatore di totalità (nei log/in tutti/ovunque/del
+# nodo N), presente in ognuna di queste — è il presidio contro il rischio
+# principale del piano SRCH-2: senza, <pattern> punterebbe solo al log singolo.
+search_all_logs	cerca "NullPointerException" nei log
+search_all_logs	cerca "NullPointerException" in tutti i log
+search_all_logs	trova "NullPointerException" nei log del nodo 5
+search_all_logs	cerca "ABContactSystemPlugin" ovunque
+search_all_logs	trova "DAOLavaParametri" in tutti i log
+search_all_logs	cerca il pattern "PtfInfoAF" nei log
+search_all_logs	in quali log appare l'errore "AssignmentException"
+search_all_logs	cerca l'utente "MARIO ROSSI" nei log
+search_all_logs	trova il transaction id "abc123" nei log
+search_all_logs	cerca "Exception" in tutti i log del nodo 12
+search_all_logs	in quali log compare "ClaimValidation"
+search_all_logs	cerca il codice sinistro "1-8101-2025-0029063"
+search_all_logs	trova "timeout" in tutti i log
+search_all_logs	cerca "connection refused" nei log
+search_all_logs	trova "StackOverflowError" ovunque
+search_all_logs	cerca in tutti i log il messaggio "deadlock"
+search_all_logs	trova l'errore "ConcurrentModificationException"
+search_all_logs	cerca il servizio "WsUtility" in tutti i log
+search_all_logs	ricerca cross-log per "DAOLavaParametri"
+search_all_logs	trova il pattern "SIUStatus" nei log
+
 distribute_status	quali endpoint generano più errori 5xx
 distribute_status	quali api hanno più errori 500
 distribute_status	quali path hanno più errori 5xx

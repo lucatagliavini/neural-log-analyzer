@@ -329,14 +329,35 @@ logfile_display_name() {
 # in dispatch.sh (esclude la sezione "Log del nodo") — un solo punto di verità
 # invece di più copie della stessa condizione (principio 2 di CLAUDE.md).
 _is_system_log_base() {
+    [[ -n "$(system_log_kind_of "$1")" ]]
+}
+
+# system_log_kind_of NAME
+# Generalizzazione tri-valore di _is_system_log_base(): stampa "access",
+# "server" o "gc" se NAME (basename senza .log, o sinonimo) identifica un log
+# di sistema, stringa vuota altrimenti. Stessa risoluzione sinonimi/basename di
+# _is_system_log_base, che ne resta il wrapper booleano — comportamento
+# identico, quindi lib/build_dataset.py (che replica solo l'esclusione
+# booleana, righe 330-331) non necessita di alcuna modifica: la distinzione
+# "quale kind" serve solo al dispatch a runtime (SYSLOG_KIND), non alla
+# normalizzazione, che decide solo se escludere.
+system_log_kind_of() {
     local name="${1,,}"
     if declare -p SYSTEM_LOG_SYNONYMS &>/dev/null; then
         local _mapped="${SYSTEM_LOG_SYNONYMS[$name]:-}"
         [[ -n "$_mapped" ]] && name="${_mapped,,}"
     fi
-    local _sysb
-    for _sysb in "${ACCESS_LOG_BASE:-}" "${SERVER_LOG_BASE:-}" "${GC_LOG_BASE:-}"; do
-        [[ -n "$_sysb" && "$name" == "${_sysb,,}" ]] && return 0
+    local _kind _sysb
+    for _kind in access server gc; do
+        case "$_kind" in
+            access) _sysb="${ACCESS_LOG_BASE:-}" ;;
+            server) _sysb="${SERVER_LOG_BASE:-}" ;;
+            gc)     _sysb="${GC_LOG_BASE:-}" ;;
+        esac
+        if [[ -n "$_sysb" && "$name" == "${_sysb,,}" ]]; then
+            echo "$_kind"
+            return 0
+        fi
     done
     return 1
 }

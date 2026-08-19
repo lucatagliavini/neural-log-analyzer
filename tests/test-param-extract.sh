@@ -105,6 +105,31 @@ assert_eq "'log di sistema' -> LOG_TYPE=server"  "server" \
 assert_eq "falso positivo evitato ('serverfarm.log')" "" \
     "$(_extract 'ultime righe del serverfarm.log' LOG_TYPE)"
 
+# ─── SYSLOG_KIND (SRCH-2: rilevatore tri-valore server/access/gc) ─────────────
+# Stesso rilevatore di LOG_TYPE (param-extract.sh, un solo punto — principio 8):
+# qui si verifica che risolva anche access e gc, non solo server, ed entrambi
+# gli ordini "<parola> log"/"log <parola>".
+section "SYSLOG_KIND (server/access/gc, entrambi gli ordini)"
+
+assert_eq "'server.log' -> server"  "server" \
+    "$(_extract 'ultime righe del server.log' SYSLOG_KIND)"
+assert_eq "'server log' -> server"  "server" \
+    "$(_extract 'ultime righe del server log' SYSLOG_KIND)"
+assert_eq "'access log' -> access"  "access" \
+    "$(_extract "ultime righe dell'access log" SYSLOG_KIND)"
+assert_eq "'gc.log' -> gc"          "gc" \
+    "$(_extract 'ultime righe del gc.log' SYSLOG_KIND)"
+assert_eq "'gc log' -> gc"          "gc" \
+    "$(_extract 'ultime righe del gc log' SYSLOG_KIND)"
+# Falso positivo da evitare, stesso principio di LOG_TYPE sopra.
+assert_eq "falso positivo evitato ('serverfarm.log')" "" \
+    "$(_extract 'ultime righe del serverfarm.log' SYSLOG_KIND)"
+# Un glob tra virgolette non è un log di sistema nominato: SYSLOG_KIND deve
+# restare vuoto anche se il glob contiene la parola "server" (0.1, priorità
+# glob-like su <LOGFILE>, non su un kind di sistema).
+assert_eq "glob '\"*server*.log\"' non attiva SYSLOG_KIND" "" \
+    "$(_extract 'ultime righe di "*server*.log"' SYSLOG_KIND)"
+
 # ─── "oggi" — giorno di calendario intero, non "fino a ora" ──────────────────
 # Bug reale (2026-08-05): "oggi" produceva TIME_TO=now_hhmm invece di 23:59,
 # incoerente col default di sessione (chatbot.sh: oggi 00:00->23:59) e con
@@ -212,6 +237,17 @@ assert_eq "ricerca non popola il glob" "" \
     "$(_extract 'cerca "NullPointerException" in produzione' NAMED_LOG_GLOB)"
 assert_eq "trigger senza virgolette: __MISSING__" "__MISSING__" \
     "$(_extract 'cerca NullPointerException in produzione' SEARCH_PATTERN)"
+
+# A1: due span quotati di forma diversa nella stessa query — l'estrattore unico
+# assegna per FORMA (non per posizione): il primo glob-like va a NAMED_LOG_GLOB,
+# il primo non-glob-like a SEARCH_PATTERN, indipendentemente dall'ordine in cui
+# appaiono. Bug reale pre-fix: due `sed` greedy-last indipendenti prendevano
+# entrambe l'ULTIMA stringa quotata, popolando le due variabili con lo stesso
+# valore (il glob), invece di ripartirle.
+assert_eq "due quotati: SEARCH_PATTERN prende il non-glob" "primo" \
+    "$(_extract 'cerca "primo" nel "*secondo*.log"' SEARCH_PATTERN)"
+assert_eq "due quotati: NAMED_LOG_GLOB prende il glob-like" "*secondo*.log" \
+    "$(_extract 'cerca "primo" nel "*secondo*.log"' NAMED_LOG_GLOB)"
 
 # ─── DETECTED_NODE deve sopravvivere all'eval di param-extract.sh ─────────────
 # Bug reale (2026-08-05): chatbot.sh:179-198 esegue normalize-query.sh (che

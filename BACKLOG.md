@@ -15,7 +15,10 @@ caso l'interfaccia non è validabile — non è urgente nonostante il tono, tant
 segnata "Quando serve". **USNEXT-2 e HELP-1 chiuse il 2026-08-19** (sotto, sezioni
 dedicate). **NCLOCAL-1, l'unica voce che era ad alta priorità, è stata chiusa il
 2026-08-19** (sotto, sezione USNEXT-1) — il deploy in produzione resta comunque una
-decisione dell'utente, non ancora presa.
+decisione dell'utente, non ancora presa. **SRCH-2 e QUOTE-1 chiuse il 2026-08-19**
+(sezione `SRCH` sotto) — il gap emerso dal test manuale in produzione è stato implementato,
+riaddestrato e verificato su entrambi i profili nella stessa sessione in cui è stato
+segnalato.
 
 ### NLP-1 + PROF-2 — **FATTO** (2026-08-17)
 
@@ -155,6 +158,60 @@ Oggi ci sono due metà di funzionalità che non si toccano:
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
 | SRCH-1 | Scelta la via (a): `grep_named_log` riceve `SEARCH_PATTERN` da `dispatch.sh`. Si è rivelato **molto più piccolo del previsto** — il canale esisteva già ai due estremi ma non era collegato: il tool AWK accettava già `-v pattern` (sua riga 5), `param-extract.sh` estraeva già `SEARCH_PATTERN`, il classificatore instradava già al 96.7%, e `TOOL_DESC` diceva già "o pattern testuale". **Nessun retrain, nessuna nuova classe.** Semantica: pattern senza livello nominato → `level=ALL` (l'intento è trovare quel testo); livello nominato → vince quello. Ha richiesto `LEVEL_EXPLICIT` in `param-extract.sh` per distinguere "livello chiesto" da "default applicato" — stesso pattern di `TIME_EXPLICIT`/`LOG_EXPLICIT`. 15 test in `tests/test-srch-named-log.sh` | **Fatto** (2026-08-06) |
+| SRCH-2 | **Stesso gap di SRCH-1, ma per i log di sistema** (`server.log`/`access.log`/`gc.log`). Risolto estendendo `grep_named_log` (via 1 della nota di design, non `search_all_logs`): `TOOL_SOURCES[grep_named_log]` è passato da `"named"` a `"named|server|access|gc"` (`nlp/tools.conf`), con un ramo dedicato nel dispatch che risolve il path via `resolve_system_log_dir()`/`resolve_log_glob()` invece di `resolve_named_log_path()`. Il canale del pattern testuale, verso il tool AWK, era già quello di SRCH-1 — riusato senza duplicazione. Vedi nota di chiusura sotto per dettagli implementativi, decisioni e bug collaterali corretti | **Fatto** (2026-08-19) |
+| QUOTE-1 | **Le virgolette come segnale riconosciuto: `<PATTERN>` nel vocabolario**, simmetrico al `<LOGFILE>` già esistente. Nato come prerequisito di SRCH-2 (serviva per distinguere `cerca "NPE" nel server.log` da `cerca errori nel server.log`) ma è una **feature a sé**, riusabile da qualunque tool che accetti un pattern testuale: qualsiasi stringa quotata che non sia glob-like (niente `*` + `.log`) diventa `<PATTERN>` in `normalize-query.sh` (e nella sua replica Python `build_dataset.py`, parità obbligatoria). Vedi nota di chiusura sotto | **Fatto** (2026-08-19) |
+
+### SRCH-2 + QUOTE-1 — nota di chiusura (2026-08-19)
+
+**La causa era strutturale, non un errore d'uso**, come già inquadrato nella nota di
+design originale: `_is_system_log_base()` esclude access/server/gc dalla normalizzazione a
+`<LOGFILE>`, quindi `grep_named_log` non li vedeva mai. Confermata anche la seconda causa,
+scoperta solo affrontando l'implementazione: senza un segnale che distingua "virgolette =
+pattern di ricerca" da "virgolette = nome di log", il classificatore non poteva imparare il
+confine — da cui **QUOTE-1**, il prerequisito che ha reso SRCH-2 realizzabile.
+
+**Decisioni prese e confermate in implementazione:**
+- **Disambiguazione per forma**: stringa quotata glob-like (`*` + `.log`) → `<LOGFILE>`
+  (esisteva già, priorità invariata); ogni altra stringa quotata → `<PATTERN>` (nuovo).
+  La regola vive in `lib/normalize-query.sh`, replicata bit-identica in
+  `lib/build_dataset.py` (parità verificata 1126/1126 su entrambi i profili).
+- **Un solo rilevatore del log di sistema**: `system_log_kind_of()` (nuova, in
+  `lib/utils-logfiles.sh`), di cui `_is_system_log_base()` è ora un wrapper booleano —
+  evita un secondo rilevatore parallelo (principio 8). `SYSLOG_KIND` è emessa sempre,
+  anche vuota, per non lasciare nel REPL il valore della query precedente.
+- **Rotazioni**: default solo log corrente; storico completo solo con range temporale
+  esplicito (`TIME_EXPLICIT`) — stessa convenzione di `tail_log`.
+- **Cross-app**: politica unica sul tool — `require_app` ora vale anche sul ramo glob
+  (`open_glob_logs`), che ne era sprovvisto; prima dell'estensione i due rami dello stesso
+  tool avrebbero avuto comportamenti diversi sull'ownership dell'app.
+- **Retrain**: `NUM_FEATURES` 111 → 113 (`<pattern>` + un bigramma `server.log|gc.log|access.log :: <pattern>|cerca\b|…`,
+  tarato per non collidere con `correlate_gc_slow` né con `search_all_logs`), `MODEL_TOPOLOGY` →
+  `113,48,16`, reinizializzazione via `setup.sh` (seed 42, deterministico). Accuratezza
+  entro il range storico (94,62-95,56%). Verificato con dry-run: `cerca "NPE" nel
+  server.log` → `grep_named_log` top-1, `filter_errors`/`search_all_logs` entrambi sotto
+  `TOOL_THRESHOLD=0.25` (quindi non eseguiti).
+- **Etichetta help (B6)**: `SOURCE_LABEL[named]` era `"named"` (gergo inglese in
+  un'interfaccia italiana) — cambiata in `"applicativi"` in entrambi i `domain.conf`.
+
+**Tre bug collaterali corretti in `lib/tools/grep_named_log.awk` (trovati implementando
+il ramo di sistema, non presenti — o non osservabili — sul solo ramo named):**
+1. **Messaggio fuorviante**: emetteva «nessuna riga riconosciuta nel formato atteso» anche
+   quando ogni riga era stata riconosciuta e mancava solo il livello (caso normale per
+   access/gc, che non hanno livello). Ora distingue "formato non riconosciuto" da "nessuna
+   riga con quel livello", con accumulatore dedicato invece del solo stato per-record.
+2. **Colonna thread**: estraeva il primo gruppo `[...]` come thread — su access/gc quel
+   gruppo è il timestamp, quindi la colonna mostrava una data al posto del thread.
+3. **Dedup silenzioso**: la chiave di deduplicazione era `level SUBSEP substr(msg,1,120)`;
+   con `level` vuoto (access/gc) righe di richieste HTTP distinte ma con lo stesso prefisso
+   collassavano in una sola riga con contatore, perdendo eventi realmente diversi.
+
+**Verifica finale**: suite completa **96 PASS / 0 FAIL** su liquido e su usnext (pesi
+condivisi, entrambi i profili testati); `--parity` **97 PASS / 0 FAIL**, 1126/1126 vettori
+identici; `tests/test-help-sources.sh` 20 PASS/0 FAIL (incluse le due asserzioni gemelle
+sulla nuova etichetta "applicativi"). Vincolo di performance rispettato per costruzione:
+il ramo di sistema riusa `select_log_files_grouped`/`open_current_server_logs` come
+`tail_log`, quindi il costo scala con il file scelto, non con il nodo — non con
+"search_all_logs e filtra dopo".
 
 ---
 

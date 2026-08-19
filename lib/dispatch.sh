@@ -102,6 +102,7 @@ open_current_log_for() {
 }
 open_current_logs()        { open_current_log_for "${ACCESS_LOG_DIR:-$(dirname "$ACCESS_LOG")}" "$ACCESS_LOG_BASE"; }
 open_current_server_logs() { open_current_log_for "${SERVER_LOG_DIR:-$(dirname "$SERVER_LOG")}" "$SERVER_LOG_BASE"; }
+open_current_gc_logs()     { open_current_log_for "${GC_LOG_DIR:-$(dirname "$GC_LOG")}"         "$GC_LOG_BASE"; }
 
 # Espande un glob nell'insieme di file da leggere, rispettando la finestra temporale.
 #
@@ -123,7 +124,11 @@ open_glob_logs() {
     local _t0 _t1
     _t0=$(date +%s%3N 2>/dev/null || echo 0)
     local chosen
-    chosen=$(resolve_log_glob "$dir" "$glob" "$glob") || return 1
+    # require_app=1: stessa politica del ramo named (resolve_named_log_path,
+    # sopra) — se il glob esiste solo sotto un'altra app, non va aperto
+    # senza dirlo (principio 6, una sola politica cross-app per il tool).
+    # Condivisa da tail_named_log e grep_named_log: il fix vale per entrambi.
+    chosen=$(resolve_log_glob "$dir" "$glob" "$glob" 1) || return 1
     [[ -z "$chosen" ]] && return 1
 
     local base
@@ -1023,6 +1028,13 @@ _dispatch_tool_run() {
                 "$(open_log "$log_path")"
             ;;
         grep_named_log)
+            # SRCH-2: TOOL_SOURCES[grep_named_log]="named|server|access|gc" — con
+            # selettore vuoto (query su log named) tool_source_kinds cade su
+            # alts[0]="named", che il case sotto scarta senza chiamare
+            # require_system_log: no-op esatto per il comportamento preesistente.
+            # Con selettore concreto (SYSLOG_KIND) verifica la disponibilità PRIMA
+            # di entrare nei rami sotto, come già fa tail_log con LOG_TYPE.
+            require_tool_sources grep_named_log "${SYSLOG_KIND:-}" || return
             local search_root="${LOG_SEARCH_ROOT:-${CUSTOM_LOG_DIR:-}}"
             local named_log="${NAMED_LOG:-}"
             local log_glob="${NAMED_LOG_GLOB:-}"
@@ -1072,6 +1084,48 @@ _dispatch_tool_run() {
                     -v pattern="$_gnl_pattern" \
                     -v tail_n="${TAIL_N:-50}" \
                     "$glob_expr"
+                return
+            fi
+            # SRCH-2: log di sistema nominato ("cerca X nel server.log"/"nel gc
+            # log"/"nell'access log"). Dopo il glob (precedenza dichiarata in
+            # normalize-query.sh: glob-like vince sempre) e prima del named, che
+            # resta il fallback storico su NAMED_LOG.
+            #
+            # Rotazioni: solo il file corrente per default, storico completo
+            # solo con range temporale esplicito (decisione utente) — stessa
+            # convenzione di tail_log (:924/:946, TIME_EXPLICIT da chatbot.sh).
+            # Allineare il costo al ramo named, che apre un solo file.
+            #
+            # require_app è già applicato qui: ACCESS_LOG_DIR/SERVER_LOG_DIR/
+            # GC_LOG_DIR sono risolte con REQUIRE_APP=1 in resolve-logs.sh
+            # all'avvio sessione (LOGDISC-4) — nessun controllo aggiuntivo da
+            # fare in questo ramo, a differenza del ramo glob sopra che risolve
+            # ad ogni query e per questo necessitava del fix a open_glob_logs.
+            if [[ -n "${SYSLOG_KIND:-}" ]]; then
+                local logs_expr=""
+                if [[ "${TIME_EXPLICIT:-0}" == "1" ]]; then
+                    case "$SYSLOG_KIND" in
+                        server) logs_expr="$(open_server_logs)" ;;
+                        access) logs_expr="$(open_logs)" ;;
+                        gc)     logs_expr="$(open_gc_logs)" ;;
+                    esac
+                else
+                    case "$SYSLOG_KIND" in
+                        server) logs_expr="$(open_current_server_logs)" ;;
+                        access) logs_expr="$(open_current_logs)" ;;
+                        gc)     logs_expr="$(open_current_gc_logs)" ;;
+                    esac
+                fi
+                print_log_source "$logs_expr" "$_gnl_what"
+                # kind: solo qui, mai sul ramo glob/named sotto — è il
+                # discriminante che grep_named_log.awk usa per non trattare il
+                # timestamp fra quadre di access/gc come fosse un thread (A4).
+                eval gawk "$tw_args" -f "$TOOLS_DIR/grep_named_log.awk" \
+                    -v level="$_gnl_level" \
+                    -v pattern="$_gnl_pattern" \
+                    -v tail_n="${TAIL_N:-50}" \
+                    -v kind="$SYSLOG_KIND" \
+                    "$logs_expr"
                 return
             fi
             if [[ -z "$named_log" ]]; then

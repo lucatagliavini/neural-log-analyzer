@@ -167,6 +167,19 @@ elif echo "$norm_query" | grep -qE "'[^']*\*[^']*\.log'"; then
     _logfile_done=1
 fi
 
+# a-bis) Qualsiasi stringa quotata RESTANTE (non glob-like, gestita sopra) →
+#    <PATTERN>. Simmetrico a <LOGFILE>: le virgolette sono un segnale esplicito
+#    dell'utente — o nome (parziale) di log, o stringa di ricerca — e senza
+#    questo placeholder il classificatore non può imparare il confine, perché
+#    il contenuto letterale (es. "NullPointerException") non è nel vocabolario.
+#    Deve girare DOPO la (a): glob-like vince sempre, quindi
+#    'cerca "*errore*.log"' diventa <LOGFILE> e non anche <PATTERN>.
+if echo "$norm_query" | grep -qE '"[^"]*"'; then
+    norm_query=$(echo "$norm_query" | sed -E 's/"[^"]*"/<PATTERN>/g')
+elif echo "$norm_query" | grep -qE "'[^']*'"; then
+    norm_query=$(echo "$norm_query" | sed -E "s/'[^']*'/<PATTERN>/g")
+fi
+
 # b) Qualsiasi nome di logfile: "<token>.log" → <LOGFILE>.
 #    Sostituisce nome+estensione insieme, così non resta un token "cc" isolato che
 #    la sezione 4 trasformerebbe in <APP>.

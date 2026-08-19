@@ -155,71 +155,99 @@ if [[ -z "$NAMED_LOG" ]]; then
     fi
 fi
 
-# Tipo di log per tail_log: "server"/"applicativo" → server.log, default → access log
-# SERVER_LOG_BASE ("server") viene da system.conf — è il nome con cui gli utenti
-# chiamano il file, non SERVER_LOG_FORMAT ("jboss"), che è la tecnologia sottostante
-# e non un sinonimo con cui una query nomina il log.
+# Rilevatore tri-valore del log di sistema nominato (server/access/gc), un solo
+# punto (principio 8 di CLAUDE.md): LOG_TYPE e SYSLOG_KIND sono entrambi derivati
+# da qui, non due regex indipendenti che potrebbero divergere.
 #
-# Bug reale (2026-08-05): la regex copriva solo l'ordine "log <parola>" (log
-# applicativo, log jboss, log di sistema), mai l'ordine inverso "<parola> log"
-# (server log, server.log) — nonostante il dataset di training labeled contenga
-# entrambi gli ordini per "server" (query-to-features.sh li normalizza correttamente,
-# solo questo file li ignorava). "ultime righe del server.log" restava con
-# LOG_TYPE='' e tail_log leggeva l'access log invece del server log.
-LOG_TYPE=""
+# Bug reale (2026-08-05, solo LOG_TYPE): la regex copriva solo l'ordine "log
+# <parola>" (log applicativo, log jboss, log di sistema), mai l'ordine inverso
+# "<parola> log" (server log, server.log) — nonostante il dataset di training
+# labeled contenga entrambi gli ordini. Vale per tutti e tre i kind, non solo
+# server: la stessa struttura di regex si applica a ciascuno.
+# SERVER_LOG_BASE/ACCESS_LOG_BASE/GC_LOG_BASE vengono da system.conf — sono i
+# nomi con cui gli utenti chiamano il file, non SERVER_LOG_FORMAT ("jboss"),
+# che è la tecnologia sottostante e non un sinonimo digitato dall'utente.
 _srv_words="server|applicativ[oa]?|dell.applicaz\\w*|${SERVER_LOG_FORMAT:-server}"
+_acc_words="access|accesso"
+_gc_words="gc|garbage.collector|garbage.collection"
+SYSLOG_KIND=""
 if echo "$query" | grep -qiE "\blog[[:space:]]+(${_srv_words}|di[[:space:]]+sistema)\b|\b(${_srv_words})[.[:space:]]+log\b"; then
-    LOG_TYPE="server"
+    SYSLOG_KIND="server"
+elif echo "$query" | grep -qiE "\blog[[:space:]]+(${_acc_words})\b|\b(${_acc_words})[.[:space:]]+log\b"; then
+    SYSLOG_KIND="access"
+elif echo "$query" | grep -qiE "\blog[[:space:]]+(${_gc_words})\b|\b(${_gc_words})[.[:space:]]+log\b"; then
+    SYSLOG_KIND="gc"
 fi
+# LOG_TYPE resta il binario storico per tail_log (TOOL_SOURCES[tail_log]="access|server",
+# non include gc): server se il kind è server, altrimenti vuoto (fallback access,
+# gestito da dispatch.sh). Derivato da SYSLOG_KIND, non un secondo rilevatore.
+LOG_TYPE=""
+[[ "$SYSLOG_KIND" == "server" ]] && LOG_TYPE="server"
 
-# Pattern di ricerca per search_all_logs.
-# La stringa da cercare deve essere tra virgolette doppie o singole:
-#   cerca "NullPointerException" in produzione
-#   trova 'claim 1-8101-2026-0473954' nel nodo 5
-# Se il trigger è presente ma mancano le virgolette → __MISSING__ (messaggio in search_all_logs.sh).
-SEARCH_PATTERN=""
 _sq="${1,,}"  # query originale in minuscolo
-if echo "$_sq" | grep -qiE "\bcerca\b|\btrova\b|\bdove.appare\b|\bdove.si.trova\b|in.quali.log|cerca.ovunque|cerca.in.tutti"; then
-    # Usa $1 (case originale) per preservare maiuscole nel pattern
-    SEARCH_PATTERN=$(echo "$1" | sed -n 's/.*"\([^"]*\)".*/\1/p' | head -1)
-    [[ -z "$SEARCH_PATTERN" ]] && \
-        SEARCH_PATTERN=$(echo "$1" | sed -n "s/.*'\([^']*\)'.*/\1/p" | head -1)
-    [[ -z "$SEARCH_PATTERN" ]] && SEARCH_PATTERN="__MISSING__"
+
+# ─── Estrattore unico delle stringhe quotate, assegnate per FORMA ────────────
+# Sostituisce due `sed` greedy-last indipendenti (bug reale: `.*` prende
+# l'ULTIMA stringa quotata, non la prima — su `cerca "X" nel "*server*.log"`
+# SEARCH_PATTERN diventava '*server*.log', cioè cercava il glob nel contenuto
+# del file). Un solo estrattore raccoglie TUTTE le stringhe quotate nell'ordine
+# in cui appaiono, poi assegna la prima glob-like a NAMED_LOG_GLOB e la prima
+# non-glob-like a SEARCH_PATTERN — stessa regola di disambiguazione per forma
+# di normalize-query.sh (<LOGFILE> vs <PATTERN>, QUOTE-1). Mutuamente esclusive:
+# su `cerca "*errore*.log"` (un solo span, glob-like) NAMED_LOG_GLOB lo prende e
+# SEARCH_PATTERN resta vuoto — prima entrambe si popolavano con lo stesso testo,
+# e dispatch.sh finiva per cercare il testo del glob dentro il file (bug
+# collaterale, corretto come effetto di questa unificazione).
+_quoted_spans=()
+while IFS= read -r _span; do
+    [[ -n "$_span" ]] && _quoted_spans+=("$_span")
+done < <(echo "$1" | grep -oE '"[^"]*"' | sed -e 's/^"//' -e 's/"$//')
+if [[ ${#_quoted_spans[@]} -eq 0 ]]; then
+    while IFS= read -r _span; do
+        [[ -n "$_span" ]] && _quoted_spans+=("$_span")
+    done < <(echo "$1" | grep -oE "'[^']*'" | sed -e "s/^'//" -e "s/'$//")
 fi
 
 # Escape hatch per log fuori da APP_LOG_NAMES: glob tra virgolette.
 #   ultime 10 righe di "*c1nssprod*.log"
-# Stesso meccanismo di estrazione di SEARCH_PATTERN (stringa tra virgolette dalla
-# query originale, per preservare le maiuscole nei nomi file), ma discriminato dalla
-# *forma* del contenuto: deve contenere '*' e terminare in '.log'. Così una query
-# `cerca "NullPointerException"` non finisce qui, e questa non finisce in SEARCH_PATTERN.
-#
-# Su `cerca "*errore*.log"` entrambe si popolano: è voluto, non una collisione. Ogni
-# tool legge solo la propria variabile, quindi è il classificatore a decidere l'intento.
-# Un'esclusione mutua romperebbe query legittime come `cerca errori nel "*c1nss*.log"`.
-#
-# Il valore finisce in `find -name` (dispatch.sh): è input non fidato, quindi la
-# whitelist di caratteri è obbligatoria, non difensiva. '/' e '..' permetterebbero
-# di uscire dalla directory dei log nonostante -maxdepth 1.
-#
-# Accetta anche le forme dei file ruotati: sul nodo la rotazione produce
-# `prod1nsse-cc.log-2026-07-26-1785016801.gz`, dove ".log" sta IN MEZZO e
-# l'estensione finale è ".gz". Richiedere ".log" finale (come faceva la prima
-# versione) rendeva il glob incapace di raggiungere qualsiasi storico.
-# Nota: la forma canonica resta `"*-cc.log"` — dispatch.sh la espande alle
-# rotazioni via select_log_files, quindi l'utente non deve scrivere il .gz a mano.
+# Discriminato dalla *forma* del contenuto: deve contenere '*' e terminare in
+# '.log' (anche di file ruotati: sul nodo la rotazione produce
+# `prod1nsse-cc.log-2026-07-26-1785016801.gz`, dove ".log" sta IN MEZZO — la
+# forma canonica resta `"*-cc.log"`, dispatch.sh la espande alle rotazioni via
+# select_log_files). Il valore finisce in `find -name` (dispatch.sh): è input
+# non fidato, quindi la whitelist di caratteri è obbligatoria, non difensiva.
+# '/' e '..' permetterebbero di uscire dalla directory dei log nonostante
+# -maxdepth 1.
 NAMED_LOG_GLOB=""
-_glob_raw=$(echo "$1" | sed -n 's/.*"\([^"]*\)".*/\1/p' | head -1)
-[[ -z "$_glob_raw" ]] && _glob_raw=$(echo "$1" | sed -n "s/.*'\([^']*\)'.*/\1/p" | head -1)
-if [[ -n "$_glob_raw" && "$_glob_raw" == *'*'* \
-      && "$_glob_raw" =~ \.log([-.][A-Za-z0-9_.*-]*)?$ ]]; then
-    if [[ "$_glob_raw" == *".."* ]]; then
-        echo "[WARN] param-extract: glob rifiutato (contiene '..'): $_glob_raw" >&2
-    elif [[ ! "$_glob_raw" =~ ^[A-Za-z0-9_.*-]+$ ]]; then
-        echo "[WARN] param-extract: glob rifiutato (caratteri non ammessi, consentiti [A-Za-z0-9_.*-]): $_glob_raw" >&2
-    else
-        NAMED_LOG_GLOB="$_glob_raw"
+for _span in "${_quoted_spans[@]}"; do
+    if [[ -n "$NAMED_LOG_GLOB" ]]; then break; fi
+    if [[ "$_span" == *'*'* && "$_span" =~ \.log([-.][A-Za-z0-9_.*-]*)?$ ]]; then
+        if [[ "$_span" == *".."* ]]; then
+            echo "[WARN] param-extract: glob rifiutato (contiene '..'): $_span" >&2
+        elif [[ ! "$_span" =~ ^[A-Za-z0-9_.*-]+$ ]]; then
+            echo "[WARN] param-extract: glob rifiutato (caratteri non ammessi, consentiti [A-Za-z0-9_.*-]): $_span" >&2
+        else
+            NAMED_LOG_GLOB="$_span"
+        fi
     fi
+done
+
+# Pattern di ricerca per search_all_logs/grep_named_log.
+# La stringa da cercare deve essere tra virgolette doppie o singole:
+#   cerca "NullPointerException" in produzione
+#   trova 'claim 1-8101-2026-0473954' nel nodo 5
+# Solo se il trigger è presente (a differenza di NAMED_LOG_GLOB, che è un
+# escape hatch indipendente dall'intento di ricerca). Trigger presente ma
+# nessuno span non-glob-like → __MISSING__ (messaggio nei tool).
+SEARCH_PATTERN=""
+if echo "$_sq" | grep -qiE "\bcerca\b|\btrova\b|\bdove.appare\b|\bdove.si.trova\b|in.quali.log|cerca.ovunque|cerca.in.tutti"; then
+    for _span in "${_quoted_spans[@]}"; do
+        if [[ -n "$SEARCH_PATTERN" ]]; then break; fi
+        if [[ "$_span" != *'*'* || ! "$_span" =~ \.log([-.][A-Za-z0-9_.*-]*)?$ ]]; then
+            SEARCH_PATTERN="$_span"
+        fi
+    done
+    [[ -z "$SEARCH_PATTERN" ]] && SEARCH_PATTERN="__MISSING__"
 fi
 
 # UNRESOLVED_LOG rimosso (2026-08-04): segnalava un ".log" che non riuscivamo a
@@ -243,6 +271,7 @@ echo "NAMED_LOG='${NAMED_LOG}'"
 echo "LOG_LEVEL='${LOG_LEVEL}'"
 echo "LEVEL_EXPLICIT='${LEVEL_EXPLICIT}'"
 echo "LOG_TYPE='${LOG_TYPE}'"
+echo "SYSLOG_KIND='${SYSLOG_KIND}'"
 echo "SEARCH_PATTERN='${SEARCH_PATTERN}'"
 echo "NAMED_LOG_GLOB='${NAMED_LOG_GLOB}'"
 # Entità normalizzate — arrivano da normalize-query.sh (unica fonte di verità).

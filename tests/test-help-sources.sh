@@ -149,6 +149,11 @@ assert_true "tail_log è annotato con entrambe le alternative (access o server)"
 assert_true "correlate_gc_slow è annotato con entrambe le sorgenti richieste (gc + access)" \
     "$(grep -qF -- "· gc + access" <<< "$_HELP_OUT" && echo 1 || echo 0)"
 
+# SRCH-2/B6: SOURCE_LABEL[named] è "applicativi" (etichetta italiana, non "named"
+# in un'interfaccia italiana) — grep_named_log ora copre anche server/access/gc.
+assert_true "grep_named_log è annotato con l'etichetta italiana 'applicativi', non 'named'" \
+    "$(grep -qF -- "· applicativi o server o access o gc" <<< "$_HELP_OUT" && echo 1 || echo 0)"
+
 assert_true "search_all_logs resta sotto 'Ricerca cross-log'" \
     "$(grep -qF -- "Ricerca cross-log" <<< "$_HELP_OUT" && echo 1 || echo 0)"
 assert_true "list_logs resta sotto 'Esplora log del nodo'" \
@@ -207,6 +212,8 @@ assert_true "usnext: named-log category nomina i log del cliente (Pass.log)" \
     "$(grep -qF -- "Pass.log" <<< "$_HELP_OUT_USNEXT" && echo 1 || echo 0)"
 assert_true "usnext: tail_log annotato come in liquido (la partizione è condivisa)" \
     "$(grep -qF -- "· access o server" <<< "$_HELP_OUT_USNEXT" && echo 1 || echo 0)"
+assert_true "usnext: grep_named_log annotato con l'etichetta italiana 'applicativi' (coordinata, non framework)" \
+    "$(grep -qF -- "· applicativi o server o access o gc" <<< "$_HELP_OUT_USNEXT" && echo 1 || echo 0)"
 
 # ─── Coerenza con il codice: nessuna chiamata diretta residua ────────────────
 section "Coerenza col codice: il case di dispatch non chiama require_system_log a mano"
@@ -218,13 +225,26 @@ assert_eq "zero chiamate dirette a require_system_log nel case (solo require_too
 
 # Tool a kind concreto (non named/all/none): count_status, distribute_status,
 # slow_requests, traffic_volume, filter_errors, service_times, gc_stats,
-# correlate_gc_slow, tail_log, filter_ip, filter_app_errors — 11 su 16.
+# correlate_gc_slow, tail_log, filter_ip, filter_app_errors, grep_named_log — 12 su 16.
+#
+# L'invariante corretta è «serve una chiamata se lo spec contiene un kind
+# concreto in QUALSIASI posizione», non solo nella prima (SRCH-2, B4). Un
+# `${TOOL_SOURCES[$_t]%%[ |]*}` guarderebbe solo il primo token: per
+# grep_named_log ("named|server|access|gc") darebbe "named" ed escluderebbe
+# un tool che invece ha esattamente una chiamata require_tool_sources nel
+# case. Va riusato tool_source_kinds (dispatch.sh) — non una quarta copia
+# della regola di parsing di TOOL_SOURCES (principio 8) — ma chiamato con
+# ogni selettore concreto possibile ("" server access gc): con selettore
+# vuoto la funzione collassa a alts[0] (qui "named", escluso), quindi va
+# provato anche con i selettori che fanno risolvere un'alternativa concreta.
 _concrete=0
 for _t in "${TOOL_NAMES[@]}"; do
-    case "${TOOL_SOURCES[$_t]%%[ |]*}" in
-        named|all|none) ;;
-        *) _concrete=$(( _concrete + 1 )) ;;
-    esac
+    for _sel in "" server access gc; do
+        if [[ -n "$(tool_source_kinds "$_t" "$_sel")" ]]; then
+            _concrete=$(( _concrete + 1 ))
+            break
+        fi
+    done
 done
 _wrapper_calls=$(grep -c 'require_tool_sources ' <<< "$_case_body")
 assert_eq "una chiamata a require_tool_sources per ciascun tool a kind concreto" \

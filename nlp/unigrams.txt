@@ -194,3 +194,14 @@ log.{0,14}(ci.sono|sono.present|present|disponibil|esiston|abbiamo|posso.veder|p
 # {0,14} + le sole forme "elenca i/tutti i log" i match diventano 0. Verificato.
 # Solo list_logs (1 classe) → peso 2.
 lista.{0,14}log|elenco.{0,14}log|elenca.i.log|elenca.tutti.i.log|elenca.i.file.di.log :: 2
+
+# ── <PATTERN>: stringa quotata NON glob-like (QUOTE-1, 2026-08-19) ────────────
+# Simmetrico a <logfile> (sopra): normalize-query.sh distingue una stringa
+# quotata glob-like ("*-cc.log", nome parziale di log) da qualsiasi altra
+# stringa quotata (stringa di ricerca) e sostituisce quest'ultima con questo
+# placeholder. Senza, il classificatore non può imparare il confine fra
+# "cerca errori nel server.log" (nessun pattern) e 'cerca "NPE" nel
+# server.log" (pattern esplicito): il contenuto letterale fra virgolette non è
+# nel vocabolario e varia per ogni query.
+# Peso 2, come <logfile>: singolo segnale forte, non un token qualsiasi.
+<pattern> :: 2

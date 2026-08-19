@@ -6,6 +6,12 @@
 #   -v tail_n=50            massimo righe di output
 #   -v time_from="YYYY-MM-DDTHH:MM"
 #   -v time_to="YYYY-MM-DDTHH:MM"
+#   -v kind=""              "access"|"gc"|"server"|"" — passato solo da
+#                           dispatch.sh sul ramo SRCH-2 (log di sistema
+#                           nominato). Su access/gc il primo [...] della riga
+#                           è il timestamp (consumato da logline_parse), non
+#                           un thread: senza questo kind la colonna "thread"
+#                           mostrerebbe la data (vedi piano, A4).
 #
 # Il riconoscimento di timestamp/livello è delegato a logline_parse()
 # (utils-logline.awk): il formato non è un'assunzione di questo tool, è una
@@ -41,9 +47,14 @@ BEGIN {
 
     if ((time_from != "" || time_to != "") && (row_epoch <= 0 || !in_range(row_epoch))) next
 
-    thread = $0
-    if (match(thread, /\[([^\]]+)\]/, th)) thread = th[1]
-    else thread = ""
+    # Il primo [...] è un thread/logger applicativo solo su named/server: su
+    # access e gc è il timestamp che logline_parse ha già consumato per
+    # _ll_ts/_ll_epoch (rami 1/2 di utils-logline.awk), quindi qui non c'è
+    # nulla da estrarre — mostrarlo comunque duplicherebbe la data.
+    thread = ""
+    if (kind != "access" && kind != "gc") {
+        if (match($0, /\[([^\]]+)\]/, th)) thread = th[1]
+    }
 
     buf_ts[count % n]     = row_ts
     buf_level[count % n]  = row_level
@@ -72,7 +83,12 @@ END {
 
     for (i = 0; i < shown; i++) {
         idx = (start + i) % n
-        dk  = buf_level[idx] SUBSEP substr(buf_msg[idx], 1, 120)
+        # Livello vuoto (access/gc) → nessun campo aiuta a distinguere due
+        # righe: usare il messaggio troncato a 120 come su ERROR/WARN farebbe
+        # collassare richieste diverse che condividono solo il prefisso.
+        # Chiave sul messaggio intero: dedup solo se davvero identiche.
+        key_msg = (buf_level[idx] == "") ? buf_msg[idx] : substr(buf_msg[idx], 1, 120)
+        dk  = buf_level[idx] SUBSEP key_msg
         dedup_add(dk, buf_level[idx], buf_msg[idx], buf_ts[idx], buf_thread[idx])
     }
 

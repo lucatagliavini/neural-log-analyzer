@@ -252,12 +252,17 @@ _secche=$(grep -cE '^(GC_PAUSE|SVC_TIME|REQ_TIME|HEAP_USED|GC_CORR)[A-Z_]*=[0-9]
     "$ROOT_DIR/profiles/liquido/domain.conf" || true)
 assert_eq "domain.conf: nessuna soglia con assegnazione secca" "0" "$_secche"
 
-# Il contenuto non cambia: le soglie governano la resa, non cosa il tool trova
+# Il contenuto non cambia: le soglie governano la resa, non cosa il tool trova.
+# L'etichetta "[N fa]" (dispatch.sh:508-518, "N fa" del file di log) dipende dal
+# clock reale al momento della lettura, non dai dati: due invocazioni sequenziali
+# possono scavalcare un secondo e differire solo lì, un falso negativo — va
+# normalizzata prima del confronto, non lasciata nell'assert_eq.
+_strip_fa() { sed -E 's/, [0-9]+[smh] fa\]/, Nfa]/'; }
 _txt_def=$(env QUERY_LOG_DIR= bash "$ROOT_DIR/chatbot.sh" --profile "$ROOT_DIR/profiles/liquido" \
-    --base-dir "$_GCFIX" --env prod --node 4 --query 'statistiche GC' 2>&1)
+    --base-dir "$_GCFIX" --env prod --node 4 --query 'statistiche GC' 2>&1 | _strip_fa)
 _txt_alt=$(env GC_PAUSE_WARN_MS=9000 GC_PAUSE_CRIT_MS=9999 QUERY_LOG_DIR= \
     bash "$ROOT_DIR/chatbot.sh" --profile "$ROOT_DIR/profiles/liquido" \
-    --base-dir "$_GCFIX" --env prod --node 4 --query 'statistiche GC' 2>&1)
+    --base-dir "$_GCFIX" --env prod --node 4 --query 'statistiche GC' 2>&1 | _strip_fa)
 assert_eq "cambiare le soglie non cambia i dati riportati (solo la resa)" "$_txt_def" "$_txt_alt"
 rm -rf "$_GCFIX"
 

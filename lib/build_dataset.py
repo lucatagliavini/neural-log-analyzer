@@ -318,6 +318,13 @@ def normalize_query(query, cfg):
         norm = re.sub(r"'[^']*\*[^']*\.log'", '<LOGFILE>', norm)
         logfile_done = True
 
+    # a-bis) Qualsiasi stringa quotata RESTANTE (non glob-like) → <PATTERN>.
+    #    Simmetrico a <LOGFILE>; deve girare DOPO la (a), stessa priorità.
+    if re.search(r'"[^"]*"', norm):
+        norm = re.sub(r'"[^"]*"', '<PATTERN>', norm)
+    elif re.search(r"'[^']*'", norm):
+        norm = re.sub(r"'[^']*'", '<PATTERN>', norm)
+
     # b) Qualsiasi "<token>.log" → <LOGFILE>, non solo i nomi noti: sul nodo di
     #    produzione ci sono 28 log distinti e APP_LOG_NAMES ne elenca 16, quindi una
     #    whitelist lascerebbe i restanti senza segnale. Esclusi solo i log di

@@ -187,6 +187,13 @@ INTENT_TESTS=(
     "grep_named_log|errori nel controllo_pagamenti.log"
     "tail_named_log|ultime 10 righe del pc1nssprod.log"
 
+    # SRCH-2: ricerca testuale libera in un solo log di sistema (server/gc/access)
+    # → grep_named_log, non filter_errors né search_all_logs. <PATTERN> (QUOTE-1)
+    # + il bigramma server.log|gc.log|access.log sono il segnale.
+    "grep_named_log|cerca \"NullPointerException\" nel server.log"
+    "grep_named_log|cerca \"OutOfMemory\" nel gc.log"
+    "grep_named_log|trova \"timeout\" nell'access log"
+
     # I log di infrastruttura NON devono finire sui tool named-log: hanno i propri
     # (filter_errors / tail_log via LOG_TYPE).
     "!tail_named_log|righe di errore nel server.log"

@@ -56,9 +56,26 @@ trap 'rm -rf "$_FIX"' EXIT
 _node="$_FIX/prod/lxprjbliq04"
 mkdir -p "$_node/prod/ClaimCenter" "$_node/ClaimCenter/Guidewire"
 echo "${_today_plain} 10:00:00,000 ERROR srv" > "$_node/prod/ClaimCenter/server.log"
-echo "${_today_plain}T10:00:00 INFO gc" > "$_node/prod/ClaimCenter/gc.log"
+echo "${_today_plain} 10:00:01,000 ERROR ServerBoomToken problema" >> "$_node/prod/ClaimCenter/server.log"
+# Formato reale riconosciuto da logline_parse (ramo 2, utils-logline.awk):
+# "[YYYY-MM-DDTHH:MM:SS.mmm+ZZZZ]" — non uno pseudo-formato "data INFO msg",
+# che non ha alcun ramo dedicato e finirebbe nel messaggio "formato non
+# riconosciuto" invece di essere trovato dalla ricerca (SRCH-2).
+echo "[${_today_plain}T10:00:00.000+0200] GC pause (young) 45M->12M(128M) 20.000ms" \
+    > "$_node/prod/ClaimCenter/gc.log"
+echo "[${_today_plain}T10:00:01.000+0200] GC pause (young) GcPauseToken 45M->12M(128M) 25.432ms" \
+    >> "$_node/prod/ClaimCenter/gc.log"
 echo "10.0.0.1 [${_today_apache}:10:00:00 +0200] \"GET /a HTTP/1.1\" 200 100 100 - UA" \
     > "$_node/prod/ClaimCenter/undertow_access_log.log"
+echo "10.0.0.1 [${_today_apache}:10:00:01 +0200] \"GET /AccessMarkerToken HTTP/1.1\" 200 100 100 - UA" \
+    >> "$_node/prod/ClaimCenter/undertow_access_log.log"
+
+# SRCH-2: seconda app senza gc.log — serve al caso "sorgente non disponibile
+# per l'app di sessione" (deve dare [SKIP] esplicito, non output vuoto).
+mkdir -p "$_node/prod/ContactManager"
+echo "${_today_plain} 10:00:00,000 ERROR srv-cm" > "$_node/prod/ContactManager/server.log"
+echo "10.0.0.1 [${_today_apache}:10:00:00 +0200] \"GET /cm HTTP/1.1\" 200 100 100 - UA" \
+    > "$_node/prod/ContactManager/undertow_access_log.log"
 # "searchHub" appare su ERROR, INFO e WARN; "NullPointer" solo su ERROR.
 cat > "$_node/ClaimCenter/Guidewire/prod1nssd-cc.log" <<EOF
 [main] USER ${_today_plain}T10:00:00,000 ERROR searchHub timeout su chiamata
@@ -165,6 +182,41 @@ assert_eq "livello ERROR riconosciuto in formato europeo" "ERROR" \
 _out_eu=$(_run 'errori nel euformat.log')
 assert_eq "formato europeo: NON il messaggio 'formato atteso' (era il bug)" "1" \
     "$([[ "$_out_eu" != *"formato atteso"* ]] && echo 1 || echo 0)"
+
+section "SRCH-2: ricerca testuale in un log di sistema (server/gc/access)"
+
+# Stessa catena di SRCH-1 ma sul ramo nuovo: SYSLOG_KIND (param-extract.sh) al
+# posto di NAMED_LOG, require_tool_sources sempre in testa (A3), kind passato a
+# grep_named_log.awk per non trattare il timestamp fra quadre come un thread (A4).
+assert_eq "'cerca X nel server.log' trova la riga" "1" \
+    "$(_righe 'cerca "ServerBoomToken" nel server.log')"
+assert_eq "  usa level=ALL (pattern senza livello nominato, stessa regola di SRCH-1)" "ALL" \
+    "$(_livello 'cerca "ServerBoomToken" nel server.log')"
+
+assert_eq "'cerca X nel gc.log' trova la riga" "1" \
+    "$(_righe 'cerca "GcPauseToken" nel gc.log')"
+
+assert_eq "'trova X nell.access log' trova la riga" "1" \
+    "$(_righe "trova \"AccessMarkerToken\" nell'access log")"
+
+section "SRCH-2: pattern assente su un log di sistema — messaggio esplicito"
+
+_out_srv_none=$(_run 'cerca "QQQNONESISTE" nel server.log')
+assert_eq "pattern assente sul server.log: lo dice, e riporta il pattern" "1" \
+    "$([[ "$_out_srv_none" == *"Nessuna riga trovata"* && "$_out_srv_none" == *"QQQNONESISTE"* ]] && echo 1 || echo 0)"
+
+section "SRCH-2: sorgente non disponibile per l'app di sessione — [SKIP], non vuoto"
+
+# ContactManager non ha gc.log nella fixture (esiste solo sotto ClaimCenter):
+# require_tool_sources deve fermarsi con [SKIP], non restituire output vuoto —
+# altrimenti l'utente non distingue "pattern non trovato" da "log inesistente".
+_out_noskip=$(QUERY_LOG_DIR= bash "$ROOT_DIR/chatbot.sh" --profile "$PROFILE_DIR" \
+    --base-dir "$_FIX" --env prod --node 4 --app ContactManager \
+    --query 'cerca "GcPauseToken" nel gc.log' 2>&1)
+assert_eq "gc.log assente sotto ContactManager: [SKIP] esplicito, non output vuoto" "1" \
+    "$([[ "$_out_noskip" == *"[SKIP]"* ]] && echo 1 || echo 0)"
+assert_eq "  il messaggio indica dove esiste davvero (ClaimCenter)" "1" \
+    "$([[ "$_out_noskip" == *"ClaimCenter"* ]] && echo 1 || echo 0)"
 
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""

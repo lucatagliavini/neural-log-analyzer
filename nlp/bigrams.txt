@@ -42,3 +42,19 @@ gc\b|garbage|jvm\b|g1gc :: lent[oaie]|latenz|slow\b|impatto|degrada|rallent :: 2
 # (filter_app_errors "quante exception ci sono nel log applicativo").
 # Verificato: 0 esempi dei 1026 esistenti attivano la co-presenza.
 quali.log|che.log|quali.file.di.log|che.file.di.log|tutti.i.log :: ci.sono|sono.present|present|disponibil|esiston|elenc|lista :: 2
+
+# ── log di sistema nominato + ricerca testuale → grep_named_log (non
+# filter_errors/search_all_logs) ──────────────────────────────────────────────
+# peso 2 per battere l'unigram cerca|trova|ricerca|search (peso 2, unigrams.txt:143)
+# che tirerebbe verso search_all_logs.
+# patternA = "server.log"/"gc.log"/"access.log" con IL PUNTO ERE non escapato
+# (matcha qualunque carattere, quindi anche lo spazio: copre "server log" senza
+# punto — query-to-features.sh normalizza lo spazio nel PATTERN, non nella
+# query), non `server\b`/`gc\b`/`access\b`: con `gc\b` la co-presenza si
+# attiva anche su "cerca correlazione tra gc e lentezza" (4 esempi di
+# correlate_gc_slow, queries_labeled.txt), perché quella query nomina "gc" e un
+# verbo di ricerca senza intendere il file. Con ".log" la co-presenza è zero
+# collisioni, verificato con `[[ =~ ]]` su tutto queries_labeled.txt e sulle 90
+# asserzioni di run-tests.sh — mai in awk, dove `\b` è backspace, non confine
+# di parola.
+server.log|gc.log|access.log :: <pattern>|cerca\b|trova\b|ricerca\b|search\b :: 2

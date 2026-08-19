@@ -117,6 +117,50 @@ _path=$(resolve_named_log_path "$_FIX/sec4" deep)
 assert_true "trovato in sottodirectory annidata sotto la root" \
     "$([[ "$_path" == "$_FIX/sec4/App/Sub/Deep/prod2-deep.log" ]] && echo 1 || echo 0)"
 
+# ─── SRCH-2: costo proporzionale al log scelto, non al nodo ──────────────────
+# grep_named_log sul ramo di sistema (server/access/gc) apre solo il file
+# corrente (open_current_log_for, già verificato sopra); search_all_logs
+# scansiona invece ogni log scoperto sotto LOG_SEARCH_ROOT. Stesso pattern
+# testuale, stesso nodo: il confronto deve mostrare che il primo costa quanto
+# un file e il secondo quanto il nodo — altrimenti la promessa del piano
+# SRCH-2 ("costo ≈ dimensione del log scelto, non del nodo") è solo prosa.
+section "SRCH-2: grep_named_log (un file) vs search_all_logs (il nodo)"
+
+_FIX9="$(mktemp -d)"
+_node9="$_FIX9/prod/lxprjbliq04"
+mkdir -p "$_node9/srvdir" "$_node9/ClaimCenter/Guidewire" "$_node9/ContactManager/Guidewire"
+printf '%s\n' "riga 1 di server" "riga 2 di server searchHub qui" \
+    > "$_node9/srvdir/server.log"
+for i in 1 2 3 4 5; do
+    printf '%s\n' "riga applicativa $i searchHub" "riga applicativa $i altro" \
+        "riga applicativa $i ancora" "riga applicativa $i extra" \
+        > "$_node9/ClaimCenter/Guidewire/app$i.log"
+done
+echo "riga cm searchHub" > "$_node9/ContactManager/Guidewire/cm.log"
+
+read -r _sel9 _nf9 _nb9 <<< "$(_sel_metrics open_current_log_for "$_node9/srvdir" server)"
+assert_true "grep_named_log (server.log): un solo file selezionato" \
+    "$([[ "$_nf9" -eq 1 ]] && echo 1 || echo 0)"
+
+export LOG_BASE_DIR="$_FIX9" DETECTED_NODE="04" ACTIVE_NODE="04" \
+    LOG_SEARCH_ROOT="$_node9" SEARCH_PATTERN="searchHub"
+_PERF_OUT9="$(mktemp)"
+export BOT_PERF_FILE="$_PERF_OUT9"
+bash "$ROOT_DIR/lib/tools/search_all_logs.sh" > /dev/null 2>&1
+_perf9=$(cat "$_PERF_OUT9" 2>/dev/null)
+unset BOT_PERF_FILE LOG_BASE_DIR DETECTED_NODE ACTIVE_NODE LOG_SEARCH_ROOT SEARCH_PATTERN
+rm -f "$_PERF_OUT9"
+eval "$_perf9" 2>/dev/null
+_nf9_all="${PERF_FILES:-0}"
+_nb9_all="${PERF_BYTES:-0}"
+
+assert_true "search_all_logs: scansiona più file del solo server.log (il nodo, non un log)" \
+    "$([[ "$_nf9_all" -gt "$_nf9" ]] && echo 1 || echo 0)"
+assert_true "search_all_logs: byte scansionati > byte del solo server.log (costo sul nodo)" \
+    "$([[ "$_nb9_all" -gt "$_nb9" ]] && echo 1 || echo 0)"
+
+rm -rf "$_FIX9"
+
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""
 printf "${BOLD}%s${RESET}\n" "───────────────────────────────────────────"
