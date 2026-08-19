@@ -555,7 +555,7 @@ tool_help_category() {
     local first="${groups[0]}"
     [[ "$first" == *"|"* ]] && first="${first%%|*}"
     case "$first" in
-        none) return ;;
+        none) return 0 ;;
         all)  printf '%s' "${ACTIVITY_CATEGORY[$tool]:-}" ;;
         *)    printf '%s' "${SOURCE_CATEGORY[$first]:-}" ;;
     esac

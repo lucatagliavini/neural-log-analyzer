@@ -154,6 +154,34 @@ assert_true "search_all_logs resta sotto 'Ricerca cross-log'" \
 assert_true "list_logs resta sotto 'Esplora log del nodo'" \
     "$(grep -qF -- "Esplora log del nodo" <<< "$_HELP_OUT" && echo 1 || echo 0)"
 
+# ─── Regressione: print_help sotto `set -e` (bug prod 2026-08-19) ────────────
+# Questo file gira con `set -uo pipefail`, SENZA `-e` (necessario per lo scoping,
+# vedi sopra) — ma chatbot.sh gira con `set -euo pipefail`. tool_help_category()
+# aveva un `return` nudo nel ramo `none)`: senza valore esplicito, `return` eredita
+# lo status dell'ultimo comando eseguito, cioè il test `[[ "$first" == *"|"* ]]`
+# — falso per "none", quindi status 1. `tool_cat="$(tool_help_category ...)"` con
+# quello status abortiva lo script sotto `set -e` non appena il loop arrivava a
+# show_help (kind "none"), troncando l'help a metà con exit 1 — invisibile a
+# questo file perché non ha `-e`, visibile solo eseguendo lo scenario reale in un
+# subshell dedicato con `-e` attivo.
+section "Regressione: print_help completa sotto set -e (come chatbot.sh)"
+
+_set_e_out="$(bash -c '
+    set -euo pipefail
+    source "'"$LIB"'/dispatch.sh"
+    PROFILE_DIR="'"$ROOT_DIR"'/profiles/liquido"
+    export PROFILE_DIR
+    source "'"$LIB"'/nlp-paths.sh"
+    nlp_resolve_paths
+    source "$TOOLS_CONF_FILE"
+    source "$PROFILE_DIR/domain.conf"
+    print_help
+' 2>&1)"
+_set_e_status=$?
+assert_eq "print_help esce con status 0 sotto set -e" "0" "$_set_e_status"
+assert_true "print_help sotto set -e arriva a 'Esplora log del nodo' (non tronca a show_help)" \
+    "$(grep -qF -- "Esplora log del nodo" <<< "$_set_e_out" && echo 1 || echo 0)"
+
 # ─── Secondo profilo: stessa partizione, etichette diverse ───────────────────
 section "usnext: stessa partizione (framework), etichette del cliente (profilo)"
 
