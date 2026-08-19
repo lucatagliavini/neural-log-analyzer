@@ -3,24 +3,30 @@
 # Parametri: -v tail_n="50"
 #            -v order="head|tail"  (default tail)
 #
-# Formato (es. Guidewire nel profilo liquido): [thread] USER YYYY-MM-DDTHH:MM:SS,mmm LEVEL messaggio
+# Il riconoscimento del livello è delegato a logline_parse() (utils-logline.awk):
+# il formato è una proprietà del file, non un'assunzione di questo tool.
 #
 # order="head": stampa non appena raggiunge tail_n righe ed esce, niente
 # buffer circolare — stesso ragionamento di tail_log.awk.
+#
+# Dipende da: utils-time.awk, utils-logline.awk, utils-colors.awk
 
 BEGIN {
     if (tail_n == "" || tail_n+0 <= 0) tail_n = 50
     n = tail_n+0; count = 0
-    GW_RE = "([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]+) (ERROR|WARN|INFO|DEBUG|TRACE)"
     head_mode = (order == "head")
     nerror = 0; nwarn = 0; ninfo = 0
 }
 
-function print_colored(line) {
+# logline_parse() analizza $0: per una riga bufferizzata (non l'ultima letta)
+# va assegnata a $0 prima della chiamata — sicuro qui, siamo in END o in una
+# regola che non userà più i campi correnti dopo questa chiamata.
+function print_colored(line,    color) {
+    $0 = line
     color = ""
-    if (match(line, GW_RE, lv)) {
-        if      (lv[2] == "ERROR") color = C_CRIT
-        else if (lv[2] == "WARN")  color = C_WARN
+    if (logline_parse()) {
+        if      (_ll_level == "ERROR") color = C_CRIT
+        else if (_ll_level == "WARN")  color = C_WARN
     }
     if (color != "")
         printf "%s%s%s\n", color, line, C_RESET
@@ -29,10 +35,11 @@ function print_colored(line) {
 }
 
 function count_level(line) {
-    if (match(line, GW_RE, lv)) {
-        if      (lv[2] == "ERROR") nerror++
-        else if (lv[2] == "WARN")  nwarn++
-        else if (lv[2] == "INFO")  ninfo++
+    $0 = line
+    if (logline_parse()) {
+        if      (_ll_level == "ERROR") nerror++
+        else if (_ll_level == "WARN")  nwarn++
+        else if (_ll_level == "INFO")  ninfo++
     }
 }
 

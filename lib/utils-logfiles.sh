@@ -297,6 +297,28 @@ logfile_logical_name() {
     echo "${base%.log}"
 }
 
+# Nome logico + strip opzionale del prefisso host, per la sola presentazione
+# all'utente (elenchi, suggerimenti). Il prefisso è una COORDINATA di profilo
+# (LOG_NAME_HOST_PREFIX_RE in system.conf, ERE senza ancora — questa funzione
+# la ancora all'inizio), non un'assunzione del framework: su liquido tutti i
+# log applicativi condividono il prefisso host ("coll1nssa-cc.log"), su altri
+# profili (es. usnext) non esiste alcun trattino nei nomi e la chiave resta
+# vuota, quindi nessuno strip avviene (BACKLOG.md: «cambiare un nome fallisce
+# rumorosamente; cambiare un formato fallisce in silenzio» — qui è un nome).
+#
+# Unico punto di verità per lo strip: prima ne esistevano due divergenti,
+# `sed` inline in dispatch.sh:_log_names_in_dir (taglia al PRIMO trattino) e
+# `${_hint##*-}` qui sotto in resolve_log_glob (taglia all'ULTIMO, greedy) —
+# su un nome con due trattini disaccordavano (principio 8 di CLAUDE.md).
+logfile_display_name() {
+    local name
+    name=$(logfile_logical_name "$1")
+    if [[ -n "${LOG_NAME_HOST_PREFIX_RE:-}" ]]; then
+        name=$(sed -E "s/^(${LOG_NAME_HOST_PREFIX_RE})//" <<< "$name")
+    fi
+    echo "$name"
+}
+
 # Un nome logico è "di sistema" (access/server/gc) se coincide, case-insensitive,
 # con uno dei tre *_LOG_BASE di system.conf, o con un sinonimo mappato su uno di
 # essi via SYSTEM_LOG_SYNONYMS (es. "access" -> "undertow_access_log": il nome
@@ -532,12 +554,14 @@ resolve_log_glob() {
             i=$(( i + 1 ))
         done
         # Suggerisce il pattern che avrebbe selezionato univocamente il file scelto:
-        # dal nome logico si prende il segmento dopo l'ultimo '-' (il serverID che
-        # precede è la parte che l'utente non ricorda).
+        # il nome che l'utente vede altrove (logfile_display_name — stessa funzione
+        # di _log_names_in_dir in dispatch.sh, principio 8: prima le due divergevano,
+        # qui si tagliava al segmento dopo l'ULTIMO trattino, dispatch.sh al PRIMO).
+        # Il "*" davanti copre il prefisso host, se il profilo ne configura uno.
         local _hint
-        _hint=$(logfile_logical_name "$chosen")
-        printf "  ${_D}Restringi il pattern per un match univoco, es: \"*-%s.log\"${_X}\n" \
-            "${_hint##*-}" >&2
+        _hint=$(logfile_display_name "$chosen")
+        printf "  ${_D}Restringi il pattern per un match univoco, es: \"*%s.log\"${_X}\n" \
+            "$_hint" >&2
     fi
 
     echo "$chosen"

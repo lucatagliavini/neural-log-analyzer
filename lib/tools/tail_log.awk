@@ -32,11 +32,15 @@ function print_colored(line) {
     }
 }
 
+# logline_parse() analizza $0: per una riga bufferizzata va assegnata a $0
+# prima della chiamata (sicuro qui — il chiamante non usa più i campi
+# correnti dopo, vedi la nota in tail_named_log.awk).
 function count_level(line) {
-    if (match(line, /[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}[, ][0-9]+ (ERROR|WARN|INFO)/, lv)) {
-        if      (lv[1] == "ERROR") nerror++
-        else if (lv[1] == "WARN")  nwarn++
-        else                       ninfo++
+    $0 = line
+    if (logline_parse()) {
+        if      (_ll_level == "ERROR") nerror++
+        else if (_ll_level == "WARN")  nwarn++
+        else if (_ll_level == "INFO")  ninfo++
     }
 }
 

@@ -7,28 +7,31 @@
 #   -v time_from="YYYY-MM-DDTHH:MM"
 #   -v time_to="YYYY-MM-DDTHH:MM"
 #
-# Formato (es. Guidewire nel profilo liquido): [thread] USER YYYY-MM-DDTHH:MM:SS,mmm LEVEL messaggio
-# Il timestamp è in posizione variabile — estratto con regex.
+# Il riconoscimento di timestamp/livello è delegato a logline_parse()
+# (utils-logline.awk): il formato non è un'assunzione di questo tool, è una
+# proprietà del file (vedi il piano di correzione, Intervento 1/2). Una riga
+# non riconosciuta non viene scartata (principio 5): resta senza livello e
+# senza timestamp, quindi non passa un filtro per livello specifico ma resta
+# visibile con level=ALL o un pattern testuale.
 #
-# Dipende da: utils-colors.awk, utils-dedup.awk, utils-time.awk
+# Dipende da: utils-colors.awk, utils-dedup.awk, utils-time.awk, utils-logline.awk
 
 BEGIN {
     FS = " "
     n = (tail_n+0 > 0) ? tail_n+0 : 50
     if (level == "") level = "ERROR"
     count = 0
-    matched_format = 0
-    GW_RE = "([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2},[0-9]+) (ERROR|WARN|INFO|DEBUG|TRACE)(.*)"
+    matched_level = 0
 }
 
 {
-    if (!match($0, GW_RE, m)) next
-    matched_format++
+    row_recognized = logline_parse()
 
-    row_ts    = m[1]
-    row_level = m[2]
-    row_msg   = m[3]
-    sub(/^ /, "", row_msg)
+    row_ts    = _ll_ts
+    row_level = _ll_level
+    if (row_level != "") matched_level++
+    row_msg   = row_recognized ? _ll_msg : $0
+    row_epoch = _ll_epoch
 
     if (level == "WARN+") {
         if (row_level != "ERROR" && row_level != "WARN") next
@@ -36,14 +39,7 @@ BEGIN {
 
     if (pattern != "" && $0 !~ pattern) next
 
-    if (time_from != "" || time_to != "") {
-        ts_str = row_ts
-        gsub(/T/, " ", ts_str); gsub(/,.*/, "", ts_str)
-        split(ts_str, dt, " ")
-        split(dt[1], d, "-"); split(dt[2], t, ":")
-        epoch = mktime(d[1] " " d[2] " " d[3] " " t[1] " " t[2] " " t[3])
-        if (!in_range(epoch)) next
-    }
+    if ((time_from != "" || time_to != "") && (row_epoch <= 0 || !in_range(row_epoch))) next
 
     thread = $0
     if (match(thread, /\[([^\]]+)\]/, th)) thread = th[1]
@@ -58,7 +54,7 @@ BEGIN {
 
 END {
     if (count == 0) {
-        if (NR > 0 && matched_format == 0) {
+        if (NR > 0 && matched_level == 0) {
             printf "Nessuna riga riconosciuta nel formato atteso (%d righe lette). ", NR
             printf "Il log potrebbe non avere livelli ERROR/WARN riconoscibili: prova a cercare una stringa specifica.\n"
             exit

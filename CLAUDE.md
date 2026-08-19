@@ -32,12 +32,14 @@ Chatbot a riga di comando che risponde a query in linguaggio naturale sui log
 JBoss/Undertow/Guidewire. Classifica l'intent della query con una rete neurale e
 dispatcha il tool di analisi AWK corretto.
 
-**Dipendenza da neural-bash:** questo repository dipende dal framework AWK in
-`../neural-bash` (path relativo — le due cartelle devono restare sorelle). Gli script
-`train.sh`, `setup.sh`, `lib/infer.sh`, `lib/infer-dry.sh` invocano
-`../neural-bash/nnet-run.sh` / `../neural-bash/nnet-init.sh`. Separato da neural-bash il
-2026-08-03 (storia preservata via `git subtree split`); remote `origin` su GitHub
-(`lucatagliavini/neural-log-analyzer`).
+**Dipendenza da neural-c:** questo repository dipende dal framework neurale in C
+`../neural-c` (path relativo — le due cartelle devono restare sorelle). Gli script
+`setup.sh`, `train.sh`, `lib/infer.sh`, `lib/infer-dry.sh` invocano
+`../neural-c/neural-c.sh` (via `lib/nc-common.sh`) per `init`/`train`/`predict`. Unico
+motore neurale del progetto (training e inferenza, x86_64 e ppc64le) — sostituisce
+`neural-bash` e il backend PyTorch (`lib/train.py`), rimossi il 2026-08-18. Separato da
+neural-bash il 2026-08-03 (storia preservata via `git subtree split`); remote `origin` su
+GitHub (`lucatagliavini/neural-log-analyzer`).
 
 ## Common Commands
 
@@ -83,7 +85,7 @@ queries_labeled.txt
       │  build-dataset.sh
       ▼
   queries.txt  (97 feature × 968 esempi)
-      │  train.sh  (adam, PyTorch wrapper, early stopping)
+      │  train.sh  (adam, neural-c, early stopping opzionale)
       ▼
   models/intent_classifier/  (97→48→15, sigmoid, Xavier)
       │  chatbot.sh
@@ -91,24 +93,29 @@ queries_labeled.txt
   query → normalize-query.sh → query-to-features.sh → rete → tool attivati
 ```
 
-### Backend Python (training accelerato)
+### Backend Python (generazione dataset accelerata)
 
-- `lib/train.py` — wrapper PyTorch CPU-only per training. Warm-start, early stopping.
-  Fallback su gawk se `.venv` assente. ~1900× più veloce di AWK.
+Solo per `build-dataset.sh`, non per il training — quello è interamente `neural-c` (vedi
+sopra). `lib/train.py` (wrapper PyTorch) è stato **rimosso il 2026-08-18**: `neural-c` è
+l'unico motore neurale, su tutte le architetture, incluso il server di produzione
+ppc64le dove PyTorch non è disponibile.
+
 - `lib/build_dataset.py` — rebuild dataset in-process, replica
   `normalize-query.sh` + `query-to-features.sh` in Python. Output bit-identico alla
-  pipeline bash (verificato 968/968).
-- `.venv/bin/python3` autodetect nei wrapper Bash corrispondenti.
+  pipeline bash (verificato 968/968). Opzionale: senza `.venv`, `build-dataset.sh` cade
+  sul ramo bash (più lento, stesso risultato).
+- `.venv/bin/python3` autodetect in `build-dataset.sh`.
 
 ### Componenti principali
 
 | File | Responsabilità |
 |------|---------------|
 | `chatbot.sh` | REPL interattivo e modalità `--query` |
-| `setup.sh` | Inizializza il modello per un profilo (chiama `nnet-init.sh`) |
-| `train.sh` | Addestra il classificatore (chiama `nnet-run.sh` o `lib/train.py`) |
+| `setup.sh` | Inizializza il modello per un profilo (chiama `neural-c init`) |
+| `train.sh` | Addestra il classificatore (chiama `neural-c train`) |
 | `build-dataset.sh` | Genera il dataset di training dai labeled examples |
-| `lib/infer.sh` | Feature vector → rete → nomi tool attivati |
+| `lib/nc-common.sh` | Wrapper condivisi verso `neural-c.sh` (`nc_predict`, gestione `project.conf`, init) |
+| `lib/infer.sh` | Feature vector → rete (`neural-c predict`) → nomi tool attivati |
 | `lib/dispatch.sh` | Routing tool name → invocazione AWK |
 | `lib/normalize-query.sh` | Normalizza entità (APP/ENV/NODE) → `NORM_QUERY` + `DETECTED_*`, unica fonte di verità |
 | `lib/query-to-features.sh` | Query testuale (normalizzata) → vettore numerico |
@@ -179,10 +186,10 @@ configurare quell'incoerenza.
 - **Entity normalization**: le query passano sempre da `normalize-query.sh` prima della
   vectorizzazione (`"errori jboss"` → `"errori <APP>"`). Il classificatore non deve mai
   vedere nomi applicativi concreti nel training set.
-- **Verifica coerenza topologia**: `train.sh` confronta `NUM_FEATURES` (da `domain.conf`,
-  calcolato da `unigrams.txt`/`bigrams.txt`) con le colonne di `layer1.txt` prima di
-  addestrare — se divergono, errore esplicito con suggerimento di reinizializzare via
-  `setup.sh`. Evita modelli corrotti silenziosi.
+- **Verifica coerenza topologia** (ARCH-4): `train.sh` confronta `NUM_FEATURES` (da
+  `domain.conf`, calcolato da `unigrams.txt`/`bigrams.txt`) con la riga `input N` di
+  `model.txt` prima di addestrare — se divergono, errore esplicito con suggerimento di
+  reinizializzare via `setup.sh`. Evita modelli corrotti silenziosi.
 - **Nessun default hardcoded**: valori come `SERVER_LOG_FORMAT`, nomi log, alias app
   vengono sempre letti da `system.conf`/`entities.conf`, mai da fallback impliciti nel
   codice (rifattorizzato in ARCH-6, vedi BACKLOG.md).
@@ -301,10 +308,13 @@ specifico:
 
 ## Dependencies
 
-- `gawk` — richiesto (usato da tutti i tool AWK e dal framework neurale)
+- `gawk` — richiesto (usato da tutti i tool AWK di analisi log; non più dal motore
+  neurale, che da 2026-08-18 è `neural-c`)
 - `bash` ≥ 4
 - `gunzip` — per lettura trasparente di log `.gz`
-- Python 3 + `.venv` (opzionale ma raccomandato) — `pip install -r requirements.txt
-  --index-url https://download.pytorch.org/whl/cpu` per il training accelerato via
-  PyTorch CPU-only
-- `../neural-bash` — framework AWK, cartella sorella richiesta
+- `../neural-c` — framework neurale in C, cartella sorella richiesta. Unico motore di
+  training/inferenza, su x86_64 e ppc64le (invocato via `neural-c.sh`, che seleziona il
+  binario giusto per architettura — mai il binario direttamente).
+- Python 3 + `.venv` (opzionale) — solo per accelerare `build-dataset.sh`
+  (`lib/build_dataset.py`); senza, il ramo bash produce lo stesso risultato più
+  lentamente. Non più necessario per il training.

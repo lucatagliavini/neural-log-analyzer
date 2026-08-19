@@ -16,11 +16,17 @@
 # solo scandendo il file per intero si sa qual è il timestamp "corrente" nel
 # punto in cui si trova la riga di stack trace.
 #
-# Output: "hits|first_ts|last_ts" su stdout.
+# Output: "hits|first_ts|last_ts|partial" su stdout. partial=1 quando
+# first_ts/last_ts sono solo-ora (nessun match datato nel file), 0 altrimenti.
 #
-# Dipende da: nessuna utility esterna (non usa utils-time.awk: qui il
-# confronto è per stringa "YYYY-MM-DD HH:MM:SS", non per epoch, per restare
-# coerente col resto di search_all_logs.sh che opera sulla stessa rappresentazione).
+# Il riconoscimento del timestamp è delegato a logline_parse()
+# (utils-logline.awk): il formato è una proprietà del file (5 grammatiche,
+# incluso il solo-ora di console.log), non un'assunzione di questo tool.
+# Il confronto resta per stringa "YYYY-MM-DD HH:MM:SS" (non per epoch): è
+# _ll_ts, non _ll_epoch, il valore usato qui, per restare coerente col resto
+# di search_all_logs.sh che opera sulla stessa rappresentazione testuale.
+#
+# Dipende da: utils-time.awk, utils-logline.awk (caricati da search_all_logs.sh).
 #
 # Due passate sullo STESSO file (il chiamante passa il path due volte come
 # argomento): la prima (FNR==NR) testa solo `pat`, a costo di un semplice
@@ -36,11 +42,14 @@
 
 BEGIN {
     IGNORECASE = 1
-    MONTHS["Jan"]="01"; MONTHS["Feb"]="02"; MONTHS["Mar"]="03"; MONTHS["Apr"]="04"
-    MONTHS["May"]="05"; MONTHS["Jun"]="06"; MONTHS["Jul"]="07"; MONTHS["Aug"]="08"
-    MONTHS["Sep"]="09"; MONTHS["Oct"]="10"; MONTHS["Nov"]="11"; MONTHS["Dec"]="12"
     do_filter = (tf != "" || tt != "")
-    hits = 0; first_ts = ""; last_ts = ""
+    hits = 0
+    # Due min/max SEPARATI (datato / solo-ora): mai mescolati, perché il
+    # confronto è per stringa e "10:03:37" ordina sempre prima di qualsiasi
+    # "2026-...". In END si emette il datato se esiste almeno un match
+    # datato nel file, altrimenti l'orario marcato come parziale (4° campo).
+    first_ts_dated = ""; last_ts_dated = ""
+    first_ts_time  = ""; last_ts_time  = ""
     # gated=1 → il chiamante ha GIÀ verificato che il pattern esiste nel file
     # (pre-gate `grep -qiF` in search_all_logs.sh) e passa il file UNA volta
     # sola: la prima passata sarebbe lavoro duplicato. Conta soprattutto sui
@@ -58,25 +67,22 @@ FNR == NR && !single_pass {
 
 {
     if (!candidate) exit
-    ts = ""
-    if (match($0, /[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}/)) {
-        ts = substr($0, RSTART, RLENGTH)
-        gsub(/T/, " ", ts)
-    } else if (match($0, /\[[0-9]{2}\/[A-Za-z]{3}\/[0-9]{4}:[0-9]{2}:[0-9]{2}:[0-9]{2}/)) {
-        raw = substr($0, RSTART + 1, RLENGTH - 1)
-        split(raw, p, "/")
-        mnum = MONTHS[p[2]]
-        if (mnum != "") {
-            split(p[3], q, ":")
-            ts = q[1] "-" mnum "-" p[1] " " q[2] ":" q[3] ":" q[4]
-        }
-    }
-    if (ts != "") last_seen_ts = ts
+    row_recognized = logline_parse()
+    ts = row_recognized ? _ll_ts : ""
+    ts_has_date = row_recognized ? _ll_has_date : 0
+    if (ts != "") { last_seen_ts = ts; last_seen_has_date = ts_has_date }
     eff_ts = (ts != "") ? ts : last_seen_ts
+    eff_has_date = (ts != "") ? ts_has_date : last_seen_has_date
 
     if ($0 !~ pat) next
 
-    if (do_filter && eff_ts != "") {
+    # tf/tt sono sempre datati ("YYYY-MM-DD HH:MM:SS"): confrontarli con un
+    # eff_ts solo-ora (console.log, profilo usnext) per stringa darebbe un
+    # esito falso (una cifra ora ordina sempre prima di un anno). Senza data
+    # non si può stabilire se la riga è nel range: si include (principio 5),
+    # esattamente il comportamento di prima della migrazione a
+    # logline_parse(), quando queste righe non avevano affatto un ts.
+    if (do_filter && eff_ts != "" && eff_has_date) {
         if (tf != "" && eff_ts < tf) next
         if (tt != "" && eff_ts > tt) next
     }
@@ -100,16 +106,33 @@ FNR == NR && !single_pass {
         # (TS-1). Su un log ordinato il risultato è identico a prima, quindi
         # nessuna regressione su access/server.
         #
-        # Confronto lessicografico e non numerico: il formato è
-        # "YYYY-MM-DD HH:MM:SS", a campi di larghezza fissa e dal più
-        # significativo al meno, quindi l'ordine delle stringhe coincide con
-        # quello temporale — ed è lo stesso confronto già usato dal filtro
-        # tf/tt sopra.
-        if (first_ts == "" || eff_ts < first_ts) first_ts = eff_ts
-        if (eff_ts > last_ts)                    last_ts  = eff_ts
+        # Confronto lessicografico e non numerico: sia "YYYY-MM-DD HH:MM:SS"
+        # sia "HH:MM:SS" sono a campi di larghezza fissa dal più significativo
+        # al meno, quindi l'ordine delle stringhe coincide con quello
+        # temporale — ed è lo stesso confronto già usato dal filtro tf/tt
+        # sopra. I due min/max restano su binari separati (vedi BEGIN):
+        # mescolarli produrrebbe un minimo falso, perché un orario di 8
+        # caratteri ordina sempre prima di una data di 19.
+        if (eff_has_date) {
+            if (first_ts_dated == "" || eff_ts < first_ts_dated) first_ts_dated = eff_ts
+            if (eff_ts > last_ts_dated)                          last_ts_dated  = eff_ts
+        } else {
+            if (first_ts_time == "" || eff_ts < first_ts_time) first_ts_time = eff_ts
+            if (eff_ts > last_ts_time)                          last_ts_time  = eff_ts
+        }
     }
 }
 
 END {
-    printf "%d|%s|%s\n", hits, first_ts, last_ts
+    # Emesso il datato se il file ne ha almeno uno; altrimenti l'orario,
+    # marcato "parziale" nel 4° campo — un file può attraversare la
+    # mezzanotte, quindi il minimo/massimo dell'orario non è garantito essere
+    # il primo/ultimo evento cronologico: limite del log (console.log non
+    # scrive la data), non del tool.
+    if (first_ts_dated != "")
+        printf "%d|%s|%s|0\n", hits, first_ts_dated, last_ts_dated
+    else if (first_ts_time != "")
+        printf "%d|%s|%s|1\n", hits, first_ts_time, last_ts_time
+    else
+        printf "%d|%s|%s|0\n", hits, "", ""
 }

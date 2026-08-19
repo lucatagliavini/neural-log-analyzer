@@ -485,13 +485,15 @@ cat > "$_FIX7/t.log" <<'EOF'
 EOF
 gzip -c "$_FIX7/t.log" > "$_FIX7/t.log.gz"
 _AWKT="$ROOT_DIR/lib/tools/search_all_logs.awk"
+_TIME_AWK="$ROOT_DIR/lib/utils-time.awk"
+_LOGLINE_AWK="$ROOT_DIR/lib/utils-logline.awk"
 _TF="2026-08-05 16:00:00"; _TT="2026-08-05 16:59:59"
-_EXPECT="3|2026-08-05 16:30:00|2026-08-05 16:30:00"
+_EXPECT="3|2026-08-05 16:30:00|2026-08-05 16:30:00|0"
 
-_r_gated=$(gawk -v pat="searchHub" -v tf="$_TF" -v tt="$_TT" -v gated=1 -f "$_AWKT" "$_FIX7/t.log")
-_r_2pass=$(gawk -v pat="searchHub" -v tf="$_TF" -v tt="$_TT" -f "$_AWKT" "$_FIX7/t.log" "$_FIX7/t.log")
-_r_gz_gated=$(gzip -dc "$_FIX7/t.log.gz" | gawk -v pat="searchHub" -v tf="$_TF" -v tt="$_TT" -v gated=1 -f "$_AWKT")
-_r_gz_2pass=$(gawk -v pat="searchHub" -v tf="$_TF" -v tt="$_TT" -f "$_AWKT" <(gzip -dc "$_FIX7/t.log.gz") <(gzip -dc "$_FIX7/t.log.gz"))
+_r_gated=$(gawk -v pat="searchHub" -v tf="$_TF" -v tt="$_TT" -v gated=1 -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWKT" "$_FIX7/t.log")
+_r_2pass=$(gawk -v pat="searchHub" -v tf="$_TF" -v tt="$_TT" -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWKT" "$_FIX7/t.log" "$_FIX7/t.log")
+_r_gz_gated=$(gzip -dc "$_FIX7/t.log.gz" | gawk -v pat="searchHub" -v tf="$_TF" -v tt="$_TT" -v gated=1 -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWKT")
+_r_gz_2pass=$(gawk -v pat="searchHub" -v tf="$_TF" -v tt="$_TT" -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWKT" <(gzip -dc "$_FIX7/t.log.gz") <(gzip -dc "$_FIX7/t.log.gz"))
 rm -rf "$_FIX7"
 
 assert_true "gated=1 (plain): eredità stack trace corretta ($_r_gated)" \
@@ -502,6 +504,43 @@ assert_true "gated=1 (.gz): eredità stack trace corretta" \
     "$([[ "$_r_gz_gated" == "$_EXPECT" ]] && echo 1 || echo 0)"
 assert_true "due passate (.gz): stesso risultato di gated=1" \
     "$([[ "$_r_gz_2pass" == "$_EXPECT" ]] && echo 1 || echo 0)"
+
+# ─── Intervento 3: timestamp parziale (solo-ora) ───────────────────────────────
+section "PRIMO/ULTIMO MATCH con timestamp parziale (console.log, TS-1/LOGDISC-4)"
+
+# File interamente solo-ora (console.log del profilo usnext: nessuna riga porta
+# una data). Il min/max deve cadere sull'orario e il 4° campo deve marcarlo
+# "parziale" (1) — prima di Intervento 3 questo file dava "-|-" muto pur avendo
+# MATCH > 0 (bug #4).
+_FIX8="$(mktemp -d)"
+cat > "$_FIX8/console.log" <<'EOF'
+01:00:00,000 INFO  searchHub avvio
+10:03:37,273 ERROR searchHub timeout
+23:51:02,500 WARN  searchHub lento
+EOF
+
+_r_time=$(gawk -v pat="searchHub" -v gated=1 -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWKT" "$_FIX8/console.log")
+assert_true "file solo-ora: min/max sull'orario, partial=1 ($_r_time)" \
+    "$([[ "$_r_time" == "3|01:00:00|23:51:02|1" ]] && echo 1 || echo 0)"
+
+# File MISTO (righe datate + righe solo-ora, es. una riga di continuazione senza
+# timestamp proprio che eredita comunque "solo ora" da un file diverso da quello
+# della fixture (f)). Il datato deve vincere per intero: partial=0, e il minimo
+# NON deve cadere sulla riga solo-ora anche se "23:51:02" ordinerebbe DOPO
+# "14:30:29" per stringa — i due binari (dated/solo-ora) restano separati anche
+# quando convivono nello stesso file, non solo fra file diversi come in (f) sopra.
+cat > "$_FIX8/mixed.log" <<'EOF'
+01:00:00,000 INFO  searchHub avvio solo ora
+2026-08-18 09:15:00,000 ERROR searchHub datato
+2026-08-18 14:30:29,000 WARN  searchHub datato2
+23:51:02,500 WARN  searchHub lento solo ora
+EOF
+
+_r_mixed=$(gawk -v pat="searchHub" -v gated=1 -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWKT" "$_FIX8/mixed.log")
+assert_true "file misto: il datato vince e non si mescola col solo-ora ($_r_mixed)" \
+    "$([[ "$_r_mixed" == "4|2026-08-18 09:15:00|2026-08-18 14:30:29|0" ]] && echo 1 || echo 0)"
+
+rm -rf "$_FIX8"
 
 # ─── Metriche di performance: contratto BOT_PERF_FILE ─────────────────────────
 section "Metriche di performance (BOT_PERF_FILE)"

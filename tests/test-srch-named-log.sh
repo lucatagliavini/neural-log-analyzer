@@ -49,6 +49,7 @@ section() { printf "\n${BOLD}── %s ${RESET}${DIM}%s${RESET}\n" "$1" "──�
 # 2026-08-07: fixture datata 2026-08-06).
 _today_plain="$(date +%Y-%m-%d)"
 _today_apache="$(date +%d/%b/%Y)"
+_today_eu="$(date +%d-%m-%Y)"
 
 _FIX="$(mktemp -d)"
 trap 'rm -rf "$_FIX"' EXIT
@@ -74,6 +75,17 @@ EOF
 cat > "$_node/ClaimCenter/Guidewire/prod1nssd-formatolibero.log" <<EOF
 10.0.0.1 [${_today_apache}:10:05:00 +0200] "GET /b HTTP/1.1" 500 200 100 - UA
 10.0.0.1 [${_today_apache}:10:06:00 +0200] "GET /c HTTP/1.1" 200 100 100 - UA
+EOF
+
+# TS-1/bug#2: formato data EUROPEA (Pass.log, profilo usnext) — DD-MM-YYYY
+# HH:MM:SS.mmm LEVEL messaggio. Prima della migrazione a logline_parse()
+# (Intervento 1/2), grep_named_log.awk riconosceva solo la grammatica ISO
+# Guidewire e scartava ogni riga di questo formato: "Nessuna riga riconosciuta
+# nel formato atteso" anche con ERROR/WARN presenti. Fail-before/pass-after.
+cat > "$_node/ClaimCenter/Guidewire/prod1nssd-euformat.log" <<EOF
+${_today_eu} 10:00:00.132 ERROR SubjectUnisalute problema di validazione
+${_today_eu} 10:01:00.132 WARN  SubjectUnisalute lentezza
+${_today_eu} 10:02:00.132 INFO  SubjectUnisalute ok
 EOF
 
 _run() {
@@ -143,6 +155,16 @@ assert_eq "righe non nel formato atteso: messaggio distinto, non 'Nessuna riga t
     "$([[ "$_out_fmt" == *"formato atteso"* && "$_out_fmt" != *"Nessuna riga trovata (level="* ]] && echo 1 || echo 0)"
 assert_eq "il messaggio riporta il numero di righe lette" "1" \
     "$([[ "$_out_fmt" == *"2 righe lette"* ]] && echo 1 || echo 0)"
+
+section "TS-1/bug#2: formato data europea (Pass.log) riconosciuto, non 'formato atteso'"
+
+assert_eq "'errori nel euformat.log' trova la riga ERROR (formato europeo)" "1" \
+    "$(_righe 'errori nel euformat.log')"
+assert_eq "livello ERROR riconosciuto in formato europeo" "ERROR" \
+    "$(_livello 'errori nel euformat.log')"
+_out_eu=$(_run 'errori nel euformat.log')
+assert_eq "formato europeo: NON il messaggio 'formato atteso' (era il bug)" "1" \
+    "$([[ "$_out_eu" != *"formato atteso"* ]] && echo 1 || echo 0)"
 
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""

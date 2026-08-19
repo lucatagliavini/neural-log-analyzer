@@ -59,6 +59,10 @@ fi
 jobs="${SEARCH_PARALLEL_JOBS:-4}"
 tmp_dir=$(mktemp -d)
 _AWK_TOOL="$(dirname "${BASH_SOURCE[0]}")/search_all_logs.awk"
+# Il riconoscimento del timestamp è delegato a logline_parse() (utils-logline.awk,
+# che a sua volta richiede utils-time.awk per l'epoch) — non più regex proprie.
+_TIME_AWK="$(dirname "${BASH_SOURCE[0]}")/../utils-time.awk"
+_LOGLINE_AWK="$(dirname "${BASH_SOURCE[0]}")/../utils-logline.awk"
 
 _R="${C_CRIT}" _Y="${C_WARN}" _G="${C_OK}"
 _B="${C_BOLD}"  _D="${C_LBL}"  _X="${C_RESET}"
@@ -220,7 +224,7 @@ printf "\n${_B}Ricerca:${_X} ${_Y}%s${_X}  ${_D}%s%s  (%d file, %d worker)${_X}\
     "$sp" "$tw_label" "$_scope_label" "$total_files" "$jobs"
 
 # ── Ricerca parallela con pool di $jobs worker ────────────────────────────────
-# Ogni subshell scrive "label|hits|first_ts|last_ts|node" in $tmp_dir/NNNNN
+# Ogni subshell scrive "label|hits|first_ts|last_ts|node|app|partial" in $tmp_dir/NNNNN
 _running=0
 _t_search_start=$(date +%s%3N 2>/dev/null || echo 0)
 for (( i=0; i<total_files; i++ )); do
@@ -239,7 +243,7 @@ for (( i=0; i<total_files; i++ )); do
         pth="${all_paths[$i]}"
         nod="${all_nodes[$i]}"
         apl="${all_apps[$i]:-}"
-        hits=0 first_ts="" last_ts=""
+        hits=0 first_ts="" last_ts="" partial=0
 
         # Due passate gawk sullo STESSO file (search_all_logs.awk: FNR==NR):
         # la prima testa solo il pattern, la seconda — eseguita solo se
@@ -273,9 +277,9 @@ for (( i=0; i<total_files; i++ )); do
                 # elimina una decompressione su tre — e la decompressione è
                 # ~90% del costo di un .gz.
                 if [[ "$pth" == *.gz ]]; then
-                    _result=$($GZ_CAT "$pth" 2>/dev/null | gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -v gated=1 -f "$_AWK_TOOL" 2>/dev/null)
+                    _result=$($GZ_CAT "$pth" 2>/dev/null | gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -v gated=1 -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWK_TOOL" 2>/dev/null)
                 else
-                    _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -v gated=1 -f "$_AWK_TOOL" "$pth" 2>/dev/null)
+                    _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -v gated=1 -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWK_TOOL" "$pth" 2>/dev/null)
                 fi
             elif [[ "$pth" == *.gz ]]; then
                 # Senza gate (pattern con metacaratteri ERE) servono due
@@ -284,15 +288,15 @@ for (( i=0; i<total_files; i++ )); do
                 # distinte. Se la prima passata non trova candidati, gawk esce
                 # prima di leggere la seconda: il secondo decompressore riceve
                 # SIGPIPE e termina subito, senza completare la decompressione.
-                _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -f "$_AWK_TOOL" \
+                _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWK_TOOL" \
                     <($GZ_CAT "$pth" 2>/dev/null) <($GZ_CAT "$pth" 2>/dev/null) 2>/dev/null)
             else
-                _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -f "$_AWK_TOOL" "$pth" "$pth" 2>/dev/null)
+                _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWK_TOOL" "$pth" "$pth" 2>/dev/null)
             fi
-            IFS='|' read -r hits first_ts last_ts <<< "$_result"
+            IFS='|' read -r hits first_ts last_ts partial <<< "$_result"
         fi
 
-        printf "%s|%s|%s|%s|%s|%s\n" "$lbl" "${hits:-0}" "${first_ts:-}" "${last_ts:-}" "${nod:-}" "${apl:-}" \
+        printf "%s|%s|%s|%s|%s|%s|%s\n" "$lbl" "${hits:-0}" "${first_ts:-}" "${last_ts:-}" "${nod:-}" "${apl:-}" "${partial:-0}" \
             > "$tmp_dir/$(printf '%05d' "$i")"
     ) &
     _running=$(( _running + 1 ))
@@ -313,15 +317,15 @@ progress_clear
 _t_search_ms=$(( $(date +%s%3N 2>/dev/null || echo 0) - _t_search_start ))
 
 # ── Raccoglie e analizza risultati ────────────────────────────────────────────
-res_labels=() res_hits=() res_ts=() res_last=() res_nodes=() res_apps=()
+res_labels=() res_hits=() res_ts=() res_last=() res_nodes=() res_apps=() res_partial=()
 max_hits=0 max_lbl=8 total_hits=0 matched_files=0
 
 for (( i=0; i<total_files; i++ )); do
     _f="$tmp_dir/$(printf '%05d' "$i")"
     if [[ -f "$_f" ]]; then
-        IFS='|' read -r rl rh rt rlast rn ra < "$_f"
+        IFS='|' read -r rl rh rt rlast rn ra rp < "$_f"
     else
-        rl="${all_labels[$i]}" rh=0 rt="" rlast="" rn="${all_nodes[$i]:-}" ra="${all_apps[$i]:-}"
+        rl="${all_labels[$i]}" rh=0 rt="" rlast="" rn="${all_nodes[$i]:-}" ra="${all_apps[$i]:-}" rp=0
     fi
     res_labels+=("${rl:-?}")
     res_hits+=("${rh:-0}")
@@ -329,6 +333,7 @@ for (( i=0; i<total_files; i++ )); do
     res_last+=("${rlast:-}")
     res_nodes+=("${rn:-}")
     res_apps+=("${ra:-}")
+    res_partial+=("${rp:-0}")
     [[ "${rh:-0}" -gt "$max_hits" ]] && max_hits="${rh:-0}"
     [[ "${#rl}"   -gt "$max_lbl"  ]] && max_lbl="${#rl}"
     total_hits=$(( total_hits + ${rh:-0} ))
@@ -366,7 +371,7 @@ fi
 
 # ── Tabella: nodo · filename · barra · conteggio · primo match · ultimo match ─
 bar_max=12 best_hits=0 best_node=""
-_prev_node="" _row_dim=0
+_prev_node="" _row_dim=0 _any_partial=0
 
 # Larghezza colonna nodo calcolata dalla lunghezza reale dei numeri di nodo
 # raccolti (non una costante scritta a mano): "nodo " (5) + cifre + 2 spazi.
@@ -435,6 +440,8 @@ for (( i=0; i<total_files; i++ )); do
     _tlast="${res_last[$i]:-}"
     _n="${res_nodes[$i]:-}"
     _a="${res_apps[$i]:-}"
+    _p="${res_partial[$i]:-0}"
+    [[ "$_p" -eq 1 ]] && _any_partial=1
 
     # Alternanza colore per gruppo nodo: solo in modalità multi-nodo, altrimenti
     # $_n è costante su tutte le righe (nodo singolo) e la prima riga flipperebbe
@@ -515,8 +522,20 @@ for (( i=0; i<total_files; i++ )); do
     [[ "$_row_dim" -eq 1 && -n "${C_ROW_ALT_FG:-}" ]] && _l_fg="${C_ROW_ALT_FG}"
     printf "  ${_RL}${node_col}${app_col}${_l_fg}%-${max_lbl}s${_RR}  ${bc}%s${_RR}%s  %6d" \
         "$_l" "$bar" "$bar_pad" "$_h"
-    printf "  ${_FG}│${_RR}  ${_l_fg}%-19s" "${_t:--}"
-    printf "  ${_FG}│${_RR}  ${_l_fg}%-19s${_X}\n" "${_tlast:--}"
+
+    # Timestamp parziale (solo-ora, nessuna data nel file — Intervento 3):
+    # ruolo tema C_PARTIAL + marcatore testuale "*", quest'ultimo perché il
+    # solo colore sparisce nei temi senza ANSI (mono) e la nota a fondo
+    # tabella (sotto) deve poter puntare a qualcosa di visibile anche lì.
+    _ts_fg="${_l_fg}"
+    _t_disp="${_t:--}"; _tlast_disp="${_tlast:--}"
+    if [[ "$_p" -eq 1 ]]; then
+        _ts_fg="${C_PARTIAL}"
+        [[ "$_t_disp"     != "-" ]] && _t_disp="${_t_disp} *"
+        [[ "$_tlast_disp" != "-" ]] && _tlast_disp="${_tlast_disp} *"
+    fi
+    printf "  ${_FG}│${_RR}  ${_ts_fg}%-19s" "$_t_disp"
+    printf "  ${_FG}│${_RR}  ${_ts_fg}%-19s${_X}\n" "$_tlast_disp"
 
     if [[ "$_h" -gt "$best_hits" ]]; then
         best_hits="$_h"; best_node="$_n"
@@ -529,6 +548,14 @@ skipped=$(( total_files - matched_files ))
 printf "  ${_B}Totale:${_X} %d occorrenze in %d log" "$total_hits" "$matched_files"
 [[ "$skipped" -gt 0 ]] && printf "${_D}  (%d senza match)${_X}" "$skipped"
 printf "\n"
+
+# "*" = il file non registra una data (es. console.log logga solo l'ora): il
+# min/max è sul solo orario, quindi su un file che attraversa la mezzanotte
+# non è garantito essere il primo/ultimo evento cronologico — limite del log,
+# non del tool.
+if [[ "$_any_partial" -eq 1 ]]; then
+    printf "  ${C_PARTIAL}* PRIMO/ULTIMO MATCH solo orario: il file non registra la data.${_X}\n"
+fi
 
 if [[ -z "${DETECTED_NODE:-}" && -n "$best_node" ]]; then
     printf "  ${_D}→ Nodo con più occorrenze: nodo %s — es: \"errori sul nodo %s\"${_X}\n" \

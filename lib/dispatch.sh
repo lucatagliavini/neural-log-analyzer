@@ -233,8 +233,9 @@ skip_msg() {
 _log_names_in_dir() {
     local dir="$1"
     [[ -z "$dir" || ! -d "$dir" ]] && return
+    local f
     find "$dir" \( -type f -o -type l \) -name "*.log" 2>/dev/null \
-        | sed -E 's|.*/||; s/^[A-Za-z0-9]+-//; s/\.log$//' \
+        | while IFS= read -r f; do logfile_display_name "$f"; done \
         | grep -E '^[A-Za-z0-9_.-]+$' | sort -u
 }
 
@@ -644,7 +645,7 @@ _dispatch_tool_run() {
             "access_status(), access_time_ms(), access_method(), access_url(), access_url_root(), access_ip() (vedi utils-access-undertow.awk)"; then
         return 1
     fi
-    local common_f="-f '$LIB_DIR/utils-time.awk' -f '$LIB_DIR/utils-colors.awk' -f '$LIB_DIR/utils-${fmt}.awk' -f '$LIB_DIR/utils-access-${afmt}.awk' -f '$LIB_DIR/utils-dedup.awk'"
+    local common_f="-f '$LIB_DIR/utils-time.awk' -f '$LIB_DIR/utils-logline.awk' -f '$LIB_DIR/utils-colors.awk' -f '$LIB_DIR/utils-${fmt}.awk' -f '$LIB_DIR/utils-access-${afmt}.awk' -f '$LIB_DIR/utils-dedup.awk'"
     # Tema colore: i valori arrivano da lib/utils-theme.sh (già caricato da
     # chatbot.sh) e vengono passati a gawk come -v. utils-colors.awk li mappa
     # sulle costanti storiche (RED, YELLOW, …), così i tool non cambiano.
@@ -745,7 +746,8 @@ _dispatch_tool_run() {
                 if [[ "${TIME_EXPLICIT:-0}" == "1" ]]; then
                     logs_expr="$(open_server_logs)"
                     print_log_source "$logs_expr"
-                    eval gawk -f "'$LIB_DIR/utils-time.awk'" -f "'$LIB_DIR/utils-${fmt}.awk'" \
+                    eval gawk -f "'$LIB_DIR/utils-time.awk'" -f "'$LIB_DIR/utils-logline.awk'" \
+                        -f "'$LIB_DIR/utils-${fmt}.awk'" \
                         -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
                         -f "$TOOLS_DIR/tail_log.awk" \
                         -v tail_n="${TAIL_N:-50}" -v log_kind="server" \
@@ -755,7 +757,8 @@ _dispatch_tool_run() {
                 else
                     logs_expr="$(open_current_server_logs)"
                     print_log_source "$logs_expr"
-                    eval gawk -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
+                    eval gawk -f "'$LIB_DIR/utils-time.awk'" -f "'$LIB_DIR/utils-logline.awk'" \
+                        -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
                         -f "$TOOLS_DIR/tail_log.awk" \
                         -v tail_n="${TAIL_N:-50}" \
                         -v order="${LOG_ORDER:-tail}" \
@@ -768,7 +771,7 @@ _dispatch_tool_run() {
                 if [[ "${TIME_EXPLICIT:-0}" == "1" ]]; then
                     logs_expr="$(open_logs)"
                     print_log_source "$logs_expr"
-                    eval gawk -f "'$LIB_DIR/utils-time.awk'" \
+                    eval gawk -f "'$LIB_DIR/utils-time.awk'" -f "'$LIB_DIR/utils-logline.awk'" \
                         -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
                         -f "$TOOLS_DIR/tail_log.awk" \
                         -v tail_n="${TAIL_N:-50}" -v log_kind="access" \
@@ -778,7 +781,8 @@ _dispatch_tool_run() {
                 else
                     logs_expr="$(open_current_logs)"
                     print_log_source "$logs_expr"
-                    eval gawk -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
+                    eval gawk -f "'$LIB_DIR/utils-time.awk'" -f "'$LIB_DIR/utils-logline.awk'" \
+                        -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
                         -f "$TOOLS_DIR/tail_log.awk" \
                         -v tail_n="${TAIL_N:-50}" \
                         -v order="${LOG_ORDER:-tail}" \
@@ -818,7 +822,8 @@ _dispatch_tool_run() {
                 fi
                 print_log_source "$glob_expr"
                 printf "${C_LBL}(glob: %s)${C_RESET}\n" "$log_glob"
-                eval gawk -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
+                eval gawk -f "'$LIB_DIR/utils-time.awk'" -f "'$LIB_DIR/utils-logline.awk'" \
+                    -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
                     -f "$TOOLS_DIR/tail_named_log.awk" \
                     -v tail_n="${TAIL_N:-50}" \
                     -v order="${LOG_ORDER:-tail}" \
@@ -836,7 +841,8 @@ _dispatch_tool_run() {
                 return
             fi
             printf "${C_ACCENT}Log: %s${C_RESET}\n" "$log_path"
-            eval gawk -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
+            eval gawk -f "'$LIB_DIR/utils-time.awk'" -f "'$LIB_DIR/utils-logline.awk'" \
+                -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
                 -f "$TOOLS_DIR/tail_named_log.awk" \
                 -v tail_n="${TAIL_N:-50}" \
                 -v order="${LOG_ORDER:-tail}" \

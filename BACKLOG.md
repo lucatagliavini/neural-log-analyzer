@@ -1,6 +1,6 @@
 # Backlog — neural-log-analyzer
 
-Aggiornato: 2026-08-17
+Aggiornato: 2026-08-19
 
 ---
 
@@ -9,10 +9,14 @@ Aggiornato: 2026-08-17
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
+| USNEXT-2 | **`distribute_status` non normalizza la query string come gli altri tool access** (notata durante USNEXT-1, Intervento 5). `lib/tools/distribute_status.awk:40-43` ha la sola normalizzazione inline esistente nel repo per l'URL (taglia query string); `slow_requests`/`correlate_gc_slow`/`service_times` mostrano invece l'URL **con** query string. Incoerenza di **presentazione**, non di correttezza — nessun conteggio è sbagliato, ma lo stesso endpoint appare troncato in un tool e per intero in un altro. Da valutare se unificare su `access_url_root()` (già usata da `service_times`, Intervento 5) o su una funzione dedicata se la troncatura di `distribute_status` è voluta | Bassa |
 
-**Resta una sola voce**, GCFMT-1, in attesa di un secondo formato GC reale da supportare:
-con un solo caso l'interfaccia non è validabile. Tutto il resto aperto il 2026-08-17 è
-stato chiuso nella stessa giornata.
+GCFMT-1 resta aperta in attesa di un secondo formato GC reale da supportare: con un solo
+caso l'interfaccia non è validabile — non è urgente nonostante il tono, tant'è che qui è
+segnata "Quando serve". USNEXT-2, aperta il 2026-08-18, è presentazione soltanto, priorità
+bassa. **NCLOCAL-1, l'unica voce che era ad alta priorità, è stata chiusa il 2026-08-19**
+(sotto, sezione USNEXT-1) — il deploy in produzione resta comunque una decisione
+dell'utente, non ancora presa.
 
 ### NLP-1 + PROF-2 — **FATTO** (2026-08-17)
 
@@ -604,6 +608,138 @@ detto all'avvio, non a metà di una risposta.
 
 ---
 
+## USNEXT-1 — Quattro difetti da conoscenza duplicata, trovati validando su dati reali usnext — **FATTO** (2026-08-18)
+
+`profiles/usnext` montato su `lxprworkerlana01` (seguito di PROF-1). La validazione dei 16
+tool sul nodo `lxprjbusal01` (app `PassInsurance`) ha esposto quattro difetti, tutti con la
+stessa radice — conoscenza duplicata inline invece di condivisa — nessuno visibile su
+`liquido`, dove le stesse assunzioni hardcoded erano vere per caso. Piano:
+`.claude/plans/rosy-noodling-owl.md`.
+
+- **(a) `service_times` — ~1064/1204 "servizi" fantasma.** `access_url_root()`
+  (`lib/utils-access-undertow.awk`) non escludeva `?`/`&`/`=`/`;` dal path: ogni variante di
+  query string sullo stesso endpoint diventava un servizio distinto. Corretto derivando la
+  radice da `access_url()` (già esistente) invece di una classe negata incompleta; la
+  richiesta alla radice (`GET /`) ora restituisce il segmento esplicito `"/"` invece di `""`,
+  che `service_times.awk` scartava in silenzio. Riprodotto dal vivo: 1204 servizi sul
+  deployato attuale.
+- **(b) `grep_named_log` — «Nessuna riga riconosciuta nel formato atteso» su `Pass.log`** (15
+  ERROR + 1380 WARN reali, 0 mostrate). Il tool hardcodava la grammatica ISO di `liquido`
+  (`GW_RE`) e scartava (`next`) ogni riga in altro formato — incluso quello europeo
+  (`DD-MM-YYYY HH:MM:SS.mmm LEVEL msg`) di `Pass.log`. Corretto migrando a
+  `logline_parse()` (nuovo `lib/utils-logline.awk`, Intervento 1), tabella ordinata di 6
+  grammatiche (le 5 già note al lato bash + il caso solo-ora di `console.log`), e togliendo
+  il `next` che scartava: una riga non riconosciuta ora è inclusa senza livello (principio
+  5), non persa. Migrati anche gli altri tre cloni della stessa regex:
+  `tail_named_log.awk`, `tail_log.awk`, `search_all_logs.awk`.
+- **(c) `list_logs` — `undertow_access_log` elencato 70 volte** (su 74 log totali) invece di
+  1. `_log_names_in_dir()` (`lib/dispatch.sh`) reimplementava inline la derivazione del nome
+  logico con una `sed` che non gestiva la rotazione `NAME.YYYY-MM-DD.log` — lo stesso bug
+  già corretto in `logfile_logical_name()` il 2026-08-07, mai migrato qui (principio 8).
+  Corretto delegando a `logfile_logical_name()`/nuova `logfile_display_name()`. Riprodotto
+  dal vivo anche su `liquido` (35/75 duplicati sul nodo 4): il difetto era presente ovunque,
+  solo mascherato su `liquido` da ~40 nomi applicativi realmente distinti. Lo strip del
+  prefisso host (`coll1nssa-` → `cc`), prima incondizionato nella stessa `sed`, è diventato
+  la chiave opzionale di profilo `LOG_NAME_HOST_PREFIX_RE` (`system.conf`, impostata solo su
+  `liquido`) — evita che un nome come `foo-bar.log` venga troncato a `bar` su un profilo che
+  non ha quella convenzione.
+- **(d) `search_all_logs` — PRIMO/ULTIMO MATCH mostra `-` con `MATCH > 0`** su
+  `console.log`, che logga solo l'ora (nessun anno a 4 cifre, che le due regex inline del
+  tool richiedevano). Con `logline_parse()` il tool ottiene anche `_ll_has_date` e accumula
+  due min/max distinti (datati / solo-ora), emettendo il primo se esiste, altrimenti il
+  secondo marcato come parziale — mai mescolati (principio: confronto per stringa,
+  `"00:03:37"` ordinerebbe prima di qualsiasi `"2026-..."`). **Scoperta in fase di
+  validazione, più seria del sintomo iniziale**: il codice precedente non si limitava a
+  omettere la data quando assente — la regex ISO nuda (senza contesto) matchava anche
+  timestamp interni a payload JSON di risposta HTTP (es. `"tsAggiornamento":
+  "2026-01-14T06:03:37.438777"`, dato anagrafico, non temporale del log), producendo una
+  data mostrata **sbagliata**, non solo mancante. Verificato: `logline_parse()` rifiuta
+  quella stessa riga (richiede il contesto `[thread] USER ... LIVELLO` attorno al
+  timestamp), il codice precedente no.
+
+**Verifica — correzione 2026-08-18 al testo precedente**: `bash tests/run-tests.sh` in
+questa sessione non esegue nemmeno il Level 1 (bloccato da **NCLOCAL-1**, sotto — causa
+scoperta *dopo* aver scritto la prima versione di questa nota, non collegata ai quattro
+bug). Isolando le sole unit test (`run_unit_tests`, bypassando `run_intent_tests`): 13 file
+su 16 puliti. I restanti 3 (`test-theme.sh` 10/53 FAIL, `test-srch-named-log.sh` 12/20 FAIL,
+`test-profile-config.sh` 7/20 FAIL) **non sono la stessa cosa già documentata prima di
+questo intervento**, come scritto qui in precedenza: sono, verificato riga per riga sul
+codice dei tre file, **tutti e soli** i FAIL sulle asserzioni che invocano `chatbot.sh
+--query` per una classificazione reale — cioè NCLOCAL-1, non un difetto di questo piano. Le
+asserzioni che precedono la classificazione (controlli di struttura profilo, guard su file
+obbligatori) restano verdi negli stessi file. La correzione dei quattro bug è verificata
+dai test che **non** passano da `chatbot.sh`: `tests/test-logline.sh` (nuovo, parità
+bash↔AWK sulle 6 grammatiche — bug b/d), `tests/test-logname-display.sh` (nuovo, rotazioni,
+prefisso configurato/non configurato, coerenza display↔resolve — bug c), sezione
+`service_times` in `tests/test-access-format.sh` (bug a) — tutti e tre invocano `gawk`/le
+funzioni bash direttamente, mai `chatbot.sh`, quindi immuni a NCLOCAL-1. La fixture EU
+aggiunta a `tests/test-srch-named-log.sh` per il bug (b) è invece bloccata da NCLOCAL-1 come
+il resto del file (confermato: riproducendo a mano la stessa query via `chatbot.sh` si
+osserva lo stesso fallimento silenzioso, non un formato non riconosciuto) — la correzione
+del bug (b) resta comunque verificata da `test-logline.sh`, che testa la stessa grammatica
+europea senza passare da `chatbot.sh`.
+
+**Validazione dal vivo** (SSH read-only su `lxprworkerlana01`): i quattro sintomi (a)-(d)
+riprodotti contro il codice **attualmente deployato** (non ancora corretto — il deploy
+richiede una sessione con autorizzazione in scrittura, non concessa in questa). La
+correzione è verificata **localmente** (suite unitaria + fixture dedicate); la validazione
+dal vivo del codice corretto resta da fare al prossimo deploy.
+
+---
+
+## NCLOCAL-1 — Modello locale convertito a neural-c, retrain completo — **FATTO** (2026-08-19)
+
+Indicazione esplicita dell'utente: backup dei pesi attuali, poi retrain completo via
+`neural-c` per avere tutto convertito localmente, e solo dopo una suite locale verde
+valutare un deploy in produzione (il deploy stesso resta fuori scope, decisione
+dell'utente).
+
+- **Backup**: `nlp/models/intent_classifier/` copiata (`cp -a`) in
+  `nlp/models/intent_classifier.backup/` prima di qualunque azione — coperta dal pattern
+  `.gitignore` `**/models/*.backup/`, quindi non tracciata. Contiene gli artefatti
+  neural-bash originali (`layer1.txt`, `layer2.txt`, `model.conf`, `best/`) che
+  `setup.sh`/`train.sh` non toccano (verificato: `neural-c init --force` scrive solo i
+  propri file — `model.txt`, `project.conf`, `train.txt`, poi `dataset.txt` — e lascia
+  intatti quelli preesistenti; i vecchi file restano nella directory live, ora orfani,
+  perché nessun chiamante li legge più da quando `lib/infer.sh` invoca solo `neural-c
+  predict`).
+- **Rebuild + retrain**: `build-dataset.sh --profile profiles/liquido` (1086 esempi, contro
+  i 968 documentati in una versione precedente di `CLAUDE.md`, ora obsoleta) → `setup.sh`
+  (`neural-c init --force`, topologia `111,48,16`) → `train.sh` (adam, early stopping
+  all'epoca 635 su un massimo di 5000, pesi selezionati dall'epoca 535, val loss ≈0.0065).
+  `gap-report.sh --compact` (eseguito in automatico da `train.sh`): nessun vettore zero (le
+  1086 esempi coprono tutte le classi), 16 classi con gap di vocabolario — informativo, non
+  azionato in questo intervento.
+- **Validazione locale**: `bash tests/run-tests.sh` passa da **91 PASS / 1 FAIL** (subito
+  dopo il retrain) a **92 PASS / 0 FAIL**. Level 1 (tutte le query di classificazione
+  intent) 100% corretto sul tool atteso, confidenze 31%–99% — anche i casi a confidenza più
+  bassa instradano al tool giusto.
+- **Difetto scoperto durante la validazione, indipendente dal retrain**:
+  `lib/tools/grep_named_log.awk` confondeva "riga riconosciuta da una qualunque grammatica
+  di `logline_parse()`" con "riga con un livello di severità leggibile", tramite un unico
+  contatore (`matched_format`) usato per decidere se stampare il messaggio LOGSEL-1
+  («formato non riconosciuto») invece del generico «Nessuna riga trovata (level=...)». I due
+  concetti coincidevano per caso prima della migrazione a `logline_parse()` (Intervento 1 di
+  USNEXT-1, sopra): la vecchia regex Guidewire-only matchava solo righe con **sia**
+  timestamp **sia** livello. Dopo la migrazione, `logline_parse()` riconosce anche i
+  timestamp di access log — che per costruzione non hanno mai un livello testuale
+  (`lib/utils-logline.awk`, ramo Undertow, commentato esplicitamente) — rompendo quella
+  coincidenza: un file in formato access log ora contava come "formato riconosciuto" pur
+  non producendo mai un `row_level`, e il messaggio LOGSEL-1 non scattava più sulla fixture
+  di `tests/test-srch-named-log.sh` dedicata (2 FAIL). Corretto sostituendo il contatore con
+  `matched_level` (incrementato solo quando `_ll_level != ""`), non `matched_format`.
+  Verificato per principio 8 che nessuno degli altri tre tool migrati nello stesso
+  intervento (`tail_named_log.awk`, `tail_log.awk`, `search_all_logs.awk`) ha lo stesso
+  pattern di conteggio aggregato — il difetto era isolato a questo file. Bug reale e
+  precedente al retrain, rimasto invisibile perché **NCLOCAL-1** faceva fallire in silenzio
+  ogni query `chatbot.sh` prima di raggiungere quel codice.
+
+**Esito**: modello locale interamente in formato `neural-c`, suite locale interamente
+verde. Il deploy in produzione resta una decisione dell'utente, non presa in questo
+intervento.
+
+---
+
 ## MIGR — Migrazione a Python (nuovo progetto)
 
 > **NON è lavoro di questo backlog.** Un agent separato sta procedendo in
@@ -693,7 +829,7 @@ senza verificarlo.
 perché dipendono da un'assunzione sui dati che cambia con la rotazione dei log. Pagano
 quelle che **eliminano lavoro** in ogni scenario (P8: una regex invece di tre) o che
 cambiano la **struttura dati** (P5: indice per secondo invece di scansione lineare).
-| PERF-NNET | **Overhead fisso per query (~574ms)**: classificazione neurale (`infer.sh`) + `normalize-query.sh` + `param-extract.sh` + fork di `resolve-logs.sh`. Vedi sotto | — | **Non si fa ora — l'utente ha in mente una modifica major** |
+| PERF-NNET | **Overhead fisso per query (~574ms)**: classificazione neurale (`infer.sh`) + `normalize-query.sh` + `param-extract.sh` + fork di `resolve-logs.sh`. Vedi sotto | — | **Chiuso 2026-08-18 — la modifica major (migrazione a `neural-c`) è fatta; riaperto come NNET-C-PERF se il costo del digest per-`predict` risulta significativo** |
 
 ### P7 — chiuso: nessuna ottimizzazione applicabile
 
@@ -746,6 +882,24 @@ in 300ms, lasciando intatte quelle da 8 secondi. Stesso ragionamento che chiuse 
 major** su questa parte (inferenza), quindi qualsiasi micro-ottimizzazione qui rischia di
 essere lavoro buttato. Da riprendere solo dopo che quella modifica è definita — e in quel
 momento questi numeri sono la baseline di confronto.
+
+**Chiuso 2026-08-18 — la modifica major è `neural-c`.** `neural-bash` e il backend PyTorch
+(`lib/train.py`) sono stati rimossi; `neural-c` è ora l'unico motore neurale del progetto
+(training e inferenza), su x86_64 e ppc64le. Migrazione completata in 4 fasi (vedi
+`docs/sessions/2026-08-18-01.md`): equivalenza numerica del forward pass verificata,
+5 esperimenti di training confrontati con la baseline PyTorch, sostituzione dei 6 file che
+conoscevano il formato dei pesi, validazione end-to-end (`setup.sh` → `build-dataset.sh` →
+`train.sh` → `tests/run-tests.sh`) in una copia isolata: **90 PASS / 0 FAIL**, invariato
+rispetto alla baseline pre-migrazione.
+
+**Non ancora misurato — riapre come NNET-C-PERF se il numero è alto:** `neural-c predict`
+ricalcola i digest del progetto (inclusi ~138.000 valori di `train.txt`) a ogni invocazione.
+La baseline di 574ms era su `nnet-run.sh predict` (gawk, nessun digest); il costo reale della
+nuova pipeline va misurato in produzione con `perf-report.sh` **dopo** la Fase 5 (ciclo
+completo su `lxprworkerlana01`, non ancora eseguita — richiede accesso SSH e conferma
+esplicita, dato il rischio di toccare pesi in produzione). Se il digest domina, la correzione
+va fatta in `neural-c` (l'utente ne è il maintainer), non aggirata qui — vedi il piano di
+migrazione per il dettaglio del meccanismo.
 
 ### P2-bis — perché non si fa
 

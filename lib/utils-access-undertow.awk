@@ -70,9 +70,22 @@ function access_url(    _a) {
 }
 
 # Primo segmento del path, usato da service_times per raggruppare per servizio:
-# "/portal/api/rest/anag" → "portal". "" se il path non è estraibile.
-function access_url_root(    _a) {
-    if (match($0, /"[A-Z]+ \/([^\/ "]+)/, _a)) return _a[1]
+# "/portal/api/rest/anag" → "portal". "/" per la radice (richiesta esplicita, non
+# un fallimento di estrazione). "" solo se il path non è estraibile affatto.
+#
+# Deriva da access_url() invece di una regex propria (bug osservato su usnext,
+# 2026-08-18): la vecchia classe negata [^\/ "]+ non escludeva "?"/"&"/"="/";",
+# quindi ogni variante di query string sullo stesso path diventava un "servizio"
+# distinto (~1064 righe fantasma in service_times su un solo access log). Si
+# taglia la query string (dopo "?") e il matrix parameter (dopo ";") prima di
+# estrarre il primo segmento, così tutte le varianti collassano sullo stesso path.
+function access_url_root(    _url, _a) {
+    _url = access_url()
+    if (_url == "") return ""
+    sub(/\?.*/, "", _url)
+    sub(/;.*/, "", _url)
+    if (_url == "/" || _url == "") return "/"
+    if (match(_url, /^\/([^\/]+)/, _a)) return _a[1]
     return ""
 }
 

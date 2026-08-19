@@ -151,6 +151,35 @@ _traffic=$(gawk -f "$LIB/utils-time.awk" -f "$LIB/utils-colors.awk" -f "$LIB/uti
     | awk '/^Totale richieste:/{print $3}')
 assert_eq "traffic_volume su combined: conta le 2 richieste in finestra" "2" "$_traffic"
 
+# ─── service_times / access_url_root: bug#1 (query string → falso servizio) ──
+section "access_url_root: query string e matrix parameter collassano sullo stesso servizio"
+
+# Prima della correzione (2026-08-18): la classe negata non escludeva
+# "?"/"&"/"="/";", quindi ogni variante di query string sullo stesso path
+# diventava un "servizio" distinto — su usnext, ~1064 righe fantasma in
+# service_times per un solo access log.
+cat > "$_FIX/svc.log" <<'EOF'
+172.30.85.133 [17/Aug/2026:10:00:00 +0200] "GET /portal/api/rest/anag?id=1 HTTP/1.1" 200 1 50 - -
+172.30.85.133 [17/Aug/2026:10:00:01 +0200] "GET /portal/api/rest/anag?id=2&x=y HTTP/1.1" 200 1 60 - -
+172.30.85.133 [17/Aug/2026:10:00:02 +0200] "GET /portal/api/rest/anag;jsessionid=ABC HTTP/1.1" 200 1 70 - -
+172.30.85.133 [17/Aug/2026:10:00:03 +0200] "GET / HTTP/1.1" 200 1 10 - -
+EOF
+
+_svc_out=$(gawk -f "$LIB/utils-time.awk" -f "$LIB/utils-colors.awk" -f "$LIB/utils-access-undertow.awk" \
+    -f "$TOOLS/service_times.awk" "$_FIX/svc.log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
+
+_svc_calls=$(echo "$_svc_out" | awk '$1=="portal"{print $2}')
+assert_eq "tre query string diverse sullo stesso path → un solo servizio 'portal' con 3 CALLS" \
+    "3" "${_svc_calls:-0}"
+
+_svc_root_calls=$(echo "$_svc_out" | awk '$1=="/"{print $2}')
+assert_eq "richiesta alla radice (GET /) → servizio '/' con 1 CALLS, non escluso in silenzio" \
+    "1" "${_svc_root_calls:-0}"
+
+_svc_rows=$(echo "$_svc_out" | grep -cE '^\S+\s+[0-9]+\s+')
+assert_eq "solo 2 servizi distinti in output (portal, /), non 4 come prima della correzione" \
+    "2" "$_svc_rows"
+
 # ─── Riepilogo ───────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"

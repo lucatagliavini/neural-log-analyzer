@@ -36,6 +36,8 @@
 #   C_ROW_ALT sfondo per righe alternate — raggruppamento per nodo
 #   C_ROW_ALT_FG colore del TESTO quando c'è lo sfondo alternato
 #   C_BAR_1..C_BAR_5  gradiente per le barre: 1 = valore basso, 5 = alto
+#   C_PARTIAL un valore non è il dato completo che sembra — timestamp
+#             solo-ora di search_all_logs (nessuna data nel file, UI-12)
 #
 # Le barre rappresentano una QUANTITÀ, non un giudizio: 400 occorrenze possono
 # essere gravi o normali secondo il contesto. Per questo usano un gradiente di
@@ -99,6 +101,7 @@ theme_load() {
     # ragione sbagliata. Bug trovato migrando i tool a C_INFO/C_TAG (UI-12).
     unset C_CRIT C_WARN C_OK C_VAL C_LBL C_ACCENT C_INFO C_TAG C_ROW_ALT C_ROW_ALT_FG C_BOLD C_RESET
     unset C_BAR_1 C_BAR_2 C_BAR_3 C_BAR_4 C_BAR_5
+    unset C_PARTIAL
 
     if [[ -f "$f" ]]; then
         # shellcheck source=/dev/null
@@ -121,6 +124,10 @@ theme_load() {
     # Gradiente barre: se il tema non lo definisce, tutti i livelli restano
     # vuoti — la barra esce nel colore di default, come prima del 2026-08-06.
     : "${C_BAR_1:=}" "${C_BAR_2:=}" "${C_BAR_3:=}" "${C_BAR_4:=}" "${C_BAR_5:=}"
+    # C_PARTIAL: default su C_LBL (dim), stesso trattamento opzionale di
+    # C_INFO/C_TAG — un tema che non lo definisce marca il dato parziale come
+    # un'etichetta di contorno piuttosto che introdurre un colore nuovo.
+    : "${C_PARTIAL:=$C_LBL}"
 
     # I .conf scrivono le sequenze come "\033[31m" — leggibili e diffabili.
     # Qui vengono convertite nel carattere ESC reale, una volta sola.
@@ -134,13 +141,13 @@ theme_load() {
     # in entrambi gli usi, invece di lasciare una trappola a chi le userà.
     local _v
     for _v in C_CRIT C_WARN C_OK C_VAL C_LBL C_ACCENT C_INFO C_TAG C_ROW_ALT C_ROW_ALT_FG C_BOLD C_RESET \
-              C_BAR_1 C_BAR_2 C_BAR_3 C_BAR_4 C_BAR_5; do
+              C_BAR_1 C_BAR_2 C_BAR_3 C_BAR_4 C_BAR_5 C_PARTIAL; do
         printf -v "$_v" '%b' "${!_v}"
     done
 
     BOT_THEME_ACTIVE="$name"
     export C_CRIT C_WARN C_OK C_VAL C_LBL C_ACCENT C_INFO C_TAG C_ROW_ALT C_ROW_ALT_FG C_BOLD C_RESET
-    export C_BAR_1 C_BAR_2 C_BAR_3 C_BAR_4 C_BAR_5
+    export C_BAR_1 C_BAR_2 C_BAR_3 C_BAR_4 C_BAR_5 C_PARTIAL
     export BOT_THEME_ACTIVE
 }
 

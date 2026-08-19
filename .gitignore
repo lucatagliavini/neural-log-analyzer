@@ -6,6 +6,12 @@ __pycache__/
 # profiles/<nome>/models/ — la regola deve valere per entrambi.
 **/models/*.backup/
 **/models/*.backup2/
+# Artefatti di runtime di neural-c, non necessari all'inferenza (model.txt +
+# project.conf + weights.txt bastano): history.txt è il log epoca-per-epoca di
+# un train.sh già concluso (riproducibile riaddestrando), .neural-c.lock è il
+# lock file del processo.
+**/models/*/history.txt
+**/models/*/.neural-c.lock
 tmp/
 # Log di utilizzo e performance (chatbot-YYYY-MM-DD.log): dati di runtime,
 # specifici dell'installazione. Anche escluso da deploy.sh, così i log

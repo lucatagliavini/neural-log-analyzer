@@ -26,8 +26,9 @@ source "$ANALYZER_DIR/lib/nlp-paths.sh"
 nlp_resolve_paths || exit 1
 
 source "$PROFILE_DIR/domain.conf"
+source "$ANALYZER_DIR/lib/utils-log.sh"
+source "$ANALYZER_DIR/lib/nc-common.sh"
 
-NNET_RUN="$ANALYZER_DIR/../neural-bash/nnet-run.sh"
 LIB_DIR="$ANALYZER_DIR/lib"
 
 query="$1"
@@ -43,20 +44,7 @@ fi
 
 features=$("$LIB_DIR/query-to-features.sh" "$query")
 
-dummy_out=$(printf '0 %.0s' $(seq 1 "$NUM_TOOLS") | sed 's/ $//')
-tmp_ds=$(mktemp)
-echo "# query features dummy_output" > "$tmp_ds"
-echo "$features $dummy_out" >> "$tmp_ds"
-
-raw_output=$("$NNET_RUN" predict "$tmp_ds" "$MODEL_DIR" 2>/dev/null)
-rm -f "$tmp_ds"
-
-probs=$(echo "$raw_output" | awk '/^\s*1\s*\|/{
-    sub(/^\s*[0-9]+\s*\|\s*/, "")
-    sub(/\s*\|.*/, "")
-    print
-    exit
-}')
+probs=$(nc_predict "$MODEL_DIR" "$NUM_TOOLS" $features) || exit 1
 
 i=0
 for prob in $probs; do
