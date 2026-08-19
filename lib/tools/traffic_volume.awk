@@ -18,6 +18,7 @@ BEGIN {
         st = _st
         if (substr(st, 1, 1) == "5") errors5xx[bucket]++
         else if (substr(st, 1, 1) == "4") errors4xx[bucket]++
+        else if (substr(st, 1, 1) == "3") errors3xx[bucket]++
     }
     total++
 }
@@ -29,8 +30,8 @@ END {
     max_vol = 0
     for (bk in volume) if (volume[bk] > max_vol) max_vol = volume[bk]
 
-    printf "%-10s  %7s  %6s  %6s  %s\n", "FASCIA", "TOTALE", "4xx", "5xx", "ANDAMENTO"
-    printf "%-10s  %7s  %6s  %6s  %s\n", "──────────", "───────", "──────", "──────", "──────────────────────────────"
+    printf "%-10s  %7s  %6s  %6s  %6s  %s\n", "FASCIA", "TOTALE", "3xx", "4xx", "5xx", "ANDAMENTO"
+    printf "%-10s  %7s  %6s  %6s  %6s  %s\n", "──────────", "───────", "──────", "──────", "──────", "──────────────────────────────"
 
     n = 0
     for (bk in volume) keys[++n] = bk
@@ -43,8 +44,10 @@ END {
     bar_max = 30
     for (i = 1; i <= n; i++) {
         bk   = keys[i]
+        e3   = errors3xx[bk]+0
         e4   = errors4xx[bk]+0
         e5   = errors5xx[bk]+0
+        col3 = (e3 > 0) ? C_INFO : ""
         col4 = (e4 > 0) ? C_WARN : ""
         col5 = (e5 > 0) ? C_CRIT    : ""
         rst  = C_RESET
@@ -54,8 +57,9 @@ END {
         bar = ""
         for (k = 1; k <= bar_len; k++) bar = bar "▪"
 
-        printf "%-10s  %s%7d%s  %s%6d%s  %s%6d%s  %s%s%s\n", \
+        printf "%-10s  %s%7d%s  %s%6d%s  %s%6d%s  %s%6d%s  %s%s%s\n", \
             bk, C_VAL, volume[bk], rst, \
+            col3, e3, (col3!="") ? rst : "", \
             col4, e4, (col4!="") ? rst : "", \
             col5, e5, (col5!="") ? rst : "", \
             C_LBL, bar, rst

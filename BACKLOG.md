@@ -853,6 +853,46 @@ annotato "· access o server", `correlate_gc_slow` "· gc + access", `show_help`
 
 ---
 
+## SEV-1 — Denominatore sbagliato e 3xx invisibile in tre tool access log — **FATTO** (2026-08-19)
+
+Trovato dall'utente durante il test manuale in produzione su entrambi i profili
+(`liquido` e `usnext`, stessa query in parallelo): `count_status.awk` su "quanti errori
+500 stamattina" mostrava `100.0%` nella tabella STATUS, appena sopra un summary che
+correttamente riportava un tasso d'errore reale del `0.17%`/`2.18%` — contraddizione
+solo apparente, ma fuorviante.
+
+- **Causa**: `pct = count[s] / total * 100` (riga 67) divide per `total`, il contatore
+  **filtrato** da `status_filter` — quando il filtro è un codice esatto (es. `"500"`), la
+  tabella ha una sola riga e `count[s] == total` per costruzione, quindi `100.0%` è
+  matematicamente inevitabile ma non dice nulla sul peso reale sul traffico. Il summary
+  sotto (già presente) usa invece correttamente `all_total`, il contatore non filtrato.
+  **Fix**: stesso denominatore in entrambi i punti — `pct = count[s] / all_total * 100`.
+  Comportamento identico a prima quando `status_filter` è vuoto (`total == all_total` per
+  costruzione in quel caso).
+- **Verifica principio 8** (parallel-assumption check): controllato se lo stesso pattern
+  filtrato/non-filtrato esiste altrove — `distribute_status.awk` non ce l'ha (un solo
+  contatore, nessun filtro per singolo status). Nessun altro tool affetto.
+- **Gap collegato, stesso principio (2xx ok / 3xx neutro / 4xx warn / 5xx crit)**: la riga
+  "Redirect 3xx" nel summary di `count_status.awk` era condizionale (`if (s3xx > 0)`),
+  unica delle quattro a poter scomparire a zero invece di mostrare `0 (0.0%)` come le
+  altre — tolta la condizione. `traffic_volume.awk` non aveva **nessuna** colonna 3xx
+  nella tabella per fascia oraria (solo `TOTALE`/`4xx`/`5xx`) — aggiunta una colonna `3xx`
+  tra `TOTALE` e `4xx`, stesso schema di conteggio e colore (`C_INFO`, neutro) di 4xx/5xx.
+  `filter_ip.awk` mostrava già il 3xx nella distribuzione per IP (non era un'omissione),
+  ma senza colore distintivo — uniformato a `C_INFO` come nel resto del progetto.
+  `distribute_status.awk` (filtra di default solo 4xx/5xx, per scelta: un redirect non è
+  un fallimento da distribuire per endpoint) e `slow_requests.awk` (colora le righe lente
+  in solo due livelli, 5xx vs resto — scelta già dichiarata nel commento del file, non un
+  buco emerso ora) sono stati valutati e lasciati invariati: non sono lo stesso difetto.
+
+**Esito**: `bash tests/run-tests.sh` → **93 PASS / 0 FAIL** (nessun test asseriva sui
+valori di `%` o sul layout delle colonne di questi tool, quindi nessuna modifica ai test
+è stata necessaria). Verificato anche con un log sintetico a mano: `count_status.awk`
+filtrato su `500` con 5 richieste totali (2×200, 2×302, 1×500) mostra ora `20.0%`
+coerente col summary, non più `100.0%`.
+
+---
+
 ## MIGR — Migrazione a Python (nuovo progetto)
 
 > **NON è lavoro di questo backlog.** Un agent separato sta procedendo in

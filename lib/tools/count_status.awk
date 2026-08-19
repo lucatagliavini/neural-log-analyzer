@@ -64,7 +64,7 @@ END {
     # "riferimento a un'entità" (UI-12).
     for (i = 1; i <= n; i++) {
         s = keys[i]
-        pct = count[s] / total * 100
+        pct = count[s] / all_total * 100
         # Scala logaritmica: log(count)/log(max) — garantisce visibilità anche a valori piccoli
         if (count[s] > 0 && max_count > 1)
             bar_len = int(log(count[s]) / log(max_count) * BAR_WIDTH + 0.5)
@@ -110,8 +110,7 @@ END {
     if (status_filter != "")
         printf C_LBL "  Traffico totale: %*d richieste nel periodo\n" C_RESET, w, all_total
     printf         "  Successi  2xx:  %*d  (%5.1f%%)\n",           w, s2xx, s2xx/base*100
-    if (s3xx > 0)
-        printf C_INFO   "  Redirect  3xx:  %*d  (%5.1f%%)\n" C_RESET,  w, s3xx, s3xx/base*100
+    printf C_INFO   "  Redirect  3xx:  %*d  (%5.1f%%)\n" C_RESET,  w, s3xx, s3xx/base*100
     printf C_WARN "  Errori    4xx:  %*d  (%5.1f%%)\n" C_RESET,      w, s4xx, s4xx/base*100
     printf C_CRIT    "  Errori    5xx:  %*d  (%5.1f%%)\n" C_RESET,      w, s5xx, s5xx/base*100
     printf "  ─────────────────────────────────\n"

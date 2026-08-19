@@ -81,7 +81,7 @@ END {
                 C_LBL, ms_count, count - ms_count, C_RESET
         printf "Distribuzione status:\n"
         for (s in status_count) {
-            color = (substr(s,1,1)=="5") ? C_CRIT : (substr(s,1,1)=="4") ? C_WARN : ""
+            color = (substr(s,1,1)=="5") ? C_CRIT : (substr(s,1,1)=="4") ? C_WARN : (substr(s,1,1)=="3") ? C_INFO : ""
             rst   = (color != "") ? C_RESET : ""
             printf "  %s%s%s: %d\n", color, s, rst, status_count[s]
         }
