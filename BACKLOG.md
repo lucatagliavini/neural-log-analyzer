@@ -160,6 +160,7 @@ Oggi ci sono due metà di funzionalità che non si toccano:
 | SRCH-1 | Scelta la via (a): `grep_named_log` riceve `SEARCH_PATTERN` da `dispatch.sh`. Si è rivelato **molto più piccolo del previsto** — il canale esisteva già ai due estremi ma non era collegato: il tool AWK accettava già `-v pattern` (sua riga 5), `param-extract.sh` estraeva già `SEARCH_PATTERN`, il classificatore instradava già al 96.7%, e `TOOL_DESC` diceva già "o pattern testuale". **Nessun retrain, nessuna nuova classe.** Semantica: pattern senza livello nominato → `level=ALL` (l'intento è trovare quel testo); livello nominato → vince quello. Ha richiesto `LEVEL_EXPLICIT` in `param-extract.sh` per distinguere "livello chiesto" da "default applicato" — stesso pattern di `TIME_EXPLICIT`/`LOG_EXPLICIT`. 15 test in `tests/test-srch-named-log.sh` | **Fatto** (2026-08-06) |
 | SRCH-2 | **Stesso gap di SRCH-1, ma per i log di sistema** (`server.log`/`access.log`/`gc.log`). Risolto estendendo `grep_named_log` (via 1 della nota di design, non `search_all_logs`): `TOOL_SOURCES[grep_named_log]` è passato da `"named"` a `"named|server|access|gc"` (`nlp/tools.conf`), con un ramo dedicato nel dispatch che risolve il path via `resolve_system_log_dir()`/`resolve_log_glob()` invece di `resolve_named_log_path()`. Il canale del pattern testuale, verso il tool AWK, era già quello di SRCH-1 — riusato senza duplicazione. Vedi nota di chiusura sotto per dettagli implementativi, decisioni e bug collaterali corretti | **Fatto** (2026-08-19) |
 | QUOTE-1 | **Le virgolette come segnale riconosciuto: `<PATTERN>` nel vocabolario**, simmetrico al `<LOGFILE>` già esistente. Nato come prerequisito di SRCH-2 (serviva per distinguere `cerca "NPE" nel server.log` da `cerca errori nel server.log`) ma è una **feature a sé**, riusabile da qualunque tool che accetti un pattern testuale: qualsiasi stringa quotata che non sia glob-like (niente `*` + `.log`) diventa `<PATTERN>` in `normalize-query.sh` (e nella sua replica Python `build_dataset.py`, parità obbligatoria). Vedi nota di chiusura sotto | **Fatto** (2026-08-19) |
+| SRCH-3 | **Bug prod, primo test manuale di SRCH-2**: pattern con spazi (`cerca "No HeadersTranscoder provided." nel server.log`) faceva crashare `grep_named_log.awk` (`gawk: cannot open file 'HeadersTranscoder' for reading`). Causa: i tre siti `eval gawk "$tw_args" ... -v pattern="$_gnl_pattern" ...` nel case `grep_named_log` (glob, sistema, named) fanno un secondo giro di parsing della shell — le virgolette che proteggono `$_gnl_pattern` nel primo giro non sopravvivono al secondo, quindi un pattern multi-parola veniva risplittato in argomenti separati che gawk, non riconoscendoli come `nome=valore`, tratta come file da apire. **Difetto preesistente di SRCH-1** (stesso costrutto da 2026-08-06), invisibile finché nessun pattern testato conteneva uno spazio — SRCH-2 l'ha solo esposto per primo, con un vero utente in produzione. Vedi nota di chiusura sotto | **Fatto** (2026-08-19) |
 
 ### SRCH-2 + QUOTE-1 — nota di chiusura (2026-08-19)
 
@@ -212,6 +213,38 @@ sulla nuova etichetta "applicativi"). Vincolo di performance rispettato per cost
 il ramo di sistema riusa `select_log_files_grouped`/`open_current_server_logs` come
 `tail_log`, quindi il costo scala con il file scelto, non con il nodo — non con
 "search_all_logs e filtra dopo".
+
+### SRCH-3 — nota di chiusura (2026-08-19)
+
+**Meccanismo confermato per riproduzione diretta**, non solo per lettura del codice:
+isolato in uno script a parte (`eval echo "$tw_args" ... -v pattern="$_gnl_pattern" ...`
+con `set -x`), la traccia mostra `pattern=No HeadersTranscoder provided.` come **una sola
+parola** nel primo giro di `eval` ma **tre parole separate** nel secondo (quello che gawk
+vede davvero) — `pattern=No`, `HeadersTranscoder`, `provided.`: le ultime due, senza `=`,
+sono gli argomenti che gawk apre come file, producendo esattamente l'errore di produzione.
+
+**Fix**: calcolata una sola volta `_gnl_pattern_q` con `printf -v _gnl_pattern_q '%q'
+"$_gnl_pattern"` (subito dopo che `_gnl_pattern` è definitivo, prima dei tre rami), poi
+`-v pattern=$_gnl_pattern_q` (senza virgolette proprie — `%q` produce già una forma
+auto-quotata) in tutti e tre i siti. Un solo calcolo, tre usi (principio 2) — non tre
+fix indipendenti. Preferito a estendere manualmente il trucco di `tw_args` (virgolette
+singole letterali) perché `%q` gestisce anche apici, `$`, backtick nel pattern, non solo
+gli spazi — verificato con un pattern che li contiene tutti.
+
+**Ambito**: `STATUS_CODE` e `IP_FILTER`, che passano per lo stesso costrutto `eval` in
+altri rami del case, sono vincolati per costruzione da `param-extract.sh` (rispettivamente
+`\b[45][0-9]{2}\b`/`5xx`/`4xx` e un'IP regex) — non possono contenere spazi, quindi non
+condividono il difetto. `SEARCH_PATTERN` era l'unico valore realmente libero passato per
+questa via; `search_all_logs` usa `export`, non `eval`, quindi non è mai stato esposto.
+
+**Test di regressione**: `tests/test-srch-named-log.sh`, nuova sezione con la stringa
+reale dell'incidente (`"No HeadersTranscoder provided."`) aggiunta alla fixture del
+server.log — verifica sia l'assenza del crash sia il match corretto. Riprodotta anche la
+query esatta dell'utente end-to-end (stesso profilo, stesso tool) prima e dopo il fix.
+
+**Verifica finale**: suite completa **96 PASS / 0 FAIL** su liquido e su usnext (nessuna
+modifica al vocabolario o al modello — bug di runtime, non di classificazione, quindi
+nessun retrain necessario).
 
 ---
 

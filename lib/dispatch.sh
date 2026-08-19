@@ -1058,6 +1058,17 @@ _dispatch_tool_run() {
             # cercare qualcosa ma non ho trovato la stringa": qui vale come
             # assenza di pattern, non come pattern letterale.
             [[ "$_gnl_pattern" == "__MISSING__" ]] && _gnl_pattern=""
+            # Bug prod 2026-08-19: "$_gnl_pattern" dentro l'`eval gawk` sotto
+            # perde le virgolette nella riparsing di eval (il primo giro le
+            # consuma, il secondo giro dell'`eval` risplitta la stringa sulle
+            # parole) — un pattern con spazi (es. "No HeadersTranscoder
+            # provided.") arriva a gawk come argomenti separati, letti come
+            # nomi di file. printf %q produce una forma già "auto-quotata"
+            # che sopravvive al secondo giro invariata (stesso principio di
+            # tw_args:844, ma generale: %q gestisce anche apici e backtick,
+            # non solo gli spazi).
+            local _gnl_pattern_q
+            printf -v _gnl_pattern_q '%q' "$_gnl_pattern"
             local _gnl_level="${LOG_LEVEL:-ERROR}"
             # LEVEL_EXPLICIT (da param-extract.sh) distingue "livello chiesto
             # dall'utente" da "default applicato": senza quel flag i due casi
@@ -1081,7 +1092,7 @@ _dispatch_tool_run() {
                 print_log_source "$glob_expr" "(glob: $log_glob)  $_gnl_what"
                 eval gawk "$tw_args" -f "$TOOLS_DIR/grep_named_log.awk" \
                     -v level="$_gnl_level" \
-                    -v pattern="$_gnl_pattern" \
+                    -v pattern=$_gnl_pattern_q \
                     -v tail_n="${TAIL_N:-50}" \
                     "$glob_expr"
                 return
@@ -1122,7 +1133,7 @@ _dispatch_tool_run() {
                 # timestamp fra quadre di access/gc come fosse un thread (A4).
                 eval gawk "$tw_args" -f "$TOOLS_DIR/grep_named_log.awk" \
                     -v level="$_gnl_level" \
-                    -v pattern="$_gnl_pattern" \
+                    -v pattern=$_gnl_pattern_q \
                     -v tail_n="${TAIL_N:-50}" \
                     -v kind="$SYSLOG_KIND" \
                     "$logs_expr"
@@ -1141,7 +1152,7 @@ _dispatch_tool_run() {
             print_log_source "$(open_log "$log_path")" "$_gnl_what"
             eval gawk "$tw_args" -f "$TOOLS_DIR/grep_named_log.awk" \
                 -v level="$_gnl_level" \
-                -v pattern="$_gnl_pattern" \
+                -v pattern=$_gnl_pattern_q \
                 -v tail_n="${TAIL_N:-50}" \
                 "$(open_log "$log_path")"
             ;;

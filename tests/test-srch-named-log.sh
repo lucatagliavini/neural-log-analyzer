@@ -57,6 +57,11 @@ _node="$_FIX/prod/lxprjbliq04"
 mkdir -p "$_node/prod/ClaimCenter" "$_node/ClaimCenter/Guidewire"
 echo "${_today_plain} 10:00:00,000 ERROR srv" > "$_node/prod/ClaimCenter/server.log"
 echo "${_today_plain} 10:00:01,000 ERROR ServerBoomToken problema" >> "$_node/prod/ClaimCenter/server.log"
+# Bug prod 2026-08-19: stringa reale che ha fatto crashare grep_named_log
+# (eval risplittava il pattern sugli spazi, gawk leggeva le parole in più
+# come nomi di file). Riusata verbatim, non un placeholder generico.
+echo "${_today_plain} 10:00:02,000 WARN No HeadersTranscoder provided. fallback attivo" \
+    >> "$_node/prod/ClaimCenter/server.log"
 # Formato reale riconosciuto da logline_parse (ramo 2, utils-logline.awk):
 # "[YYYY-MM-DDTHH:MM:SS.mmm+ZZZZ]" — non uno pseudo-formato "data INFO msg",
 # che non ha alcun ramo dedicato e finirebbe nel messaggio "formato non
@@ -198,6 +203,20 @@ assert_eq "'cerca X nel gc.log' trova la riga" "1" \
 
 assert_eq "'trova X nell.access log' trova la riga" "1" \
     "$(_righe "trova \"AccessMarkerToken\" nell'access log")"
+
+section "Bug prod 2026-08-19: pattern con spazi non crasha (eval doppio parsing)"
+
+# Diagnosi: "eval gawk ... -v pattern=\"\$_gnl_pattern\" ..." fa un secondo giro
+# di parsing della shell; le virgolette che protteggono "$_gnl_pattern" nel
+# primo giro non sopravvivono al secondo, quindi un pattern con spazi veniva
+# risplittato in più argomenti — gawk legge le parole senza "=" come nomi di
+# file da aprire ("cannot open file 'HeadersTranscoder' for reading"). Fix:
+# printf '%q' produce una forma auto-quotata che regge il secondo giro.
+_out_multi=$(_run 'cerca "No HeadersTranscoder provided." nel server.log')
+assert_eq "pattern con spazi: nessun crash gawk" "1" \
+    "$([[ "$_out_multi" != *"gawk:"*"fatal"* ]] && echo 1 || echo 0)"
+assert_eq "pattern con spazi: trova la riga" "1" \
+    "$(_righe 'cerca "No HeadersTranscoder provided." nel server.log')"
 
 section "SRCH-2: pattern assente su un log di sistema — messaggio esplicito"
 
