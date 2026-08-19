@@ -835,6 +835,22 @@ invisibile perché non testato, non del dispatch.
 occhio: `service_times` sotto "Log HTTP (access log)" (bug storico corretto), `tail_log`
 annotato "· access o server", `correlate_gc_slow` "· gc + access", `show_help` assente.
 
+- **Bug di produzione trovato in verifica dal vivo post-deploy**: la query reale `aiuto`
+  su `chatbot.sh` (che gira con `set -euo pipefail`, a differenza del test che usa
+  `set -uo pipefail` senza `-e` per necessità di scoping — vedi punto 1 sopra) troncava
+  l'help dopo la categoria "Log HTTP (access log)" con `exit 1`. Causa:
+  `tool_help_category()` aveva `none) return ;;` senza status esplicito — `return` nudo
+  eredita l'exit status dell'**ultimo comando eseguito**, cioè il test
+  `[[ "$first" == *"|"* ]]`, falso per `"none"` (status 1). L'assegnazione
+  `tool_cat="$(tool_help_category ...)"` per `show_help` (kind `none`) propagava quello
+  status 1, e sotto `set -e` l'intero script terminava lì — assorbito silenziosamente dal
+  trap `EXIT` (`_rotate_query_logs` in `chatbot.sh`), quindi invisibile in `bash -x` senza
+  guardare l'exit code stesso. **Fix**: `return 0` esplicito. Aggiunto un test di
+  regressione dedicato che isola lo scenario `-e` in un subshell (`bash -c 'set
+  -euo pipefail; ...'`), l'unico modo per esercitarlo senza rompere lo scoping degli array
+  associativi sourciati nel resto del file. Verificato dal vivo sul server dopo il fix:
+  output completo, `exit 0`.
+
 ---
 
 ## MIGR — Migrazione a Python (nuovo progetto)
