@@ -180,6 +180,47 @@ _svc_rows=$(echo "$_svc_out" | grep -cE '^\S+\s+[0-9]+\s+')
 assert_eq "solo 2 servizi distinti in output (portal, /), non 4 come prima della correzione" \
     "2" "$_svc_rows"
 
+# ─── distribute_status / access_url_endpoint: granularità per-endpoint ───────
+section "access_url_endpoint: query string/matrix param tagliati, ID e UUID templatizzati"
+
+# USNEXT-2: distribute_status aveva la sola normalizzazione URL del repo scritta
+# inline (query string + ID + UUID), senza test dedicati — lo stesso gap che
+# service_times/access_url_root() aveva prima della correzione qui sopra.
+# Estratta in access_url_endpoint() (utils-access-undertow.awk): stessa logica,
+# ora condivisa e testata. Granularità diversa da access_url_root(): qui si
+# preserva il path intero, non solo il primo segmento.
+cat > "$_FIX/endpoint.log" <<'EOF'
+172.30.85.133 [17/Aug/2026:10:00:00 +0200] "GET /rest/claims/998877?type=auto HTTP/1.1" 500 1 50 - -
+172.30.85.133 [17/Aug/2026:10:00:01 +0200] "GET /rest/claims/123456 HTTP/1.1" 500 1 60 - -
+172.30.85.133 [17/Aug/2026:10:00:02 +0200] "GET /rest/claims/42 HTTP/1.1" 500 1 40 - -
+172.30.85.133 [17/Aug/2026:10:00:03 +0200] "GET /rest/claims;jsessionid=XYZ HTTP/1.1" 500 1 45 - -
+172.30.85.133 [17/Aug/2026:10:00:04 +0200] "GET /rest/claims/550e8400-e29b-41d4-a716-446655440000 HTTP/1.1" 500 1 55 - -
+172.30.85.133 [17/Aug/2026:10:00:05 +0200] "GET /health HTTP/1.1" 500 1 5 - -
+EOF
+
+_ep_out=$(gawk -f "$LIB/utils-time.awk" -f "$LIB/utils-colors.awk" -f "$LIB/utils-access-undertow.awk" \
+    -f "$TOOLS/distribute_status.awk" "$_FIX/endpoint.log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')
+
+_ep_id=$(echo "$_ep_out" | awk '$1=="/rest/claims/{id}"{print $NF}')
+assert_eq "due ID numerici >=5 cifre diversi collassano su '/rest/claims/{id}' con COUNT 2" \
+    "2" "${_ep_id:-0}"
+
+_ep_short=$(echo "$_ep_out" | awk '$1=="/rest/claims/42"{print $NF}')
+assert_eq "ID corto (2 cifre, <5) NON templatizzato: resta '/rest/claims/42'" \
+    "1" "${_ep_short:-0}"
+
+_ep_matrix=$(echo "$_ep_out" | awk '$1=="/rest/claims"{print $NF}')
+assert_eq "matrix parameter (;jsessionid=...) tagliato: resta '/rest/claims'" \
+    "1" "${_ep_matrix:-0}"
+
+_ep_uuid=$(echo "$_ep_out" | awk '$1=="/rest/claims/{uuid}"{print $NF}')
+assert_eq "UUID templatizzato: '/rest/claims/{uuid}'" \
+    "1" "${_ep_uuid:-0}"
+
+_ep_health=$(echo "$_ep_out" | awk '$1=="/health"{print $NF}')
+assert_eq "path senza nulla da normalizzare: passa invariato" \
+    "1" "${_ep_health:-0}"
+
 # ─── Riepilogo ───────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"

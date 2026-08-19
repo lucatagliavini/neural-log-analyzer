@@ -9,14 +9,13 @@ Aggiornato: 2026-08-19
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
-| USNEXT-2 | **`distribute_status` non normalizza la query string come gli altri tool access** (notata durante USNEXT-1, Intervento 5). `lib/tools/distribute_status.awk:40-43` ha la sola normalizzazione inline esistente nel repo per l'URL (taglia query string); `slow_requests`/`correlate_gc_slow`/`service_times` mostrano invece l'URL **con** query string. Incoerenza di **presentazione**, non di correttezza — nessun conteggio è sbagliato, ma lo stesso endpoint appare troncato in un tool e per intero in un altro. Da valutare se unificare su `access_url_root()` (già usata da `service_times`, Intervento 5) o su una funzione dedicata se la troncatura di `distribute_status` è voluta | Bassa |
 
 GCFMT-1 resta aperta in attesa di un secondo formato GC reale da supportare: con un solo
 caso l'interfaccia non è validabile — non è urgente nonostante il tono, tant'è che qui è
-segnata "Quando serve". USNEXT-2, aperta il 2026-08-18, è presentazione soltanto, priorità
-bassa. **NCLOCAL-1, l'unica voce che era ad alta priorità, è stata chiusa il 2026-08-19**
-(sotto, sezione USNEXT-1) — il deploy in produzione resta comunque una decisione
-dell'utente, non ancora presa.
+segnata "Quando serve". **USNEXT-2 chiusa il 2026-08-19** (sotto, sezione dedicata).
+**NCLOCAL-1, l'unica voce che era ad alta priorità, è stata chiusa il 2026-08-19** (sotto,
+sezione USNEXT-1) — il deploy in produzione resta comunque una decisione dell'utente, non
+ancora presa.
 
 ### NLP-1 + PROF-2 — **FATTO** (2026-08-17)
 
@@ -737,6 +736,43 @@ dell'utente).
 **Esito**: modello locale interamente in formato `neural-c`, suite locale interamente
 verde. Il deploy in produzione resta una decisione dell'utente, non presa in questo
 intervento.
+
+---
+
+## USNEXT-2 — Incoerenza URL fra `distribute_status` e gli altri tool access — **FATTO** (2026-08-19)
+
+Diagnosi corretta rispetto al testo precedente (aperto durante USNEXT-1, Intervento 5):
+`service_times` **non** mostra più l'URL con query string da quella stessa correzione —
+usa `access_url_root()`, che collassa al primo segmento. Verificati anche `slow_requests` e
+`correlate_gc_slow`: mostrano l'URL **intero** (con query string) deliberatamente, perché
+sono tool di **detail** (elencano singole richieste/eventi — l'utente vuole identificare o
+riprodurre una richiesta specifica), non di aggregazione. Il gap reale era più ristretto di
+come la voce originale lo descriveva: `distribute_status` (un tool di **aggregazione**, come
+`service_times`, ma a una granularità diversa — endpoint esatto, non modulo) aveva la sola
+normalizzazione URL del repo scritta inline, senza test dedicati — lo stesso gap che
+`service_times`/`access_url_root()` aveva prima di Intervento 5.
+
+Non unificata con `access_url_root()`: le due funzioni servono granularità diverse e
+legittime — `access_url_root()` collassa al primo segmento (`/portal/api/rest/anag` →
+`portal`, "che modulo"), `access_url_endpoint()` preserva il path intero e templatizza solo
+le parti variabili (`/rest/claims/998877?type=auto` → `/rest/claims/{id}`, "quale rotta
+esatta"). Unificarle avrebbe reso `service_times` più grossolano o `distribute_status` più
+aggressivo.
+
+- Estratta la normalizzazione inline di `lib/tools/distribute_status.awk` (query string,
+  matrix parameter, ID numerici ≥5 cifre, UUID) in `access_url_endpoint()`, nuova funzione
+  condivisa in `lib/utils-access-undertow.awk` accanto ad `access_url_root()`.
+  `distribute_status.awk` migrato a chiamarla (principio 8: la centralizzazione include il
+  chiamante preesistente, non solo la nuova funzione).
+- Nuova sezione in `tests/test-access-format.sh`: 5 casi via `distribute_status.awk` reale
+  (non la funzione isolata) — due ID ≥5 cifre diversi collassano sullo stesso endpoint, un
+  ID corto (2 cifre) **non** templatizzato, matrix parameter tagliato, UUID templatizzato,
+  path senza nulla da normalizzare passa invariato.
+- `bash tests/run-tests.sh`: **92 PASS / 0 FAIL**, nessuna regressione.
+
+**Esito**: `slow_requests`/`correlate_gc_slow` confermati corretti così com'erano (nessuna
+modifica — comportamento voluto). `distribute_status` ora condivide la stessa disciplina di
+`service_times`: normalizzazione centralizzata e testata, non inline.
 
 ---
 

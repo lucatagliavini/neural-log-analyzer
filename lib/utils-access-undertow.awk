@@ -89,6 +89,26 @@ function access_url_root(    _url, _a) {
     return ""
 }
 
+# Path intero (non solo il primo segmento) normalizzato per raggruppare per
+# ENDPOINT esatto, usata da distribute_status: "/rest/claims/998877?type=auto"
+# → "/rest/claims/{id}". Granularità diversa da access_url_root() (che collassa
+# tutto al primo segmento, "servizio" macro) — questa preserva la rotta intera e
+# sostituisce solo le parti variabili: query string, matrix parameter, ID
+# numerici lunghi (>= 5 cifre, per non toccare codici brevi legittimi nel path)
+# e UUID. Le due funzioni condividono il taglio di query string/matrix parameter
+# ma non il resto: unificarle in una sola avrebbe reso service_times più
+# grossolano o distribute_status più aggressivo, perdendo la granularità che
+# serve a ciascun tool (USNEXT-2).
+function access_url_endpoint(    _url) {
+    _url = access_url()
+    if (_url == "") return ""
+    sub(/\?.*/, "", _url)
+    sub(/;.*/, "", _url)
+    gsub(/\/[0-9]{5,}/, "/{id}", _url)
+    gsub(/\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/, "/{uuid}", _url)
+    return _url
+}
+
 # Ora e minuto della richiesta, come "HH" e "MM" (stringhe, per non perdere lo
 # zero iniziale). Usata da traffic_volume per il raggruppamento in fasce da 10
 # minuti: aveva una regex propria sul timestamp, l'ultima assunzione di formato

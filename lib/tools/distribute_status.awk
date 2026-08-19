@@ -29,18 +29,11 @@ BEGIN {
         if (substr(status, 1, 1) != "4" && substr(status, 1, 1) != "5") next
     }
 
-    # Estrai URL (terzo campo tra virgolette: METHOD URL PROTO)
-    _url = access_url()
-    if (_url != "") {
-        url = _url
-    } else {
-        next
-    }
-
-    # Normalizza URL: rimuovi query string e ID numerici lunghi
-    sub(/\?.*/, "", url)
-    gsub(/\/[0-9]{5,}/, "/{id}", url)
-    gsub(/\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/, "/{uuid}", url)
+    # Endpoint normalizzato (query string/matrix param tagliati, ID e UUID
+    # sostituiti da placeholder): access_url_endpoint(), utils-access-undertow.awk.
+    _url = access_url_endpoint()
+    if (_url == "") next
+    url = _url
 
     endpoint_count[url][status]++
     endpoint_total[url]++
