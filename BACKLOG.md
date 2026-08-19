@@ -893,6 +893,48 @@ coerente col summary, non più `100.0%`.
 
 ---
 
+## SEV-2 — Riga "Log:" senza spaziatura né contesto su dimensione/freschezza — **FATTO** (2026-08-19)
+
+Trovato dall'utente durante lo stesso test manuale (`distribuzione errori sul nodo 3`,
+profilo `usnext`): la riga `Log: /path/...` era attaccata senza soluzione di continuità
+alla tabella di risultato sottostante, e non diceva nulla su quanto fosse grande o
+recente il file che stava mostrando.
+
+- **Individuazione del punto centrale**: `print_log_source()` (`lib/dispatch.sh`) è già
+  il punto unico che stampa la riga "Log:" per 16 delle 18 chiamate nel `case` di
+  dispatch — ma `tail_named_log`/`grep_named_log` con log singolo risolto la bypassavano
+  con un `printf` diretto (principio 8: centralizzare significa migrare **tutti** i
+  chiamanti). Migrati entrambi a `print_log_source "$(open_log "$log_path")"`.
+- **Nuove funzioni** (`lib/dispatch.sh`, vicino a `print_log_source`): `_format_size`
+  (byte → `B`/`K`/`M`/`G`), `_format_time_ago` (epoch → `Ns fa`/`Nm fa`/`Nh fa`/`Ng fa`,
+  stesso vocabolario italiano che `utils-time.sh` già usa in senso inverso per
+  interpretare il linguaggio naturale dell'utente), `_log_file_info` (dimensione totale +
+  mtime più recente di un elenco di path — con più file, per costruzione, misura il file
+  "vivo" che riceve ancora scritture, non una rotazione ferma).
+- **Formato scelto**: `[dimensione, N fa]` tra `[]` (non `()`, per coerenza con la riga
+  di contesto `[prod · nodo NN · App · ...]` già usata sopra, che adotta la stessa
+  convenzione per i metadati). Esempio: `Log: .../undertow_access_log.log [237B, 1s fa]`.
+- **Spaziatura strutturale**: `print_log_source()` ha ora un secondo parametro opzionale
+  `suffix` (assorbe le annotazioni `(glob: ...)`/`(level=...)` che prima erano `printf`
+  separati nei chiamanti) e termina sempre con una riga vuota — un solo punto decide la
+  spaziatura verso il corpo della risposta, invece di richiederla a ciascun chiamante.
+- **Test-fix collegato**: `tests/test-theme.sh` confrontava byte-per-byte l'output tra
+  temi diversi per garantire che nessun tema nasconda dati — ma l'annotazione `[N fa]` è
+  per natura legata all'orologio reale (ogni tema è un'invocazione separata di
+  `chatbot.sh` a distanza di secondi dalle altre), quindi il numero cambia legittimamente
+  run per run. Aggiunta una maschera (`_mask_log_info`) che normalizza il blocco
+  `[dimensione, N fa]` prima del confronto — non un rilassamento del test, ma la
+  correzione di un'assunzione (contenuto deterministico) diventata falsa per un dato che
+  è deliberatamente non deterministico.
+
+**Esito**: `bash tests/run-tests.sh` → **93 PASS / 0 FAIL**. Verificato anche dal vivo con
+`chatbot.sh` su una fixture sintetica (stessa fixture di `test-theme.sh`): riga vuota tra
+`Log:` e la tabella, annotazione `[237B, 1s fa]` corretta sia nel caso a file singolo che
+nel caso a più file (rotazione, dove mostra la somma delle dimensioni e il "fa" del file
+più recente del gruppo).
+
+---
+
 ## MIGR — Migrazione a Python (nuovo progetto)
 
 > **NON è lavoro di questo backlog.** Un agent separato sta procedendo in

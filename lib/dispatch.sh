@@ -490,41 +490,101 @@ list_available_logs() {
     [[ "$found" -eq 0 ]] && printf "  ${_D}Nessuno trovato sul nodo.${_X}\n"
 }
 
+# Dimensione in byte -> stringa leggibile (B/K/M/G), scala automatica.
+_format_size() {
+    awk -v b="$1" 'BEGIN {
+        if      (b >= 1073741824) printf "%.1fG", b/1073741824
+        else if (b >= 1048576)    printf "%.1fM", b/1048576
+        else if (b >= 1024)       printf "%.1fK", b/1024
+        else                      printf "%dB", b
+    }'
+}
+
+# Epoch -> "N fa", stessa scala e stesso vocabolario (secondi/minuti/ore/giorni)
+# usato in senso inverso da utils-time.sh per interpretare il linguaggio
+# naturale dell'utente ("2 ore fa") — qui è l'output, lì l'input.
+_format_time_ago() {
+    local mtime="$1" now diff
+    now=$(date +%s)
+    diff=$(( now - mtime ))
+    (( diff < 0 )) && diff=0
+    if   (( diff < 90 ));     then printf '%ds fa' "$diff"
+    elif (( diff < 5400 ));   then printf '%dm fa' $(( diff / 60 ))
+    elif (( diff < 129600 )); then printf '%dh fa' $(( diff / 3600 ))
+    else                           printf '%dg fa' $(( diff / 86400 ))
+    fi
+}
+
+# Dimensione totale e mtime più recente di un elenco di path (uno per riga in
+# $1). Con più file la dimensione è la somma e il "fa" è quello del file PIÙ
+# RECENTE — è il file "vivo" che riceve ancora scritture, quindi è quello che
+# risponde alla domanda implicita dell'utente ("questo dato è aggiornato?").
+# $2 (opzionale) è un'etichetta appesa alla sola dimensione (es. " totali"),
+# per non finire in coda al "fa" dov'è semanticamente sbagliata (qualifica la
+# dimensione, non il tempo). Silenzioso se un file non è (più) raggiungibile:
+# è un'annotazione, non deve far fallire la stampa del risultato principale
+# (principio 5, in spirito).
+_log_file_info() {
+    local size_label="${2:-}"
+    local sizes=0 newest=0 f sz mt
+    while IFS= read -r f; do
+        [[ -z "$f" || ! -f "$f" ]] && continue
+        read -r sz mt < <(stat -c '%s %Y' "$f" 2>/dev/null) || continue
+        sizes=$(( sizes + sz ))
+        (( mt > newest )) && newest=$mt
+    done <<< "$1"
+    [[ "$newest" -eq 0 ]] && return
+    printf '%s%s, %s' "$(_format_size "$sizes")" "$size_label" "$(_format_time_ago "$newest")"
+}
+
 # Stampa quale file (o quali) il tool sta effettivamente leggendo.
 # tail_named_log/grep_named_log lo facevano già; tail_log no, e questo rendeva
 # indistinguibile il caso "ho chiesto un log applicativo e mi è stato dato
 # l'access log di Undertow" — l'utente vedeva righe plausibili e nessun indizio.
 # Prende l'espressione prodotta da open_*() (che contiene path quotati e
 # possibili <(gunzip -c '...')) e ne estrae i path per la sola visualizzazione.
+# $2 (opzionale) è una riga di annotazione aggiuntiva (es. "(glob: ...)",
+# "(level=ERROR)") stampata subito dopo, prima della riga vuota di distacco —
+# unico punto che decide la spaziatura verso il resto della risposta, così
+# tutti i chiamanti restano coerenti senza doverlo replicare (SEV-2).
 print_log_source() {
-    local logs_expr="$1"
+    local logs_expr="$1" suffix="${2:-}"
     local paths
     paths=$(grep -oE "'[^']+'" <<< "$logs_expr" | tr -d "'" | paste -sd' ' -)
     [[ -z "$paths" ]] && return
     local count
     count=$(wc -w <<< "$paths")
+    local info
     if [[ "$count" -eq 1 ]]; then
-        printf "${C_ACCENT}Log: %s${C_RESET}\n" "$paths"
-        return
-    fi
-
-    # Più file (rotazione): l'utente deve capire su quale insieme è calcolato il
-    # risultato, ma con 11 rotazioni la riga diventa illeggibile (misurato in
-    # produzione). Si mostrano la directory una volta sola e i soli nomi, troncati.
-    local dir first
-    first=$(awk '{print $1}' <<< "$paths")
-    dir=$(dirname "$first")
-    local names
-    names=$(tr ' ' '\n' <<< "$paths" | xargs -r -n1 basename | paste -sd' ' -)
-    printf "${C_ACCENT}Log: %s file in %s${C_RESET}\n" "$count" "$dir"
-    if [[ "$count" -le 4 ]]; then
-        printf "     ${C_LBL}%s${C_RESET}\n" "$names"
+        info=$(_log_file_info "$paths")
+        printf "${C_ACCENT}Log: %s${C_RESET}" "$paths"
+        [[ -n "$info" ]] && printf " ${C_LBL}[%s]${C_RESET}" "$info"
+        printf '\n'
     else
-        local head_n tail_n
-        head_n=$(tr ' ' '\n' <<< "$names" | head -2 | paste -sd' ' -)
-        tail_n=$(tr ' ' '\n' <<< "$names" | tail -1)
-        printf "     ${C_LBL}%s … %s${C_RESET}\n" "$head_n" "$tail_n"
+        # Più file (rotazione): l'utente deve capire su quale insieme è calcolato
+        # il risultato, ma con 11 rotazioni la riga diventa illeggibile (misurato
+        # in produzione). Si mostrano la directory una volta sola e i soli nomi,
+        # troncati.
+        local dir first
+        first=$(awk '{print $1}' <<< "$paths")
+        dir=$(dirname "$first")
+        local names
+        names=$(tr ' ' '\n' <<< "$paths" | xargs -r -n1 basename | paste -sd' ' -)
+        info=$(_log_file_info "$(tr ' ' '\n' <<< "$paths")" " totali")
+        printf "${C_ACCENT}Log: %s file in %s${C_RESET}" "$count" "$dir"
+        [[ -n "$info" ]] && printf " ${C_LBL}[%s]${C_RESET}" "$info"
+        printf '\n'
+        if [[ "$count" -le 4 ]]; then
+            printf "     ${C_LBL}%s${C_RESET}\n" "$names"
+        else
+            local head_n tail_n
+            head_n=$(tr ' ' '\n' <<< "$names" | head -2 | paste -sd' ' -)
+            tail_n=$(tr ' ' '\n' <<< "$names" | tail -1)
+            printf "     ${C_LBL}%s … %s${C_RESET}\n" "$head_n" "$tail_n"
+        fi
     fi
+    [[ -n "$suffix" ]] && printf "${C_LBL}%s${C_RESET}\n" "$suffix"
+    printf '\n'
 }
 
 # Unisce le stringhe passate con $1 come separatore letterale. Serve perché
@@ -935,8 +995,7 @@ _dispatch_tool_run() {
                     skip_msg "Nessun log corrispondente a '$log_glob' in ${search_root:-<search_root non impostata>}"
                     return
                 fi
-                print_log_source "$glob_expr"
-                printf "${C_LBL}(glob: %s)${C_RESET}\n" "$log_glob"
+                print_log_source "$glob_expr" "(glob: $log_glob)"
                 eval gawk -f "'$LIB_DIR/utils-time.awk'" -f "'$LIB_DIR/utils-logline.awk'" \
                     -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
                     -f "$TOOLS_DIR/tail_named_log.awk" \
@@ -955,7 +1014,7 @@ _dispatch_tool_run() {
                 skip_named_log_not_found "$search_root" "$named_log"
                 return
             fi
-            printf "${C_ACCENT}Log: %s${C_RESET}\n" "$log_path"
+            print_log_source "$(open_log "$log_path")"
             eval gawk -f "'$LIB_DIR/utils-time.awk'" -f "'$LIB_DIR/utils-logline.awk'" \
                 -f "'$LIB_DIR/utils-colors.awk'" $theme_v \
                 -f "$TOOLS_DIR/tail_named_log.awk" \
@@ -1007,8 +1066,7 @@ _dispatch_tool_run() {
                     skip_msg "Nessun log corrispondente a '$log_glob' in ${search_root:-<search_root non impostata>}"
                     return
                 fi
-                print_log_source "$glob_expr"
-                printf "${C_LBL}(glob: %s)${C_RESET}  %s\n" "$log_glob" "$_gnl_what"
+                print_log_source "$glob_expr" "(glob: $log_glob)  $_gnl_what"
                 eval gawk "$tw_args" -f "$TOOLS_DIR/grep_named_log.awk" \
                     -v level="$_gnl_level" \
                     -v pattern="$_gnl_pattern" \
@@ -1026,7 +1084,7 @@ _dispatch_tool_run() {
                 skip_named_log_not_found "$search_root" "$named_log"
                 return
             fi
-            printf "${C_ACCENT}Log: %s${C_RESET}  %s\n" "$log_path" "$_gnl_what"
+            print_log_source "$(open_log "$log_path")" "$_gnl_what"
             eval gawk "$tw_args" -f "$TOOLS_DIR/grep_named_log.awk" \
                 -v level="$_gnl_level" \
                 -v pattern="$_gnl_pattern" \

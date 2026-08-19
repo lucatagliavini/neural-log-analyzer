@@ -101,9 +101,15 @@ done
 # Il contenuto testuale deve essere IDENTICO fra i temi: cambia la resa, non
 # l'informazione. Se divergesse, un tema starebbe nascondendo dati.
 _strip() { sed 's/\x1b\[[0-9;]*m//g' <<< "$1"; }
-_txt_mono=$(_strip "$_out_mono")
+# La riga "Log: ... [dimensione, N fa]" (SEV-2) è per natura legata all'orologio
+# reale: ogni tema è un'invocazione separata di chatbot.sh a qualche secondo di
+# distanza dalle altre, quindi il numero di "fa" cambia legittimamente run per
+# run — non è un tema che nasconde dati, è il tempo che passa. Si maschera
+# prima del confronto, altrimenti il test sarebbe intermittente per definizione.
+_mask_log_info() { sed -E 's/\[[0-9.]+[A-Z]?( totali)?, [0-9]+[a-z] fa\]/[LOG_INFO]/' <<< "$1"; }
+_txt_mono=$(_mask_log_info "$(_strip "$_out_mono")")
 for _t in dark light high-contrast plain; do
-    _txt=$(_strip "$(_run "$_t" 'quanti errori 500 oggi')")
+    _txt=$(_mask_log_info "$(_strip "$(_run "$_t" 'quanti errori 500 oggi')")")
     assert_eq "tema $_t: contenuto testuale identico a mono" "$_txt_mono" "$_txt"
 done
 
