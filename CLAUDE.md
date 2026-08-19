@@ -159,9 +159,12 @@ La prova che la collocazione precedente era sbagliata: montare il secondo profil
   Aggiungere un'applicazione richiede una riga qui, non un retrain. **Obbligatorio**:
   senza, non esiste la normalizzazione delle entità (ENTCONF-1).
 - **`domain.conf`** — solo le stringhe che l'utente legge (`TOOL_DESC`,
-  `TOOL_EXAMPLE`, `HELP_CATEGORIES`, `TOOL_CATEGORY`) e le soglie di severità (UI-13,
-  tarabili per ambiente). Sourcia `nlp/tools.conf` via `$TOOLS_CONF_FILE`. Gli esempi
-  devono restare **concreti e copiabili** (nomi di log reali, nodi che esistono).
+  `TOOL_EXAMPLE`, `HELP_CATEGORIES`, `SOURCE_CATEGORY`/`SOURCE_LABEL`/
+  `ACTIVITY_CATEGORY`) e le soglie di severità (UI-13, tarabili per ambiente). Sourcia
+  `nlp/tools.conf` via `$TOOLS_CONF_FILE`, da cui viene anche `TOOL_SOURCES` — la
+  partizione tool→sorgente di log, unica fonte di verità condivisa da guard e help
+  (HELP-1, 2026-08-19). Gli esempi devono restare **concreti e copiabili** (nomi di log
+  reali, nodi che esistono).
 - **`examples.sh`** — generatori di esempi per `gen-examples.sh` (opzionale).
 - **`system.local.conf`** — override per-installazione, non deployato (opzionale).
 

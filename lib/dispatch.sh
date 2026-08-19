@@ -366,6 +366,52 @@ require_system_log() {
     return 1
 }
 
+# Espande la dichiarazione di TOOL_SOURCES (nlp/tools.conf, HELP-1) nei kind di
+# sistema effettivi per questo tool, uno per riga. È la sola lettura di quella
+# tabella lato guard: print_help() la legge separatamente per l'help.
+#
+# "|" (OR runtime, es. "access|server" di tail_log) risolve al $selector se
+# combacia con una delle alternative, altrimenti alla PRIMA — che riproduce il
+# ramo "else → access" preesistente prima di questa tabella. Uno spazio (AND,
+# es. "gc access" di correlate_gc_slow) resta più kind, tutti richiesti.
+# I kind non di sistema (named/all/none) non producono righe: nessun tool con
+# quei valori chiama require_system_log.
+tool_source_kinds() {
+    local tool="$1" selector="${2:-}"
+    local spec="${TOOL_SOURCES[$tool]:-}"
+    [[ -z "$spec" ]] && return 0
+    local group
+    for group in $spec; do
+        local kind="$group"
+        if [[ "$group" == *"|"* ]]; then
+            local -a alts=()
+            IFS='|' read -ra alts <<< "$group"
+            kind="${alts[0]}"
+            local alt
+            for alt in "${alts[@]}"; do
+                [[ "$alt" == "$selector" ]] && { kind="$alt"; break; }
+            done
+        fi
+        case "$kind" in
+            named|all|none) ;;
+            *) echo "$kind" ;;
+        esac
+    done
+}
+
+# Guard table-driven: sostituisce le chiamate dirette a require_system_log nel
+# case sottostante con un'unica dichiarazione per tool (TOOL_SOURCES). Ferma
+# al primo kind mancante, così il messaggio di skip nomina il kind giusto.
+require_tool_sources() {
+    local tool="$1" selector="${2:-}"
+    local kind
+    while IFS= read -r kind; do
+        [[ -z "$kind" ]] && continue
+        require_system_log "$kind" "$tool" || return 1
+    done < <(tool_source_kinds "$tool" "$selector")
+    return 0
+}
+
 # Quando un log richiesto non esiste, elenca quelli realmente presenti sul nodo.
 # L'avviso di param-extract.sh mostra gli ALIAS noti da entities.conf, che possono
 # divergere dal disco (es. "plugin" in whitelist contro "plugins" reale): qui si
@@ -481,6 +527,65 @@ print_log_source() {
     fi
 }
 
+# Unisce le stringhe passate con $1 come separatore letterale. Serve perché
+# "${arr[*]}" con IFS multi-carattere usa solo il primo carattere di IFS, non
+# la stringa intera — non basta impostare IFS=" + " per ottenere " + " come join.
+_tool_sources_join() {
+    local sep="$1"; shift
+    local out="" first=true x
+    for x in "$@"; do
+        if [[ "$first" == true ]]; then out="$x"; first=false
+        else out="$out$sep$x"; fi
+    done
+    printf '%s' "$out"
+}
+
+# Categoria derivata per print_help (HELP-1): non più TOOL_CATEGORY scritta a mano,
+# ma la conseguenza di TOOL_SOURCES (nlp/tools.conf). Kind "none" → nessuna categoria
+# (show_help resta fuori dall'help, come oggi); kind "all" → ACTIVITY_CATEGORY, il
+# tool è raggruppato per attività e non per sorgente (decisione utente: search_all_logs
+# e list_logs restano su due voci distinte, non su una categoria "sorgente" comune);
+# altrimenti SOURCE_CATEGORY del primo kind dichiarato — per un OR (es. "access|server"
+# di tail_log) la prima alternativa, stessa regola di tool_source_kinds senza selettore.
+tool_help_category() {
+    local tool="$1"
+    local spec="${TOOL_SOURCES[$tool]:-}"
+    [[ -z "$spec" ]] && return
+    local -a groups=($spec)
+    local first="${groups[0]}"
+    [[ "$first" == *"|"* ]] && first="${first%%|*}"
+    case "$first" in
+        none) return ;;
+        all)  printf '%s' "${ACTIVITY_CATEGORY[$tool]:-}" ;;
+        *)    printf '%s' "${SOURCE_CATEGORY[$first]:-}" ;;
+    esac
+}
+
+# Annotazione inline per i tool multi-sorgente (decisione utente: elenco singolo,
+# annotato — non una riga per categoria). " + " per un AND (entrambi richiesti
+# incondizionatamente, es. correlate_gc_slow="gc access"), " o " per un OR (una delle
+# alternative secondo un selettore a runtime, es. tail_log="access|server"). Vuota per
+# i tool a sorgente singola: non c'è nulla da dichiarare oltre alla categoria.
+tool_help_annotation() {
+    local tool="$1"
+    local spec="${TOOL_SOURCES[$tool]:-}"
+    local -a groups=($spec)
+    if [[ "${#groups[@]}" -gt 1 ]]; then
+        local -a parts=() g
+        for g in "${groups[@]}"; do parts+=("${SOURCE_LABEL[$g]:-$g}"); done
+        _tool_sources_join " + " "${parts[@]}"
+        return
+    fi
+    local only="${groups[0]:-}"
+    if [[ "$only" == *"|"* ]]; then
+        local -a alts=()
+        IFS='|' read -ra alts <<< "$only"
+        local -a parts=() a
+        for a in "${alts[@]}"; do parts+=("${SOURCE_LABEL[$a]:-$a}"); done
+        _tool_sources_join " o " "${parts[@]}"
+    fi
+}
+
 print_help() {
     local BOLD="${C_BOLD}"
     local CYAN="${C_ACCENT}"
@@ -493,7 +598,9 @@ print_help() {
     for cat in "${HELP_CATEGORIES[@]}"; do
         local printed_header=false
         for tool in "${TOOL_NAMES[@]}"; do
-            [[ "${TOOL_CATEGORY[$tool]:-}" != "$cat" ]] && continue
+            local tool_cat
+            tool_cat="$(tool_help_category "$tool")"
+            [[ -z "$tool_cat" || "$tool_cat" != "$cat" ]] && continue
             local desc="${TOOL_DESC[$tool]:-}"
             local ex="${TOOL_EXAMPLE[$tool]:-}"
             [[ -z "$desc" ]] && continue
@@ -505,7 +612,11 @@ print_help() {
                 first_cat=false
             fi
 
-            printf "  ${BOLD}%s${RESET}\n" "$desc"
+            local annot
+            annot="$(tool_help_annotation "$tool")"
+            printf "  ${BOLD}%s${RESET}" "$desc"
+            [[ -n "$annot" ]] && printf "  ${DIM}· %s${RESET}" "$annot"
+            printf "\n"
             [[ -n "$ex" ]] && printf "  ${DIM}es: \"%s\"${RESET}\n" "$ex"
         done
     done
@@ -669,7 +780,7 @@ _dispatch_tool_run() {
 
     case "$tool" in
         count_status)
-            require_system_log access count_status || return
+            require_tool_sources count_status || return
             logs_expr="$(open_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/count_status.awk" \
@@ -677,7 +788,7 @@ _dispatch_tool_run() {
                 "$logs_expr"
             ;;
         distribute_status)
-            require_system_log access distribute_status || return
+            require_tool_sources distribute_status || return
             logs_expr="$(open_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/distribute_status.awk" \
@@ -685,7 +796,7 @@ _dispatch_tool_run() {
                 "$logs_expr"
             ;;
         slow_requests)
-            require_system_log access slow_requests || return
+            require_tool_sources slow_requests || return
             logs_expr="$(open_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/slow_requests.awk" \
@@ -693,37 +804,38 @@ _dispatch_tool_run() {
                 "$logs_expr"
             ;;
         traffic_volume)
-            require_system_log access traffic_volume || return
+            require_tool_sources traffic_volume || return
             logs_expr="$(open_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/traffic_volume.awk" \
                 "$logs_expr"
             ;;
         filter_errors)
-            require_system_log server filter_errors || return
+            require_tool_sources filter_errors || return
             logs_expr="$(open_server_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/filter_errors.awk" \
                 "$logs_expr"
             ;;
         service_times)
-            require_system_log access service_times || return
+            require_tool_sources service_times || return
             logs_expr="$(open_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/service_times.awk" \
                 "$logs_expr"
             ;;
         gc_stats)
-            require_system_log gc gc_stats || return
+            require_tool_sources gc_stats || return
             logs_expr="$(open_gc_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/gc_stats.awk" \
                 "$logs_expr"
             ;;
         correlate_gc_slow)
-            # Due sorgenti: entrambe necessarie, e il messaggio dice quale manca.
-            require_system_log gc correlate_gc_slow || return
-            require_system_log access correlate_gc_slow || return
+            # Due sorgenti: entrambe necessarie (TOOL_SOURCES[correlate_gc_slow]
+            # ="gc access"), e il messaggio dice quale manca — require_tool_sources
+            # si ferma al primo kind assente.
+            require_tool_sources correlate_gc_slow || return
             local gc_expr access_expr
             gc_expr="$(open_gc_logs)"
             access_expr="$(open_logs)"
@@ -741,8 +853,14 @@ _dispatch_tool_run() {
             # senza il filtro riga per riga, un file corrente con ts_start dentro la
             # finestra ma ts_end nel presente farebbe comunque tail delle righe più
             # recenti, fuori dalla finestra richiesta.
+            #
+            # Un solo guard per entrambi i rami di LOG_TYPE, non uno per ramo:
+            # TOOL_SOURCES[tail_log]="access|server" è un OR runtime, e LOG_TYPE
+            # è il selettore che sceglie quale delle due alternative richiedere
+            # (se non è "server" si richiede la prima, "access" — stesso esito
+            # del preesistente if/else, ora dichiarato invece che duplicato).
+            require_tool_sources tail_log "${LOG_TYPE:-}" || return
             if [[ "${LOG_TYPE:-}" == "server" ]]; then
-                require_system_log server tail_log || return
                 if [[ "${TIME_EXPLICIT:-0}" == "1" ]]; then
                     logs_expr="$(open_server_logs)"
                     print_log_source "$logs_expr"
@@ -765,9 +883,6 @@ _dispatch_tool_run() {
                         "$logs_expr"
                 fi
             else
-                # Un solo guard per entrambi i rami temporali: la disponibilità
-                # dell'access log non dipende da TIME_EXPLICIT.
-                require_system_log access tail_log || return
                 if [[ "${TIME_EXPLICIT:-0}" == "1" ]]; then
                     logs_expr="$(open_logs)"
                     print_log_source "$logs_expr"
@@ -791,7 +906,7 @@ _dispatch_tool_run() {
             fi
             ;;
         filter_ip)
-            require_system_log access filter_ip || return
+            require_tool_sources filter_ip || return
             logs_expr="$(open_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/filter_ip.awk" \
@@ -800,7 +915,7 @@ _dispatch_tool_run() {
                 "$logs_expr"
             ;;
         filter_app_errors)
-            require_system_log server filter_app_errors || return
+            require_tool_sources filter_app_errors || return
             logs_expr="$(open_server_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/filter_app_errors.awk" \

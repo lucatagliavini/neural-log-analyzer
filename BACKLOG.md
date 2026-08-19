@@ -12,10 +12,10 @@ Aggiornato: 2026-08-19
 
 GCFMT-1 resta aperta in attesa di un secondo formato GC reale da supportare: con un solo
 caso l'interfaccia non è validabile — non è urgente nonostante il tono, tant'è che qui è
-segnata "Quando serve". **USNEXT-2 chiusa il 2026-08-19** (sotto, sezione dedicata).
-**NCLOCAL-1, l'unica voce che era ad alta priorità, è stata chiusa il 2026-08-19** (sotto,
-sezione USNEXT-1) — il deploy in produzione resta comunque una decisione dell'utente, non
-ancora presa.
+segnata "Quando serve". **USNEXT-2 e HELP-1 chiuse il 2026-08-19** (sotto, sezioni
+dedicate). **NCLOCAL-1, l'unica voce che era ad alta priorità, è stata chiusa il
+2026-08-19** (sotto, sezione USNEXT-1) — il deploy in produzione resta comunque una
+decisione dell'utente, non ancora presa.
 
 ### NLP-1 + PROF-2 — **FATTO** (2026-08-17)
 
@@ -80,7 +80,9 @@ chiamano le cose, quale tecnologia — non il vocabolario, non il dataset, non i
 
 **Nel profilo** — `system.conf`, `entities.conf` e un `domain.conf` ridotto alle sole
 stringhe che l'utente legge: `TOOL_DESC`, `TOOL_EXAMPLE`, `HELP_CATEGORIES`,
-`TOOL_CATEGORY`. Nominano i log reali (`cc.log` vs `Pass.log`) e i nodi che esistono
+`SOURCE_CATEGORY`/`SOURCE_LABEL`/`ACTIVITY_CATEGORY` (etichette; la partizione
+tool→sorgente è `TOOL_SOURCES` nel framework, `nlp/tools.conf`, dopo HELP-1). Nominano i
+log reali (`cc.log` vs `Pass.log`) e i nodi che esistono
 davvero, quindi sono coordinate: l'help deve restare **concreto e copiabile**
 («ultime 100 righe del console.log sul nodo 2»), non generico.
 
@@ -773,6 +775,65 @@ aggressivo.
 **Esito**: `slow_requests`/`correlate_gc_slow` confermati corretti così com'erano (nessuna
 modifica — comportamento voluto). `distribute_status` ora condivide la stessa disciplina di
 `service_times`: normalizzazione centralizzata e testata, non inline.
+
+---
+
+## HELP-1 — Categoria dell'help derivata da `TOOL_SOURCES`, non più prosa parallela — **FATTO** (2026-08-19)
+
+Prima di questo intervento esistevano due fonti indipendenti per "quale log apre questo
+tool": `require_system_log` chiamato a mano nel `case` di `_dispatch_tool_run`
+(`lib/dispatch.sh`) e `TOOL_CATEGORY`, prosa scritta a mano tool-per-tool in ciascun
+`domain.conf`. Erano già divergenti: `service_times` era categorizzato "Server log JBoss"
+in `TOOL_CATEGORY` ma legge l'access log da `60f679e` (2026-07-29) — un bug dell'help,
+invisibile perché non testato, non del dispatch.
+
+- **`TOOL_SOURCES`** (nuova tabella in `nlp/tools.conf`, framework — non nel profilo: la
+  partizione tool→sorgente è identica su `liquido` e `usnext`, verificato a diff) diventa
+  la sola fonte di verità. Sintassi: un kind singolo (`"access"`), AND con spazio (`"gc
+  access"` per `correlate_gc_slow`, entrambe le sorgenti richieste incondizionatamente), OR
+  con `|` (`"access|server"` per `tail_log`, scelto a runtime da un selettore — `LOG_TYPE`),
+  e i kind non di sistema `named`/`all`/`none`.
+- **Guard table-driven**: `tool_source_kinds()` espande la dichiarazione nei kind concreti
+  per un tool + selettore; `require_tool_sources()` la consuma fermandosi al primo kind
+  assente (il messaggio di skip nomina il kind giusto, come i guard manuali precedenti).
+  Ogni chiamata diretta a `require_system_log` nel `case` è stata sostituita — principio 8,
+  la centralizzazione include i chiamanti preesistenti, non solo la nuova tabella.
+- **Help derivato**: `tool_help_category()` deriva la categoria da `TOOL_SOURCES` (kind
+  `none` → nessuna categoria, `all` → `ACTIVITY_CATEGORY` per attività —
+  `search_all_logs`/`list_logs` restano su voci distinte, non una categoria "sorgente"
+  comune — altrimenti `SOURCE_CATEGORY` del primo kind). `tool_help_annotation()` annota
+  inline i tool multi-sorgente (`· access o server` per un OR, `· gc + access` per un AND) —
+  un elenco singolo annotato, non una riga duplicata per categoria. `domain.conf` si riduce
+  alle sole etichette (`SOURCE_CATEGORY`, `SOURCE_LABEL`, `ACTIVITY_CATEGORY`), coordinate di
+  questo profilo — non più la partizione stessa.
+- **`tests/test-help-sources.sh`** (nuovo): completezza (ogni tool in `TOOL_NAMES` ha una
+  voce in `TOOL_SOURCES`), chiusura (ogni kind citato ha un'etichetta), rendering (nessun
+  tool duplicato o assente, `service_times` correttamente sotto "Log HTTP (access log)",
+  annotazioni multi-sorgente presenti) su entrambi i profili, e coerenza col codice (zero
+  chiamate dirette residue a `require_system_log` nel `case`).
+- **Ripresa dopo interruzione**: la sessione che ha scritto l'implementazione si è
+  interrotta prima di eseguire il nuovo test per la prima volta. Alla ripresa, il test
+  falliva per motivi indipendenti dal refactor:
+  1. `_load_profile()` era una funzione bash che sourciava `tools.conf`/`domain.conf` al suo
+     interno — in bash `source` non apre un proprio scope, quindi ogni `declare -A` in quei
+     file diventava locale alla funzione e spariva al `return` (`count_status: unbound
+     variable`). Non un problema in produzione (`chatbot.sh` sorcia a top-level), solo nel
+     test — eliminata la funzione, caricamento inlineato due volte (un profilo per volta).
+  2. Gap reale nell'invariante di chiusura: `SOURCE_LABEL[named]` mancava in entrambi i
+     `domain.conf` (non ancora sfruttato — nessun tool ha `named` in OR/AND con un altro
+     kind oggi — ma il test lo richiede per non lasciare un buco silenzioso se un domani lo
+     sarà). Aggiunto in entrambi i profili.
+  3. L'AWK che isola la sezione-categoria di `service_times` confondeva l'header di
+     categoria con la riga del tool stesso — nell'output di `print_help` entrambi iniziano
+     con "  " + testo in grassetto, indistinguibili per indentazione dopo lo strip dei
+     codici colore. Corretto confrontando contro l'elenco esatto di `HELP_CATEGORIES`
+     invece di indovinare dalla forma della riga.
+  4. Il test non era ancora agganciato a `tests/run-tests.sh` — aggiunto a
+     `run_unit_tests()`.
+
+**Esito**: `bash tests/run-tests.sh` → **93 PASS / 0 FAIL**. `print_help` verificato anche a
+occhio: `service_times` sotto "Log HTTP (access log)" (bug storico corretto), `tail_log`
+annotato "· access o server", `correlate_gc_slow` "· gc + access", `show_help` assente.
 
 ---
 
