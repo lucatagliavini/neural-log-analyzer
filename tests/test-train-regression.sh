@@ -22,7 +22,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 NC_BIN="$ROOT_DIR/../neural-c/neural-c.sh"
 # Il dataset vive nel framework da NLP-1 (2026-08-17), non più nel profilo.
 DATASET="$ROOT_DIR/nlp/dataset/queries.txt"
-NUM_FEATURES=114
+NUM_FEATURES=115
 
 WORK="$ROOT_DIR/tmp/train-regression-$$"
 rm -rf "$WORK"
@@ -31,9 +31,9 @@ trap 'rm -rf "$WORK"' EXIT
 
 RED="\033[31m"; GREEN="\033[32m"; RESET="\033[0m"
 
-# Checksum di riferimento — rigenerato il 2026-08-20 (C2: nuova feature <ip>,
-# 113 → 114, più 20 esempi per C1/C2), verificato bit-identico su 3 run consecutivi
-# sulla stessa macchina.
+# Checksum di riferimento — rigenerato il 2026-08-20 (FLEX-1b: nuova feature
+# `fallit|fallim|fallis`, 114 → 115, più `rott[oaie]` e 6 esempi), verificato
+# bit-identico su 3 run consecutivi sulla stessa macchina.
 #
 # Nota: questo checksum dipende da (topologia, dataset, seed, iperparametri).
 # Qualsiasi modifica al vocabolario o a queries_labeled.txt lo invalida per
@@ -41,8 +41,9 @@ RED="\033[31m"; GREEN="\033[32m"; RESET="\033[0m"
 # la riproducibilità regga su almeno 3 run consecutivi.
 #
 # Storia dei riferimenti, utile per riconoscere una regressione da una modifica
-# voluta: 111 feature fino al 2026-08-19, 113 con SRCH-2/QUOTE-1, 114 da C2.
-EXPECTED_WEIGHTS_MD5="4ffd799112a0ab14d25383d19983b56c"
+# voluta: 111 feature fino al 2026-08-19, 113 con SRCH-2/QUOTE-1, 114 con C2 (<ip>),
+# 115 con FLEX-1b (fallit|fallim|fallis).
+EXPECTED_WEIGHTS_MD5="ad6861f548224a13ee6b8fdca571e0a8"
 
 # La topologia deve combaciare con NUM_FEATURES del profilo: righe con un numero
 # di colonne diverso da num_features+num_outputs vengono scartate dalla

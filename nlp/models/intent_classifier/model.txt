@@ -1,5 +1,5 @@
 neural-c model 1
 
-input 114
+input 115
 dense 48 sigmoid
 dense 16 sigmoid

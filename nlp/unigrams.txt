@@ -6,6 +6,21 @@
 
 # ── Status HTTP ───────────────────────────────────────────────────────────────
 errore|errori             :: 2
+# Sinonimo diretto di "errore" nel dominio HTTP, e finora SENZA alcuna feature —
+# pur essendo usato in 6 esempi labeled su 3 classi (count_status,
+# distribute_status, filter_app_errors). Quegli esempi venivano appresi solo
+# tramite gli altri token ("totale", "raggruppa", "api"), e una query costruita
+# attorno a questa parola non attivava nulla: `richieste fallite` — che è
+# letteralmente un esempio di training — non portava alcun tool sopra
+# TOOL_THRESHOLD, quindi il bot non rispondeva affatto.
+# `gap-report.sh` lo segnalava già («fallimenti — 3 esempi» fra i token non
+# coperti) e nessuno aveva agito: l'informazione c'era, il canale funzionava,
+# non era stata letta. Stessa famiglia dei checksum obsoleti (c1951e3) e dei test
+# fuori dalla suite (NLP-1).
+# Prefisso senza \b: copre fallito/fallita/falliti/fallite, fallimento/
+# fallimenti, fallisce/falliscono. Peso 2 come `errore|errori`, perché in
+# "richieste fallite" è l'UNICA parola che porta il segnale di errore.
+fallit|fallim|fallis      :: 2
 500                       :: 1
 400                       :: 1
 404                       :: 1
@@ -143,7 +158,16 @@ appare\b|ovunque\b        :: 1
 accessi\b                 :: 1
 
 # ── Colloquiale / informale ───────────────────────────────────────────────────
-rott[oa]|non.va\b|non.funz :: 1
+# `rott[oaie]` e non `rott[oa]`: il plurale ("richieste rotte", "endpoint rotti")
+# non matchava. Terzo caso della famiglia FLEX-1 — una classe di caratteri che
+# copre alcune desinenze italiane e non altre — dopo `ultim[aei]` (utils-time.sh)
+# e `applicativ[oa]?`/`prim[ei]` (param-extract.sh).
+# NON estesi `tutt[ie]` e `quant[eo]|quanti`, gli altri due candidati della stessa
+# passata: misurati innocui (`in tutto il log` → search_all_logs 97%,
+# `quanta memoria` → gc_stats 96%, il segnale arriva da altre feature). Estenderli
+# per simmetria formale sarebbe churn con rischio di perturbare i confini, a
+# beneficio misurato zero.
+rott[oaie]|non.va\b|non.funz :: 1
 c.è.*problem|qualcosa.*stran :: 1
 vediamo|un.occhiat         :: 1
 

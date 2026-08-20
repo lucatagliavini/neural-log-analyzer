@@ -1294,3 +1294,29 @@ filter_ip	chiamate da 192.168.0.7 di oggi
 filter_ip	attività di 172.30.44.12 nell'ultima ora
 filter_ip	quante richieste da 10.0.0.5
 filter_ip	mostrami 192.168.10.20
+
+# ── FLEX-1b (2026-08-20) — "fallite"/"rotte" come parola portante.
+# Prima nessuna feature copriva fallit*/fallim*, quindi queste formulazioni non
+# portavano ALCUN tool sopra TOOL_THRESHOLD: il bot non rispondeva. Etichettate
+# secondo la regola già presente nel dataset — "totale/quante" → count_status,
+# "quali X"/"per path" → distribute_status.
+count_status	richieste fallite
+count_status	quante richieste sono fallite
+count_status	numero di richieste fallite stamattina
+count_status	quante chiamate sono andate in errore
+distribute_status	quali richieste sono fallite
+distribute_status	quali endpoint sono rotti
+#
+# NON aggiunti "quali richieste sono rotte" / "raggruppa le richieste rotte per
+# endpoint": erano stati etichettati distribute_status e il modello li instradava
+# comunque a filter_errors al 93%, perché `rott*` vive sulla riga colloquiale del
+# vocabolario che serve quel tool ("cosa è rotto" → filter_errors, corretto).
+#
+# L'etichetta sbagliata era la mia, non il routing. Insistere avrebbe creato un
+# confine imprevedibile — "rotto" verso gli errori applicativi ma "richieste
+# rotte" verso l'access log — contro la politica del progetto: una sola, formulata
+# una volta. La regola ora è statuibile in una riga:
+#   rott*    = "qualcosa è rotto"        → filter_errors (log applicativo)
+#   fallit*  = "richieste HTTP fallite"  → count_status / distribute_status
+# "quali endpoint sono rotti" resta perché "endpoint" è un segnale HTTP esplicito
+# e non ambiguo, quindi non introduce alcun confine sottile.

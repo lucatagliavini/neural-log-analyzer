@@ -8,8 +8,102 @@ Aggiornato: 2026-08-20
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
-| FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** (aperta e in parte chiusa il 2026-08-20). Lo stesso difetto — una classe che copre alcune desinenze italiane e non altre — è emerso **tre volte** in una sessione: `ultim[aei]` senza la `o` (`utils-time.sh`, T3), `applicativ[oa]?` senza la `i` (`param-extract.sh`, P2), `prim[ei]` senza `a`/`o` (`param-extract.sh`, LOG_ORDER). Nessuno dava errore: producevano un parametro vuoto o un default, cioè un filtro che **si disattiva**. La passata (`grep -rnoE '[a-z]{4,}\[[aeio]{2,3}\]\??'`) ha esaminato **21 occorrenze** in `lib/`, `profiles/`, `nlp/`: tutte verificate, **un solo difetto residuo trovato e corretto** (`prim[ei]`). Interessante: `quant[eo]\|quanti` (`nlp/unigrams.txt:39`) era già stato patchato con un'alternativa esplicita invece di estendere la classe — segno che il problema si era già presentato e la correzione era stata locale invece che sistematica. **Resta aperto solo come promemoria**: il comando è nel backlog, va rieseguito quando si aggiunge un pattern flesso nuovo | Promemoria |
+| FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
+
+### FLEX-1 — classi di caratteri flesse, e FLEX-1b — la parola senza feature (2026-08-20)
+
+**Il difetto che la voce nomina**: una classe di caratteri che copre alcune desinenze
+italiane e non altre. Emerso **quattro volte**, in tre file:
+
+| pattern | mancava | conseguenza |
+|---|---|---|
+| `ultim[aei]` | `o` | `ultimo giorno` → nessun filtro temporale (`utils-time.sh`, T3) |
+| `applicativ[oa]?` | `i` | `log applicativi` → `LOG_TYPE` vuoto → fallback access log (P2) |
+| `prim[ei]` | `a`, `o` | `prima riga` → mostra l'**ultima** (`param-extract.sh`, LOG_ORDER) |
+| `rott[oa]` | `i`, `e` | `richieste rotte` → nessun tool sopra soglia (`nlp/unigrams.txt`) |
+
+Tratto comune: **nessuno dava errore**. Producevano un parametro vuoto o un default, cioè un
+filtro che *si disattiva* invece di fallire.
+
+**Il comando della passata** — la prima versione produceva falsi positivi sui **propri
+commenti esplicativi** (quelli che citano il valore vecchio per spiegare il fix), obbligando a
+ritriagiarli: esattamente l'attrito che la voce deve eliminare. Corretto:
+
+```bash
+grep -rnE '[a-z]{4,}\[[aeio]{2,3}\]\??' lib/ profiles/ nlp/ | grep -vE ':[[:space:]]*#'
+```
+
+Proprietà utile e non progettata: `[aeio]{2,3}` trova solo le classi **potenzialmente
+incomplete**, quindi una già corretta a 4 vocali esce da sola dai risultati — la passata non
+richiede di ricordare cosa è già stato sistemato.
+
+**Triage delle 15 occorrenze di codice** (21 meno i 6 commenti): 12 complete per il loro uso
+(`giorn[oi]`, `minut[oi]`, `rispost[ae]`, `total[ei]`, `memori[ae]`, …), 3 incomplete, tutte
+misurate dal vivo:
+
+| pattern | manca | esito misurato | azione |
+|---|---|---|---|
+| `rott[oa]` | `rotte`, `rotti` | `quali richieste sono rotte` → **nessun tool sopra soglia** | **corretto** → `rott[oaie]` |
+| `tutt[ie]` | `tutto`, `tutta` | `cerca "NPE" in tutto il log` → `search_all_logs` **97%** | **non toccato** |
+| `quant[eo]\|quanti` | `quanta` | `quanta memoria usa la jvm` → `gc_stats` **96%** | **non toccato** |
+
+**Perché due su tre restano così**: sono misurati innocui — il segnale arriva da altre feature.
+Estenderli per soddisfare una simmetria formale sarebbe churn con rischio di perturbare confini
+funzionanti, a beneficio misurato zero. `quant[eo]|quanti` è anche la **prova che il problema si
+era già presentato**: qualcuno l'aveva patchato con un'alternativa esplicita invece di estendere
+la classe, cioè una correzione locale invece che sistematica. È la ragione per cui questa voce
+resta come promemoria.
+
+---
+
+**FLEX-1b — la scoperta più grande, trovata indagando `rott[oa]`.** Il vicolo cieco non era
+quello:
+
+```
+richieste rotte                  → NESSUN TOOL SOPRA SOGLIA
+quali richieste hanno fallito    → NESSUN TOOL SOPRA SOGLIA
+richieste fallite                → NESSUN TOOL SOPRA SOGLIA
+```
+
+**`richieste fallite` è letteralmente un esempio di training** (`count_status → totale richieste
+fallite`) e da sola non attivava nulla, perché **non esisteva alcuna feature per
+`fallit*`/`fallim*`** — pur essendo usata in **6 esempi labeled su 3 classi**. Quegli esempi
+venivano appresi solo tramite gli altri token (`totale`, `raggruppa`, `api`).
+
+**E `gap-report.sh` lo segnalava già**: `fallimenti — 3 esempi` fra i token non coperti,
+stampato da `train.sh` a ogni addestramento, con la nota di NCLOCAL-1 «informativo, non
+azionato in questo intervento». Non una scoperta nuova, un **report esistente non letto** —
+stessa famiglia dei checksum obsoleti per 12 giorni (`c1951e3`) e dei test fuori dalla suite
+(NLP-1): l'informazione c'era, il canale funzionava, nessuno l'aveva guardata.
+
+**Fix**: nuovo unigramma `fallit|fallim|fallis :: 2` nella sezione Status HTTP (peso 2 come
+`errore|errori`, perché in "richieste fallite" è l'unica parola che porta il segnale di errore),
+più 6 esempi. `NUM_FEATURES` 114 → 115, `MODEL_TOPOLOGY` → `115,48,16`, reinizializzazione e
+retrain (early stopping all'epoca 966, pesi dalla 866).
+
+**Una politica sola su `rott*`, e l'etichetta sbagliata era la mia.** Due esempi erano stati
+etichettati `distribute_status` per «quali richieste sono rotte», e il modello li instradava
+comunque a `filter_errors` al 93% — perché `rott*` vive sulla riga colloquiale del vocabolario
+che serve quel tool, e `cosa è rotto → filter_errors` è corretto. **Rimossi invece di
+insistere**: forzarli avrebbe creato un confine imprevedibile (`rotto` verso gli errori
+applicativi ma `richieste rotte` verso l'access log), contro la politica del progetto — una
+sola, formulata una volta. La regola ora si scrive in due righe:
+
+```
+rott*    = "qualcosa è rotto"        → filter_errors (log applicativo)
+fallit*  = "richieste HTTP fallite"  → count_status / distribute_status
+```
+
+`quali endpoint sono rotti` → `distribute_status` (59%) resta corretto perché `endpoint` è un
+segnale HTTP esplicito, quindi non introduce alcun confine sottile.
+
+**Verifica**: `fallit*` instrada `count_status`/`distribute_status` (49-99%, multi-label sulle
+formulazioni ambigue — stesso schema di LOGSEL-1b: conteggio e distribuzione sono entrambe
+risposte valide); `rott*` sempre `filter_errors` (96%); confini storici invariati
+(`quanti errori 500 stamattina` 99.6%, `distribuzione errori per endpoint` 98.7%,
+`errori nel server log` 98.2%). `gap-report.sh` non segnala più `fallimenti`. Checksum di
+`test-train-regression.sh` rigenerato (`ad6861f5…`) con riproducibilità su 3 run bit-identici.
 
 ### TIME-D1b — **CHIUSA il 2026-08-20: misurata, zero righe non databili**
 
@@ -85,9 +179,11 @@ test che non girano (NLP-1) e dei checksum mai verificati (`c1951e3`).
 
 ---
 
-**SRCH-4 chiusa il 2026-08-20** (sezione `SRCH` sotto), insieme a **9 difetti nuovi della
-prima fase della pipeline** trovati costruendo tre harness di test che non esistevano — vedi
-la sezione **FASE-1** subito sotto, che è il lavoro principale della giornata.
+**SRCH-4 chiusa il 2026-08-20** (sezione `SRCH` sotto), insieme a **11 difetti nuovi della
+prima fase della pipeline**: 9 trovati costruendo tre harness di test che non esistevano
+(sezione **FASE-1**, il lavoro principale della giornata), più 2 trovati *cercandoli* con una
+passata sistematica invece di attenderli (sezione **FLEX-1/FLEX-1b**). **TIME-D1b aperta e
+chiusa nella stessa giornata**, misurata in produzione.
 
 GCFMT-1 resta aperta in attesa di un secondo formato GC reale da supportare: con un solo
 caso l'interfaccia non è validabile — non è urgente nonostante il tono, tant'è che qui è
