@@ -1,6 +1,6 @@
 # Backlog — neural-log-analyzer
 
-Aggiornato: 2026-08-19
+Aggiornato: 2026-08-20
 
 ---
 
@@ -8,8 +8,61 @@ Aggiornato: 2026-08-19
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
+| TIME-D1b | **Misurare in produzione quante righe non sono databili** (conseguenza di D2, sezione FASE-1). Vedi le istruzioni operative subito sotto la tabella | Alla prossima esecuzione in prod |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
-| SRCH-4 | **Gap in QUOTE-1: nome di log di sistema quotato senza `*` viene assorbito in `<PATTERN>`, non resta letterale.** Segnalato dall'utente nel secondo test manuale di SRCH-2/SRCH-3: `sul nodo 3 di produzione trova "No HeadersTranscoder provided" nel "server.log" di oggi` instrada a `search_all_logs` (87%) invece di `grep_named_log`. Confermato per ispezione diretta di `NORM_QUERY`: `sul <NODE> di <ENV> trova <PATTERN> nel <PATTERN> di oggi` — **entrambe** le stringhe quotate diventano `<PATTERN>` in `normalize-query.sh`, perché `"server.log"` senza `*` non è glob-like per la regola QUOTE-1 (serve `*` **e** `.log` insieme) e quindi non produce `<LOGFILE>`, ma sparisce anche come testo letterale. Il bigramma che discrimina SRCH-2 (`nlp/bigrams.txt`: `server.log\|gc.log\|access.log :: <pattern>\|cerca\b\|trova\b\|...`) matcha la sottostringa **letterale** "server.log"/"gc.log"/"access.log" nella query — con quella sostituita da `<PATTERN>`, il bigramma non si attiva e la rete ricade sul marcatore di totalità che spinge verso `search_all_logs`. **Non è errore dell'utente**: senza virgolette (`trova "..." nel server.log`) la query instrada correttamente, come verificato nei test SRCH-2/SRCH-3 esistenti — il gap è specifico alla combinazione "nome di log di sistema" + "quotato" + "senza wildcard". Direzione plausibile (da validare, non decisa): estendere la disambiguazione per forma di QUOTE-1 perché una stringa quotata che combacia esattamente con un sinonimo di log di sistema (già riconosciuto da `system_log_kind_of()`/`_is_system_log_base()`, `lib/utils-logfiles.sh`) resti letterale o diventi `<LOGFILE>` anche senza `*` — simmetrico al caso named già gestito. Richiede verifica di non-regressione sulle 5 query quotate esistenti nel dataset e su `--parity`. **Da implementare, non ancora iniziato** | Da fare |
+
+### TIME-D1b — istruzioni operative
+
+**Il contesto in tre righe.** `in_range(epoch <= 0)` ora **include** la riga: un epoch 0
+significa «istante ignoto», e non sapere quando è avvenuta una riga non è una ragione per
+affermare che sia fuori dal periodo (principio 5). Prima veniva esclusa, ed è il «falso
+negativo pieno» misurato in FORMAT-1: il bot diceva «nessuna richiesta nel periodo» quando in
+realtà non aveva saputo leggere le date.
+
+**I tre casi, di cui solo il terzo è aperto:**
+
+| caso | comportamento | copertura |
+|---|---|---|
+| nessuna riga non databile | identico a prima | il caso normale |
+| **tutte** le righe non databili | il tool lo dichiara | risolto — `access_ts_format_warning()` |
+| **alcune** righe non databili | quelle righe passano il filtro **sempre**, senza avviso | **⚠️ da misurare** |
+
+Il terzo caso non ha un avviso di proposito: scatterebbe su ogni riga malformata di un log da
+200.000 righe, e il rumore costante fa ignorare gli avvisi veri.
+
+**La domanda non è "è giusto includere?" ma "quanto pesa?"** — 2 righe su 200.000 è
+irrilevante, 50.000 su 200.000 significa che un quarto del file scavalca sempre la finestra e
+l'utente crede di guardare un'ora mentre ne guarda otto. Stessa modifica, giudizi opposti, e
+la differenza è un numero non misurabile da locale (non ci sono log di produzione).
+
+**Comando** — una query qualunque, su un tool che legge l'access log e uno che legge il
+server log, perché il numero dipende dal formato del file e non dal tool:
+
+```bash
+BOT_LOG_LEVEL=debug ./chatbot.sh --profile profiles/liquido --env prod --node 4 \
+    --query "quanti errori 500 stamattina" 2>&1 | grep utils-time
+```
+
+Nessun output = zero righe non databili, ed è l'esito migliore. Altrimenti:
+`[DEBUG] utils-time: N righe su M senza timestamp riconosciuto (incluse per principio 5)`.
+
+**Come leggere N/M:** sotto l'1% → chiudere la voce, modifica a costo zero; qualche punto
+percentuale → accettabile, ma capire *quali* righe sono (probabilmente stack trace o righe di
+continuazione); decine di punti → rivedere, e il rollback è togliere `if (epoch <= 0) return 1`
+da `lib/utils-time.awk`, una riga.
+
+⚠️ **Corretto il 2026-08-20 dopo una domanda dell'utente**: il canale richiedeva *anche*
+`BOT_LOG_FILE`, quindi `BOT_LOG_LEVEL=debug` da solo non scriveva nulla — e una misura assente
+sarebbe stata letta come «zero righe non databili». Ora il fallback è `/dev/stderr`, come
+documenta `utils-log.sh` per tutto il resto del logging. Un canale diagnostico che tace quando
+è mal configurato è indistinguibile da uno che dice «tutto bene»: è lo stesso falso verde dei
+test che non girano (NLP-1) e dei checksum mai verificati (`c1951e3`).
+
+---
+
+**SRCH-4 chiusa il 2026-08-20** (sezione `SRCH` sotto), insieme a **9 difetti nuovi della
+prima fase della pipeline** trovati costruendo tre harness di test che non esistevano — vedi
+la sezione **FASE-1** subito sotto, che è il lavoro principale della giornata.
 
 GCFMT-1 resta aperta in attesa di un secondo formato GC reale da supportare: con un solo
 caso l'interfaccia non è validabile — non è urgente nonostante il tono, tant'è che qui è
@@ -22,6 +75,174 @@ riaddestrato e verificato su entrambi i profili nella stessa sessione in cui è 
 segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manuale
 (nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
 implementato su richiesta esplicita dell'utente ("implementiamo domani").
+
+## FASE-1 — La prima fase della pipeline: tre harness e 9 difetti — **FATTO** (2026-08-20)
+
+Indicazione dell'utente all'inizio della sessione: *«mi sembra che abbiamo molti problemi
+nella fase iniziale del bot — parsing della riga ed estrazione parametri»*, con la proposta
+di concentrarsi lì costruendo una suite di test più precisa.
+
+**La misura ha confermato la conclusione e corretto la diagnosi.** Sui 31 commit `fix(` dal
+1° agosto, i file di produzione più toccati sono `dispatch.sh` (13) e i tool AWK (~32),
+contro `normalize-query.sh` (4) e `param-extract.sh` (3). Per conteggio grezzo i bug stanno
+nei tool. Ma il conteggio è la metrica sbagliata: i tool sono stati corretti tanto perché
+sono **osservabili** (un numero sbagliato in tabella si vede) e perché hanno fixture vere.
+La prima fase ha meno fix non perché abbia meno difetti, ma perché i suoi difetti sono
+**silenziosi** — e la struttura dei test lo dimostrava in tre punti:
+
+1. **Level 1 asseriva solo il nome del tool.** 89 query di intent, zero asserzioni sui
+   parametri estratti. Una query classificata giusta con finestra temporale sbagliata
+   **passava la suite** — la classe esatta del bug `"oggi"` (commit `8838683`).
+2. **11 dei 19 parametri emessi da `param-extract.sh` non avevano una sola asserzione**:
+   `STATUS_CODE`, `THRESHOLD_MS`, `IP_FILTER`, `LOG_LEVEL`, `LEVEL_EXPLICIT`,
+   `NAMED_LOG_GLOB`, `DATE_FILTER`, `TIME_ONLY_QUERY`. E `utils-time.sh` + `utils-time.awk`
+   — 427 righe, la superficie più ambigua del progetto — avevano **5 asserzioni indirette**
+   e nessun file di test dedicato.
+3. **Il REPL ha stato, i test no.** `run-tests.sh:245` lo dichiarava esplicitamente
+   («chatbot.sh le eredita di proposito, i test no»). Due bug reali erano venuti da lì
+   (`e43d1c6` TIME_EXPLICIT persistente, `01c5f6f` DETECTED_* azzerate dall'eval) e
+   **nessuno dei due era catturabile dalla suite per costruzione**.
+
+### I tre harness
+
+| file | asserzioni | esito |
+|---|---|---|
+| `tests/test-utils-time.sh` (nuovo) | 82 | 17 branch della cascata, la loro **precedenza reciproca**, `TIME_ONLY_QUERY`, `DATE_FILTER`, input degeneri, lato AWK (`parse_iso`/`in_range`) |
+| `run-tests.sh` — Level 1b (nuovo) | 85 | gli 11 parametri scoperti, asseriti **insieme al tool sulla stessa invocazione** (lezione di LOGDISC-4e: un test per-feature non coglie l'interazione fra feature) |
+| `tests/test-repl-state.sh` (nuovo) | 34 | query consecutive nello **stesso processo** via stdin del REPL |
+
+**`_front_end()` in `run-tests.sh`**: punto unico che replica la sequenza di `chatbot.sh`
+(normalizza → esporta `NORM_QUERY` → esporta `DETECTED_*` → inferisce → estrae parametri),
+usato sia da Level 1 sia da Level 1b. Due repliche indipendenti divergerebbero, ed è
+precisamente il difetto che ha reso invisibile il train/serve skew di NLOG-4 (principio 2).
+Scrivendolo si è ricalpestata la trappola di HELP-1 (`3859d62`): `[[ ]] && cmd` come ultimo
+comando di una subshell restituisce 1 e fa abortire il chiamante sotto `set -e`.
+
+### Risultato negativo importante: lo stato del REPL era già corretto
+
+`test-repl-state.sh` passa **34/34 senza alcun fix**. L'ipotesi di un leak di `DATE_FILTER`
+non è confermata; `STATUS_CODE`/`THRESHOLD_MS`/`LOG_LEVEL` non fanno leak perché
+`param-extract.sh` ri-emette tutte le 19 variabili a ogni query, anche vuote, e l'`eval` le
+sovrascrive; `TIME_EXPLICIT` si ricalcola davvero. **La classe che si temeva di più era già
+sana** — ora è blindata invece di essere non verificabile.
+
+**L'harness ha però trovato un difetto in se stesso, e vale più di un difetto nel codice.**
+Le asserzioni sulla persistenza della finestra guardavano il **banner**, che stampa
+`ACTIVE_TIME_FROM/TO`; i tool ricevono `TIME_FROM/TO`. Sono variabili diverse. Con una
+mutazione deliberata che svuotava l'eredità, il banner restava corretto e **tutte le
+asserzioni passavano**: si stava asserendo l'etichetta invece dell'effetto, che è LOGSEL-1 D2
+in forma di test. Aggiunta l'asserzione sull'effetto (una richiesta 500 fuori fascia che non
+deve essere contata), entrambe le mutazioni vengono catturate.
+
+### I 9 difetti trovati e corretti
+
+| ID | forma | comportamento prima | causa |
+|---|---|---|---|
+| **T1** | `ieri pomeriggio`, `ieri alle 10`, `ieri dalle 10 alle 14` | finestra di **OGGI**, `DATE_FILTER` vuoto | i branch `EXPLICIT_RANGE`/`SINGLE_HOUR`/fasce cablavano `now_date` e **precedevano** il branch `ieri` |
+| **T2** | `ieri mattina`, `ieri sera`, `2 giorni fa di mattina` | giornata **intera** (fascia scartata) | `mattina`/`sera` nudi non erano nelle regex delle fasce → cadeva sul branch del giorno |
+| **T3** | `ultimo giorno` | **nessun filtro** | `ultim[aei]` esclude il maschile singolare; il commento la dichiarava supportata |
+| **T4** | `tra le 10 e le 12` | **nessun filtro** | forma documentata nel commento dal primo giorno, mai implementata nella regex |
+| **T5** | `alle 99` | finestra a **2026-08-24 02:30** | nessuna validazione di ora/minuti; `mktime()` normalizza i valori fuori scala |
+| **D1** | `dalle 22 alle 2` | intervallo **invertito** → `in_range` sempre 0 → «nessun risultato» | entrambi gli estremi ancorati allo stesso giorno |
+| **P1** | `ultime 500 righe`, `sopra i 500 ms`, `ultimi 450 minuti` | `STATUS_CODE=500/450` | `\b[45][0-9]{2}\b` non distingue i ruoli del numero (latente: nei casi misurati nessun tool attivo lo legge) |
+| **P2** | `log applicativi` (plurale) | `SYSLOG_KIND`/`LOG_TYPE` vuoti → fallback access log | `applicativ[oa]?` non copre `applicativi`/`applicative` |
+| **D2** | riga senza timestamp riconoscibile, filtro attivo | **esclusa** → «nessun risultato» su dati non databili | `in_range(0)`: `0 >= ts_from` è falso per ogni finestra reale |
+
+**T1 e T2 erano lo stesso errore di modellazione, non due bug.** Il giorno e l'ora del giorno
+sono dimensioni **indipendenti**; il codice le trattava come rami alternativi della stessa
+cascata, quindi mutuamente esclusive — una frase che nominava entrambe *doveva* perderne una,
+e quale si perdesse dipendeva soltanto da quale regex capitava di matchare prima.
+`_RE_AFTERNOON` conteneva `\bpomeriggio\b` nudo → `ieri pomeriggio` prendeva il ramo della
+fascia con `now_date` (**giorno sbagliato**); `_RE_MORNING` richiedeva `di mattina` →
+`ieri mattina` cadeva su `ieri` (**fascia persa**). Nessuno ha progettato quell'asimmetria.
+La correzione **separa le due fasi** (`utils-time.sh`: Fase 1 ancora di giorno, Fase 2
+finestra oraria ancorata), così i quattro sintomi diventano un caso solo e la struttura non
+può produrne un quinto.
+
+**T3 e P2 sono lo stesso difetto in due file**: una classe di caratteri che copre alcune
+flessioni della parola italiana e non altre. Nessuno dei due dava errore — producevano un
+parametro vuoto, cioè un filtro che **si disattiva** invece di fallire. Vale la pena cercare
+la stessa forma nelle altre regex flesse del progetto.
+
+**D1 — la regola, indicata dall'utente**: `from` è l'occorrenza **più recente già passata**
+di quell'ora del giorno; se `to ≤ from` il range attraversa la mezzanotte e `to` va al giorno
+successivo; se il giorno **non** è nominato e `from` cade nel futuro, si arretra di un giorno.
+Alle 21:00 `dalle 22 alle 2` → ieri 22:00 → oggi 02:00; alle 23:00 → oggi 22:00 → domani
+02:00. **L'arretramento vale solo per un range che attraversa la mezzanotte**: su un range
+normale sarebbe una sorpresa (`dalle 10:30 alle 14:45` chiesto alle 09:00 risponderebbe su
+ieri) e butterebbe via dati che esistono (principio 5). Verificato su `_range_window()` con un
+`now` **sintetico**, non end-to-end: un'asserzione sull'ora reale fallirebbe se la suite
+girasse dopo le 22:00 — la stessa fragilità delle date cablate.
+
+**D2 — la scelta e la sua contropartita.** `in_range(epoch <= 0)` ora restituisce 1: un epoch
+≤ 0 significa «istante IGNOTO», e non sapere quando è avvenuta una riga non è una ragione per
+affermare che sia fuori dal periodo (principio 5). L'esposizione è stata **enumerata prima di
+decidere**, non stimata: dei 17 call site di `in_range()`, 9 sono in regole AWK che hanno già
+matchato la grammatica del timestamp (epoch 0 irraggiungibile), `grep_named_log:48` gestisce
+`row_epoch <= 0` da sé (immune), **`search_all_logs` non chiama `in_range` affatto** — quindi
+il fix `722b054` sulle stack trace non si riapre. Restano i 7 call site di `access_ts()`.
+La contropartita è `access_ts_format_warning()`, che dice quando il filtro **non** ha potuto
+filtrare: senza, si scambierebbe un falso negativo con un falso positivo. Scoperto
+implementandola che **`access_ts_ok()` (creata da FORMAT-1) non aveva un solo chiamante** —
+il meccanismo per dire «formato non riconosciuto» esisteva e non era collegato (principio 8).
+Aggiunta anche `access_ts_period_ok()`: senza, il tool stampava «il filtro non è stato
+applicato» e subito dopo «Nessuna richiesta trovata **nel periodo selezionato**» — due frasi
+che si contraddicono, e una contraddizione è peggio del falso negativo che il lavoro elimina.
+
+### C1 e C2 — i due misrouting, con retrain
+
+| ID | query | prima | causa |
+|---|---|---|---|
+| **C1** | `quanti 5xx stamattina` | `traffic_volume` (37%) | firma «quanti + classe 4xx/5xx + espressione temporale» assente dal dataset: 1 solo esempio `count_status` con `5xx` contro 6 di `distribute_status` |
+| **C2** | `richieste da 192.168.1.100` | `tail_log` | i soli segnali di `filter_ip` erano le **parole** `\bip\b` e `client\|indirizz`: una query che porta l'indirizzo e non la parola non attivava nulla |
+
+**C2 non era un gap di copertura ma di generalizzazione**, e la diagnosi lo ha mostrato: i 6
+esempi `filter_ip` del dataset contenevano **IP letterali** (`172.30.169.1`, `10.156.7.250`,
+…), quindi il modello era esposto a ottetti specifici. È lo stesso difetto che `<LOGFILE>` ha
+risolto per i nomi di log e `<PATTERN>` per le stringhe quotate, quindi la stessa soluzione:
+**nuovo placeholder `<IP>`** in `normalize-query.sh` (sezione 0, riconoscimento per forma) e
+unigramma `<ip>`. Non interferisce con `IP_FILTER`, che `param-extract.sh` estrae dalla query
+**grezza** (`chatbot.sh:363`).
+
+**Retrain**: `NUM_FEATURES` 113 → 114, `MODEL_TOPOLOGY` → `114,48,16`, reinizializzazione via
+`setup.sh` (seed 42), dataset 1262 → 1296 righe labeled (1146 esempi), early stopping
+all'epoca 969 su 5000, pesi dall'epoca 869. `test-train-regression.sh` aggiornato: checksum
+rigenerato (`4ffd7991…`) e **riproducibilità verificata su 3 run bit-identici**, come
+prescrive il suo stesso commento; `TOPOLOGY` e `--inputs` derivano ora da `NUM_FEATURES`
+invece di essere lo stesso numero scritto tre volte (principio 2).
+
+**La prova che `<IP>` generalizza**, non memorizza: `8.8.4.4` e `203.0.113.77` — indirizzi
+mai visti in training — instradano a `filter_ip` al 98%.
+
+### `DATE_FILTER` è vestigiale (scoperta collaterale)
+
+`utils-time.sh` documentava `DATE_FILTER` come «usato da `resolve-logs.sh` per selezionare il
+file di log ruotato corretto». **Falso**: `chatbot.sh:242` glielo passa, `resolve-logs.sh` non
+lo legge in nessun punto (grep a zero). Le rotazioni le seleziona il walk temporale su
+`TIME_FROM/TO` (LOGDISC-4). L'unico effetto vivo è `chatbot.sh:398`, dove un suo cambio forza
+`ctx_changed=1`. Commento corretto — chi lo leggesse come un selettore di file cercherebbe un
+bug di selezione rotazioni nel posto sbagliato. Conseguenza da tenere presente: T1 **non** era
+un errore composto «finestra sbagliata + file sbagliato», come una prima analisi aveva
+scritto; la finestra era sbagliata e il file la seguiva coerentemente.
+
+### Verifica finale
+
+`bash tests/run-tests.sh` → **174 PASS / 0 FAIL** su **liquido** e su **usnext** (pesi
+condivisi, entrambi i profili). Suite passata da 96 asserzioni verdi a 174.
+`--parity` su entrambi i profili. Fail-before/pass-after: 11 FAIL in `test-utils-time.sh` e
+6 in Level 1b prima dei fix, 0 dopo; `test-repl-state.sh` verificato con **due mutazioni
+deliberate** su `chatbot.sh` (TIME_EXPLICIT reso persistente, eredità della finestra
+svuotata), entrambe catturate, produzione ripristinata bit-identica.
+
+**Quattro asserzioni erano sbagliate le mie e sono state corrette invece di toccare la
+produzione** (la lezione di metodo di FORMAT-1: *un test che fallisce non implica un bug nel
+codice*): `__MISSING__` su un pattern non quotato è voluto per design; `SYSLOG_KIND` vuoto su
+«statistiche GC» è corretto, perché il tool conosce la propria sorgente da `TOOL_SOURCES` e
+il campo si popola solo quando l'utente **nomina** un log di sistema; due query erano
+genuinamente ambigue fra `tail_named_log` e `grep_named_log`. Più tre errori di aritmetica
+della fixture in `test-repl-state.sh`, che al primo giro sembravano difetti del codice.
+
+---
 
 ### NLP-1 + PROF-2 — **FATTO** (2026-08-17)
 
@@ -164,6 +385,34 @@ Oggi ci sono due metà di funzionalità che non si toccano:
 | SRCH-2 | **Stesso gap di SRCH-1, ma per i log di sistema** (`server.log`/`access.log`/`gc.log`). Risolto estendendo `grep_named_log` (via 1 della nota di design, non `search_all_logs`): `TOOL_SOURCES[grep_named_log]` è passato da `"named"` a `"named|server|access|gc"` (`nlp/tools.conf`), con un ramo dedicato nel dispatch che risolve il path via `resolve_system_log_dir()`/`resolve_log_glob()` invece di `resolve_named_log_path()`. Il canale del pattern testuale, verso il tool AWK, era già quello di SRCH-1 — riusato senza duplicazione. Vedi nota di chiusura sotto per dettagli implementativi, decisioni e bug collaterali corretti | **Fatto** (2026-08-19) |
 | QUOTE-1 | **Le virgolette come segnale riconosciuto: `<PATTERN>` nel vocabolario**, simmetrico al `<LOGFILE>` già esistente. Nato come prerequisito di SRCH-2 (serviva per distinguere `cerca "NPE" nel server.log` da `cerca errori nel server.log`) ma è una **feature a sé**, riusabile da qualunque tool che accetti un pattern testuale: qualsiasi stringa quotata che non sia glob-like (niente `*` + `.log`) diventa `<PATTERN>` in `normalize-query.sh` (e nella sua replica Python `build_dataset.py`, parità obbligatoria). Vedi nota di chiusura sotto | **Fatto** (2026-08-19) |
 | SRCH-3 | **Bug prod, primo test manuale di SRCH-2**: pattern con spazi (`cerca "No HeadersTranscoder provided." nel server.log`) faceva crashare `grep_named_log.awk` (`gawk: cannot open file 'HeadersTranscoder' for reading`). Causa: i tre siti `eval gawk "$tw_args" ... -v pattern="$_gnl_pattern" ...` nel case `grep_named_log` (glob, sistema, named) fanno un secondo giro di parsing della shell — le virgolette che proteggono `$_gnl_pattern` nel primo giro non sopravvivono al secondo, quindi un pattern multi-parola veniva risplittato in argomenti separati che gawk, non riconoscendoli come `nome=valore`, tratta come file da apire. **Difetto preesistente di SRCH-1** (stesso costrutto da 2026-08-06), invisibile finché nessun pattern testato conteneva uno spazio — SRCH-2 l'ha solo esposto per primo, con un vero utente in produzione. Vedi nota di chiusura sotto | **Fatto** (2026-08-19) |
+
+| SRCH-4 | **Nome di log di sistema quotato senza `*`: resta LETTERALE invece di essere assorbito in `<PATTERN>`.** Nuova sezione (a-ter) in `normalize-query.sh`, fra la (a) glob-quotato e la (a-bis) `<PATTERN>`. Vedi nota di chiusura sotto | **Fatto** (2026-08-20) |
+
+### SRCH-4 — nota di chiusura (2026-08-20)
+
+**Scelta: letterale, non `<LOGFILE>`.** La sezione (b) esclude deliberatamente i log di
+sistema dalla generalizzazione a `<LOGFILE>` — hanno tool dedicati — quindi emettere
+`<LOGFILE>` qui contraddirebbe quella decisione a due passi di distanza. Lasciando il nome
+letterale la query diventa **identica alla forma senza virgolette**, che già instradava
+correttamente: nessuna nuova feature, nessun nuovo confine da insegnare alla rete, **nessun
+retrain necessario per questo fix**. Si riusa ciò che funziona già.
+
+**Riconoscimento tramite `system_log_kind_of()`** (`utils-logfiles.sh`), unica fonte di verità
+sui sinonimi dei log di sistema: nessun secondo rilevatore parallelo che possa divergere
+(principio 8). Sostituzione via parameter expansion e non `sed`, perché il contenuto fra
+virgolette è testo arbitrario dell'utente e non va reinterpretato come regex.
+
+**Replica Python obbligatoria** (`build_dataset.py`), con tre dettagli su cui la parità
+bit-a-bit si gioca e che una replica "ragionevole" sbaglierebbe: si iterano **entrambi** i
+tipi di virgoletta (come il `for` in bash, non `if/elif` come la (a-bis) accanto); lo strip di
+`.log` è **case-sensitive** come `${_span%.log}`; gli span si raccolgono **una volta** prima
+di mutare la stringa, come fa la process substitution in bash.
+
+**Verifica**: la query reale dell'utente passa da `search_all_logs` (87%) a `grep_named_log`
+(94%), unico tool sopra `TOOL_THRESHOLD`. 7 asserzioni in `tests/test-normalize-query.sh`
+(letterale, `<PATTERN>` sull'altra stringa, **non** `<LOGFILE>`, apici singoli, e i due
+confini: glob quotato resta `<LOGFILE>`, stringa non-log resta `<PATTERN>`), 4 di routing in
+`run-tests.sh`. `--parity` 1146/1146 su entrambi i profili.
 
 ### SRCH-2 + QUOTE-1 — nota di chiusura (2026-08-19)
 
