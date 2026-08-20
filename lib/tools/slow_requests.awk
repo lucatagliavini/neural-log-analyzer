@@ -77,8 +77,12 @@ BEGIN {
 }
 
 END {
+    # Il filtro temporale non ha potuto filtrare (nessun timestamp riconosciuto in
+    # tutto il file): lo si DICE, invece di presentare dati non filtrati come se lo
+    # fossero. Contropartita di in_range(epoch<=0)=1 in utils-time.awk.
+    access_ts_format_warning()
     if (count == 0) {
-        printf "Nessuna richiesta lenta sopra %d ms trovata.\n", threshold_ms
+        if (access_ts_period_ok()) printf "Nessuna richiesta lenta sopra %d ms trovata.\n", threshold_ms
         exit
     }
 

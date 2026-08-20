@@ -96,6 +96,14 @@ url|path                  :: 1
 api                       :: 1
 
 # ── IP / client ───────────────────────────────────────────────────────────────
+# <ip> è il placeholder emesso da normalize-query.sh (sezione 0) per un indirizzo
+# IPv4 letterale. Prima esistevano solo le PAROLE `\bip\b` e `client|indirizz`,
+# quindi una query che porta l'indirizzo senza nominarlo — "richieste da
+# 192.168.1.100" — non attivava alcuna feature e finiva su tail_log. Stessa
+# funzione di <logfile> e <pattern>: dare al classificatore la forma invece del
+# letterale, così generalizza a indirizzi mai visti in training (ed evita di
+# imparare gli ottetti dei 6 esempi del dataset).
+<ip>                      :: 1
 \bip\b                    :: 1
 client|indirizz           :: 1
 \bchi\b|\bchiunque\b|\bchi.ha\b :: 1

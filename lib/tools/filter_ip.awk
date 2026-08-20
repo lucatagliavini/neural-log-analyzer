@@ -64,6 +64,10 @@ BEGIN {
 }
 
 END {
+    # Il filtro temporale non ha potuto filtrare (nessun timestamp riconosciuto in
+    # tutto il file): lo si DICE, invece di presentare dati non filtrati come se lo
+    # fossero. Contropartita di in_range(epoch<=0)=1 in utils-time.awk.
+    access_ts_format_warning()
     if (ip_filter != "") {
         if (count == 0) {
             printf "Nessuna richiesta trovata per IP: %s\n", ip_filter
@@ -88,7 +92,7 @@ END {
 
     } else {
         if (length(ip_count) == 0) {
-            print "Nessuna richiesta trovata nel log."
+            if (access_ts_period_ok()) print "Nessuna richiesta trovata nel log."
             exit
         }
 

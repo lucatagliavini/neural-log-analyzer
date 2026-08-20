@@ -26,11 +26,30 @@ query="${1,,}"
 eval "$(resolve_time_range "$query")"
 
 # Codice HTTP specifico: 200, 404, 500, 503, 4xx, 5xx ...
+#
+# Un numero di tre cifre che inizia per 4 o 5 non è per forza uno status HTTP: nella
+# stessa posizione può essere un CONTEGGIO ("ultime 500 righe") o una SOGLIA
+# ("sopra i 500 ms", "ultimi 450 minuti"). La regex nuda `\b[45][0-9]{2}\b` non
+# distingue i ruoli, quindi assegnava STATUS_CODE=500 a tutte e tre le frasi.
+#
+# Oggi il difetto è latente — nei casi misurati si attiva un solo tool e non legge
+# STATUS_CODE — ma è una trappola: basta che un tool multi-label che lo consuma
+# superi TOOL_THRESHOLD sulla stessa query e l'utente riceve un conteggio di
+# errori 500 che non ha chiesto, senza che nulla lo segnali.
+#
+# Si disambigua per RUOLO invece che con un lookahead (non disponibile in grep -E,
+# e `grep -P` non è garantito sul server ppc64le): dalla query si rimuovono prima
+# le occorrenze in cui il numero è legato a un quantificatore o a un'unità di
+# misura, poi si cerca lo status in ciò che resta. Uno stesso numero non può avere
+# due ruoli nella stessa frase.
+_sq_status=$(echo "$query" | sed -E '
+    s/(ultim|prim)[aeio]+ +[0-9]+//g;
+    s/[0-9]+ *(ms|millisecond[oi]?|secondi?|sec\b|minut[oi]|or[ae]|giorn[oi]|rig[ah]|record|linee|lin\b)//g')
 STATUS_CODE=""
-if   echo "$query" | grep -qE "\b[45][0-9]{2}\b"; then
-    STATUS_CODE=$(echo "$query" | grep -oE "\b[45][0-9]{2}\b" | head -1)
-elif echo "$query" | grep -qE "\b[2][0-9]{2}\b"; then
-    STATUS_CODE=$(echo "$query" | grep -oE "\b[2][0-9]{2}\b" | head -1)
+if   echo "$_sq_status" | grep -qE "\b[45][0-9]{2}\b"; then
+    STATUS_CODE=$(echo "$_sq_status" | grep -oE "\b[45][0-9]{2}\b" | head -1)
+elif echo "$_sq_status" | grep -qE "\b[2][0-9]{2}\b"; then
+    STATUS_CODE=$(echo "$_sq_status" | grep -oE "\b[2][0-9]{2}\b" | head -1)
 elif echo "$query" | grep -qE "5xx"; then
     STATUS_CODE="5xx"
 elif echo "$query" | grep -qE "4xx"; then
@@ -167,7 +186,14 @@ fi
 # SERVER_LOG_BASE/ACCESS_LOG_BASE/GC_LOG_BASE vengono da system.conf — sono i
 # nomi con cui gli utenti chiamano il file, non SERVER_LOG_FORMAT ("jboss"),
 # che è la tecnologia sottostante e non un sinonimo digitato dall'utente.
-_srv_words="server|applicativ[oa]?|dell.applicaz\\w*|${SERVER_LOG_FORMAT:-server}"
+# `applicativ[oaie]?` e non `applicativ[oa]?`: il plurale "log applicativi" — e il
+# femminile "applicative" — non matchavano, quindi SYSLOG_KIND restava vuoto e con
+# esso LOG_TYPE. Conseguenza: un tool che decide la sorgente da LOG_TYPE cadeva sul
+# fallback access log pur avendo l'utente nominato il log applicativo. È la stessa
+# classe di LOGSEL-1 (leggere il file sbagliato senza dirlo) e la stessa forma del
+# difetto `ultim[aei]` in utils-time.sh: una classe di caratteri incompleta che
+# copre alcune flessioni della parola e non altre.
+_srv_words="server|applicativ[oaie]?|dell.applicaz\\w*|${SERVER_LOG_FORMAT:-server}"
 _acc_words="access|accesso"
 _gc_words="gc|garbage.collector|garbage.collection"
 SYSLOG_KIND=""

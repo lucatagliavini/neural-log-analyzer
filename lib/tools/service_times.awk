@@ -48,8 +48,12 @@ function svc_percentiles(svc, n,    i, tmp) {
 }
 
 END {
+    # Il filtro temporale non ha potuto filtrare (nessun timestamp riconosciuto in
+    # tutto il file): lo si DICE, invece di presentare dati non filtrati come se lo
+    # fossero. Contropartita di in_range(epoch<=0)=1 in utils-time.awk.
+    access_ts_format_warning()
     if (length(svc_count) == 0) {
-        print "Nessun dato trovato nell'access log."
+        if (access_ts_period_ok()) print "Nessun dato trovato nell'access log."
         exit
     }
 

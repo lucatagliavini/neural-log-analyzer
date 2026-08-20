@@ -261,6 +261,37 @@ else
     (( PASS++ ))
 fi
 
+# ─── SRCH-4: log di sistema quotato senza wildcard ───────────────────────────
+# Bug prod segnalato il 2026-08-19: in `trova "X" nel "server.log"` ENTRAMBE le
+# stringhe quotate diventavano <PATTERN>, perché "server.log" senza '*' non è
+# glob-like. Il bigramma che discrimina SRCH-2 matcha la sottostringa LETTERALE
+# server.log|gc.log|access.log, quindi non si attivava e la query cadeva su
+# search_all_logs invece di grep_named_log.
+printf "\n\033[1m── SRCH-4: nome di log di sistema quotato \033[0m\n"
+
+_run 'sul nodo 3 di produzione trova "No HeadersTranscoder provided" nel "server.log" di oggi'
+assert_contains "il nome del log di sistema resta LETTERALE" "$NORM_QUERY" "server.log"
+assert_contains "la stringa di ricerca diventa <PATTERN>"    "$NORM_QUERY" "<PATTERN>"
+# Non deve diventare <LOGFILE>: la sezione (b) esclude deliberatamente i log di
+# sistema da quella generalizzazione, perché hanno tool dedicati.
+if [[ "$NORM_QUERY" != *"<LOGFILE>"* ]]; then
+    printf "  \033[32mPASS\033[0m  non diventa <LOGFILE> (i log di sistema ne sono esclusi)\n"; (( PASS++ ))
+else
+    printf "  \033[31mFAIL\033[0m  non diventa <LOGFILE>\n        got: '%s'\n" "$NORM_QUERY"; (( FAIL++ ))
+fi
+
+_run 'cerca "NPE" nel "gc.log"'
+assert_contains "gc.log quotato resta letterale" "$NORM_QUERY" "gc.log"
+_run "cerca 'NPE' nel 'access.log'"
+assert_contains "access.log quotato (apici singoli) resta letterale" "$NORM_QUERY" "access.log"
+
+# Confine: un glob quotato resta <LOGFILE>, la (a) ha priorità sulla (a-ter).
+_run 'cerca "timeout" nel "*-cc.log"'
+assert_contains "glob quotato resta <LOGFILE>" "$NORM_QUERY" "<LOGFILE>"
+# Confine: una stringa quotata che NON è un log di sistema resta <PATTERN>.
+_run 'cerca "NullPointerException" in tutti i log'
+assert_contains "stringa non-log resta <PATTERN>" "$NORM_QUERY" "<PATTERN>"
+
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 printf "═══════════════════════════════════════════════════\n"

@@ -75,6 +75,49 @@ result_line() {
     esac
 }
 
+# ─── Prima fase della pipeline: un solo punto di verità ───────────────────────
+#
+# Replica la sequenza esatta di chatbot.sh (righe 336-363) per la fase che
+# precede i tool: normalizza → esporta le entità → inferisce → estrae i
+# parametri. Esiste come funzione unica perché i due loop che la usano
+# (run_intent_tests, run_param_tests) devono misurare lo STESSO percorso: due
+# repliche indipendenti divergerebbero, ed è precisamente il difetto che ha reso
+# invisibile il train/serve skew sui named log (NLOG-4) e che il principio 2 di
+# CLAUDE.md vieta.
+#
+# Tre dettagli che rendono la replica fedele, e che una versione approssimata
+# sbaglierebbe:
+#   1. NORM_QUERY esportata prima di infer.sh — è ciò che la rete vede davvero
+#   2. DETECTED_APP/ENV/NODE esportate prima di param-extract.sh, che le
+#      ri-emette invariate (chatbot.sh:345; ometterle azzerava il nodo appena
+#      rilevato — bug reale del 2026-08-05)
+#   3. param-extract.sh riceve la query GREZZA, non NORM_QUERY: i placeholder
+#      <APP>/<LOGFILE> servono al classificatore, non all'estrazione parametri
+#
+# _front_end QUERY [tool|all]
+#   tool → emette solo "TOOL <nome> <prob>"
+#   all  → emette anche le righe VAR='valore' di param-extract.sh
+_front_end() {
+    local query="$1" want="${2:-all}"
+    (
+        export PROFILE_DIR
+        source <("$LIB_DIR/normalize-query.sh" "$query")
+        export NORM_QUERY
+        export DETECTED_APP DETECTED_ENV DETECTED_NODE
+
+        bash "$LIB_DIR/infer.sh" "$query" 2>/dev/null \
+            | awk '{ if ($2+0 > max) { max=$2+0; line=$0 } } END { print "TOOL " line }'
+
+        # if/fi e non `[[ ]] && cmd`: con want=tool quel costrutto sarebbe
+        # l'ultimo comando della subshell e restituirebbe 1, facendo abortire il
+        # chiamante sotto `set -e`. È la stessa trappola di HELP-1 (commit
+        # 3859d62, `return` nudo che troncava l'help).
+        if [[ "$want" == "all" ]]; then
+            bash "$LIB_DIR/param-extract.sh" "$query" 2>/dev/null
+        fi
+    )
+}
+
 # ─── LEVEL 1: intent test ─────────────────────────────────────────────────────
 # Formato: "expected_tool|query"
 # Se expected_tool è "NONE" verifica che infer.sh non produca output (sotto soglia)
@@ -194,6 +237,15 @@ INTENT_TESTS=(
     "grep_named_log|cerca \"OutOfMemory\" nel gc.log"
     "grep_named_log|trova \"timeout\" nell'access log"
 
+    # SRCH-4: come SRCH-2 ma col nome del log di sistema QUOTATO e senza wildcard.
+    # Bug prod 2026-08-19: entrambe le stringhe quotate diventavano <PATTERN>, il
+    # bigramma letterale server.log|gc.log|access.log non si attivava e la query
+    # finiva su search_all_logs (87%). La prima è la query reale dell'utente.
+    "grep_named_log|sul nodo 3 di produzione trova \"No HeadersTranscoder provided\" nel \"server.log\" di oggi"
+    "!search_all_logs|sul nodo 3 di produzione trova \"No HeadersTranscoder provided\" nel \"server.log\" di oggi"
+    "grep_named_log|cerca \"NPE\" nel \"gc.log\""
+    "grep_named_log|cerca 'OutOfMemory' nel 'access.log'"
+
     # I log di infrastruttura NON devono finire sui tool named-log: hanno i propri
     # (filter_errors / tail_log via LOG_TYPE).
     "!tail_named_log|righe di errore nel server.log"
@@ -237,19 +289,13 @@ run_intent_tests() {
             expected="${expected#!}"
         fi
 
-        # Replica il percorso reale di chatbot.sh:179-180: normalizza la query ed
-        # esporta NORM_QUERY prima di invocare infer.sh. Senza questo il test misura
-        # un percorso che in produzione non esiste — è il difetto che ha reso
-        # invisibile il train/serve skew sui named log (BACKLOG NLOG-4).
-        # Subshell per query: le DETECTED_*/NORM_QUERY di un test non devono
-        # sopravvivere al successivo (chatbot.sh le eredita di proposito, i test no).
-        top_result=$(
-            export PROFILE_DIR
-            source <("$LIB_DIR/normalize-query.sh" "$query")
-            export NORM_QUERY
-            bash "$LIB_DIR/infer.sh" "$query" 2>/dev/null | \
-                awk '{ if ($2+0 > max) { max=$2+0; line=$0 } } END { print line }'
-        )
+        # Percorso reale di chatbot.sh via _front_end (vedi sopra). La subshell è
+        # dentro _front_end: le DETECTED_*/NORM_QUERY di un test non sopravvivono
+        # al successivo. Nota che questa è anche la LIMITAZIONE strutturale di
+        # Level 1 — chatbot.sh le eredita di proposito fra query consecutive, e
+        # quel comportamento è coperto da tests/test-repl-state.sh, non qui.
+        top_result=$(_front_end "$query" tool)
+        top_result="${top_result#TOOL }"
         top_tool="${top_result%% *}"
         top_prob="${top_result##* }"
         top_pct=$(awk -v p="${top_prob:-0}" 'BEGIN { printf "%.0f", p * 100 }')
@@ -270,6 +316,174 @@ run_intent_tests() {
     done
 }
 
+# ─── LEVEL 1b: parametri estratti ─────────────────────────────────────────────
+#
+# Perché esiste (2026-08-20): Level 1 asserisce SOLO il nome del tool. Una query
+# instradata correttamente ma con un parametro sbagliato passava la suite — e
+# quella è la classe di difetto più costosa del progetto, perché produce una
+# risposta ben formata alla domanda sbagliata invece di un errore (LOGSEL-1,
+# FORMAT-1, e il bug "oggi" del 2026-08-05).
+#
+# Copre gli 11 parametri che param-extract.sh emette e che nessun test asseriva:
+# STATUS_CODE, THRESHOLD_MS, IP_FILTER, LOG_LEVEL, LEVEL_EXPLICIT,
+# NAMED_LOG_GLOB, DATE_FILTER, TIME_ONLY_QUERY.
+#
+# Asserisce tool E parametri sulla STESSA invocazione, di proposito: la lezione
+# di LOGDISC-4e è che un test per-feature non coglie l'interazione fra feature —
+# lì la combinazione "path senza app attraverso require_app" non era mai stata
+# esercitata pur essendo entrambe le metà coperte.
+#
+# Formato: "expected_tool|VAR=valore,VAR=valore|query"
+#   expected_tool vuoto = non asserire il tool, solo i parametri
+#   VAR=  (valore vuoto) = asserisce che il parametro sia vuoto
+PARAM_TESTS=(
+    # ── STATUS_CODE ──────────────────────────────────────────────────────────
+    "count_status|STATUS_CODE=500|quanti errori 500 ci sono stati stamattina"
+    "count_status|STATUS_CODE=404|quanti 404 nell'ultima ora"
+    "count_status|STATUS_CODE=4xx|numero di 4xx nell'ultima ora"
+    "count_status|STATUS_CODE=5xx|quanti 5xx stamattina"
+    "distribute_status|STATUS_CODE=400|distribuzione degli errori 400 per endpoint in produzione"
+    # Confine: una query senza codice non deve inventarne uno.
+    "filter_errors|STATUS_CODE=|errori nel server log del nodo 3"
+    # Collisione: "500" in "ultime 500 righe" è un CONTEGGIO, non uno status HTTP.
+    # La regex \b[45][0-9]{2}\b non distingue i due ruoli del numero.
+    "tail_log|STATUS_CODE=,TAIL_N=500|ultime 500 righe del log"
+    # Collisione: "500 ms" è una SOGLIA, non uno status HTTP.
+    "slow_requests|STATUS_CODE=,THRESHOLD_MS=500|richieste sopra i 500 ms"
+
+    # ── THRESHOLD_MS ─────────────────────────────────────────────────────────
+    "slow_requests|THRESHOLD_MS=1000|dammi le chiamate lente in produzione nodo 5"
+    "slow_requests|THRESHOLD_MS=2000|richieste più lente di 2000 ms"
+    "slow_requests|THRESHOLD_MS=3000|chiamate oltre 3000 ms stamattina"
+    "count_status|THRESHOLD_MS=|quanti errori 500 ci sono stati stamattina"
+
+    # ── IP_FILTER ────────────────────────────────────────────────────────────
+    "filter_ip|IP_FILTER=10.0.0.1|traffico dall'ip 10.0.0.1"
+    "filter_ip|IP_FILTER=192.168.1.100|richieste da 192.168.1.100 stamattina"
+    "filter_ip|IP_FILTER=|traffico per indirizzo ip sul nodo 2"
+
+    # ── LOG_LEVEL + LEVEL_EXPLICIT ───────────────────────────────────────────
+    # LEVEL_EXPLICIT distingue "livello chiesto" da "default applicato": è ciò
+    # che permette a SRCH-1 di cercare in TUTTO il file quando la query porta un
+    # pattern ma non nomina un livello. Introdotto il 2026-08-06, mai asserito.
+    "grep_named_log|LOG_LEVEL=ERROR,LEVEL_EXPLICIT=1|errori nel cc.log"
+    "grep_named_log|LOG_LEVEL=WARN,LEVEL_EXPLICIT=1|warning nel cc.log"
+    "grep_named_log|LOG_LEVEL=WARN+,LEVEL_EXPLICIT=1|problemi sul cc.log del nodo 12 di produzione"
+    "grep_named_log|LOG_LEVEL=WARN+,LEVEL_EXPLICIT=1|anomalie nel api.log"
+    # Senza asserzione sul tool: "righe info" / "tutti i livelli" sono frasi
+    # ambigue fra tail_named_log e grep_named_log (entrambe leggono lo stesso
+    # file, cambia solo il filtro) e qui si misura l'ESTRAZIONE del livello, non
+    # il routing. Vincolare anche il tool renderebbe il test un doppio
+    # esperimento con una sola conclusione possibile.
+    "|LOG_LEVEL=INFO,LEVEL_EXPLICIT=1|righe info nel cc.log"
+    "|LOG_LEVEL=ALL,LEVEL_EXPLICIT=1|tutti i livelli nel cc.log"
+    # Il caso che LEVEL_EXPLICIT esiste per servire: pattern quotato senza
+    # livello nominato → default ERROR ma NON esplicito, così dispatch.sh
+    # allarga a tutto il file invece di filtrare sui soli errori.
+    "grep_named_log|LEVEL_EXPLICIT=0,SEARCH_PATTERN=NullPointerException|cerca \"NullPointerException\" nel cc.log"
+    "grep_named_log|LEVEL_EXPLICIT=0|cerca \"timeout\" nel api.log"
+
+    # ── SEARCH_PATTERN + NAMED_LOG_GLOB (disambiguazione per forma, QUOTE-1) ──
+    "grep_named_log|SEARCH_PATTERN=NullPointerException,NAMED_LOG_GLOB=|cerca \"NullPointerException\" nel server.log"
+    "search_all_logs|SEARCH_PATTERN=NullPointerException|cerca \"NullPointerException\" in tutti i log"
+    # Le virgolette sono OBBLIGATORIE per design (param-extract.sh:236): senza,
+    # il pattern è __MISSING__ e il tool chiede di quotare invece di indovinare
+    # quale parola della frase sia il termine di ricerca. Questa query è nel
+    # Level 1 come caso positivo di routing — instrada bene e poi chiede le
+    # virgolette, che è il comportamento voluto, non un difetto.
+    "search_all_logs|SEARCH_PATTERN=__MISSING__|in quali log c'è la stringa NullPointerException"
+    # Pattern con spazi: la stringa reale del bug prod SRCH-3.
+    "grep_named_log|SEARCH_PATTERN=No HeadersTranscoder provided.|cerca \"No HeadersTranscoder provided.\" nel server.log"
+    # Glob-like → NAMED_LOG_GLOB, e SEARCH_PATTERN resta vuoto: mutuamente
+    # esclusivi per forma. Prima si popolavano entrambi con lo stesso testo e
+    # dispatch.sh cercava il glob DENTRO il file.
+    "tail_named_log|NAMED_LOG_GLOB=*c1nssprod*.log,SEARCH_PATTERN=|ultime 10 righe di \"*c1nssprod*.log\""
+    "grep_named_log|NAMED_LOG_GLOB=*-database.log|warning nel '*-database.log'"
+    # Entrambi presenti: il glob è il file, il pattern è il testo.
+    "grep_named_log|NAMED_LOG_GLOB=*-cc.log,SEARCH_PATTERN=timeout|cerca \"timeout\" nel \"*-cc.log\""
+    # Trigger di ricerca senza stringa quotata → __MISSING__, non vuoto: i tool
+    # devono poter dire "quale stringa?" invece di cercare il nulla.
+    "|SEARCH_PATTERN=__MISSING__|cerca nel cc.log"
+
+    # ── NAMED_LOG (longest-match) ────────────────────────────────────────────
+    # Il bug del longest-match: "ccJBatch.log" risolto come "cc" faceva aprire
+    # il file sbagliato con routing corretto — silenzioso per definizione.
+    "tail_named_log|NAMED_LOG=ccJBatch|ultime righe del ccJBatch.log"
+    "tail_named_log|NAMED_LOG=ccCanaliz|ultime 2 righe del ccCanaliz.log"
+    "tail_named_log|NAMED_LOG=cc|ultime righe del cc.log"
+    # Log di infrastruttura: hanno tool dedicati, NAMED_LOG deve restare vuoto.
+    "filter_errors|NAMED_LOG=,SYSLOG_KIND=server|righe di errore nel server.log"
+    "tail_log|NAMED_LOG=,SYSLOG_KIND=gc|ultime righe del gc.log"
+
+    # ── LOG_ORDER + TAIL_N ───────────────────────────────────────────────────
+    "tail_log|LOG_ORDER=tail,TAIL_N=50|ultime righe del log"
+    "tail_log|LOG_ORDER=tail,TAIL_N=100|ultime 100 righe"
+    "tail_log|LOG_ORDER=head,TAIL_N=10|prime 10 righe del log"
+    "tail_named_log|LOG_ORDER=head,TAIL_N=20|mostrami le prime 20 righe del database.log"
+
+    # ── DATE_FILTER (sceglie la ROTAZIONE in resolve-logs.sh) ────────────────
+    # Un DATE_FILTER vuoto su una query datata fa leggere il file di OGGI: è la
+    # seconda metà dell'errore composto: finestra sbagliata + file sbagliato,
+    # concordi, quindi la risposta è coerente e completamente errata.
+    "filter_errors|DATE_FILTER=$(date -d yesterday +%Y-%m-%d)|errori nel server log di ieri"
+    "filter_errors|DATE_FILTER=$(date -d '2 days ago' +%Y-%m-%d)|errori nel server log 2 giorni fa"
+    "filter_errors|DATE_FILTER=|errori nel server log di oggi"
+
+    # ── TIME_ONLY_QUERY (set-context, non una domanda) ───────────────────────
+    "|TIME_ONLY_QUERY=1|dalle 10 alle 12"
+    "|TIME_ONLY_QUERY=1|ultimi 30 minuti"
+    "|TIME_ONLY_QUERY=0|errori di stamattina"
+
+    # ── LOG_TYPE / SYSLOG_KIND (quale sorgente di sistema) ───────────────────
+    "filter_errors|LOG_TYPE=server,SYSLOG_KIND=server|errori nel server log del nodo 3"
+    "count_status|LOG_TYPE=,SYSLOG_KIND=access|errori nel access.log di produzione stamattina del nodo 4"
+    # SYSLOG_KIND si popola quando l'utente NOMINA un log di sistema, non per
+    # dichiarare la sorgente del tool: gc_stats sa da sé di leggere il gc log
+    # (TOOL_SOURCES), quindi su "statistiche GC" il campo resta vuoto ed è
+    # corretto. Si asserisce il caso in cui il log è nominato davvero.
+    "gc_stats|SYSLOG_KIND=|statistiche GC del nodo 5"
+    "|SYSLOG_KIND=gc|errori nel log gc"
+    # Plurale: "log applicativi" deve valere "log applicativo". Senza tool
+    # asserito — qui si misura l'estrazione, e LOG_TYPE derivato da SYSLOG_KIND
+    # è ciò che decide se si legge il server log o (per fallback) l'access log.
+    "|SYSLOG_KIND=server,LOG_TYPE=server|errori nei log applicativi del nodo 3"
+)
+
+run_param_tests() {
+    print_header "LEVEL 1b — Parametri estratti (param-extract.sh sul percorso reale)"
+    printf "${DIM}%-4s  %-18s  %-45s  %s${RESET}\n" "ESIT" "PARAMETRO" "QUERY" "DETTAGLIO"
+    echo ""
+
+    for entry in "${PARAM_TESTS[@]}"; do
+        local_expected="${entry%%|*}"
+        rest="${entry#*|}"
+        assertions="${rest%%|*}"
+        query="${rest#*|}"
+
+        out=$(_front_end "$query" all)
+        got_tool=$(printf '%s\n' "$out" | awk '/^TOOL /{ print $2; exit }')
+
+        # Tool: asserito solo se indicato. Un parametro giusto su un tool
+        # sbagliato non è un successo — chi legge il parametro è il tool.
+        if [[ -n "$local_expected" && "$got_tool" != "$local_expected" ]]; then
+            result_line FAIL "tool" "$got_tool" "$query" "tool=${got_tool:-NONE} invece di $local_expected"
+            continue
+        fi
+
+        # Ogni VAR=valore della lista è un'asserzione indipendente.
+        IFS=',' read -r -a _asserts <<< "$assertions"
+        for _a in "${_asserts[@]}"; do
+            var="${_a%%=*}"; exp="${_a#*=}"
+            got=$(printf '%s\n' "$out" | grep "^${var}=" | head -1 | cut -d= -f2- | sed "s/^'//; s/'$//")
+            if [[ "$got" == "$exp" ]]; then
+                result_line PASS "$var" "$got_tool" "$query" "$var='$got'"
+            else
+                result_line FAIL "$var" "$got_tool" "$query" "$var='$got' invece di '$exp'"
+            fi
+        done
+    done
+}
+
 # ─── Unit test con fixture locali (delegati, nessun log reale richiesto) ──────
 # Prima (fino al 2026-08-06) nessun runner aggregato li invocava: erano
 # eseguiti solo a mano, quindi senza rete di regressione automatica.
@@ -280,7 +494,7 @@ run_unit_tests() {
               test-theme.sh test-filter-ip.sh test-srch-named-log.sh test-log-discovery.sh \
               test-logdisc-4.sh test-access-format.sh test-profile-config.sh \
               test-train-regression.sh test-logline.sh test-logname-display.sh \
-              test-help-sources.sh; do
+              test-help-sources.sh test-utils-time.sh test-repl-state.sh; do
         if bash "$SCRIPT_DIR/$_t"; then
             pass=$(( pass + 1 ))
             printf "  ${GREEN}PASS${RESET}  %s\n" "$_t"
@@ -362,6 +576,7 @@ run_output_tests() {
 printf "${BOLD}Neural Log Analyzer — Test Suite${RESET}  profilo: $(basename "$PROFILE_DIR")\n"
 
 [[ "$RUN_L1" -eq 1 ]] && run_intent_tests
+[[ "$RUN_L1" -eq 1 ]] && run_param_tests
 [[ "$RUN_L1" -eq 1 ]] && run_unit_tests
 [[ "$RUN_L2" -eq 1 ]] && run_output_tests
 

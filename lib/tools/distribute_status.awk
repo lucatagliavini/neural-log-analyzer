@@ -41,6 +41,10 @@ BEGIN {
 }
 
 END {
+    # Il filtro temporale non ha potuto filtrare (nessun timestamp riconosciuto in
+    # tutto il file): lo si DICE, invece di presentare dati non filtrati come se lo
+    # fossero. Contropartita di in_range(epoch<=0)=1 in utils-time.awk.
+    access_ts_format_warning()
     # Calcola larghezza massima endpoint tra quelli che verranno mostrati
     n = 0
     for (ep in endpoint_total) { keys[++n] = ep; vals[n] = endpoint_total[ep] }

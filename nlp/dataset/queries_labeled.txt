@@ -1260,3 +1260,37 @@ count_status,distribute_status	anomalie nell'access.log di stamattina in produzi
 count_status,distribute_status	errori nell'access log di oggi
 count_status,distribute_status	messaggi di errore nel log delle richieste di stanotte
 count_status,distribute_status	eccezioni nel access.log questa mattina
+
+# ── C1 (2026-08-20) — "quanti/numero di" + classe 4xx/5xx + espressione temporale.
+# Firma scoperta dalle asserzioni di Level 1b: "quanti 5xx stamattina" instradava a
+# traffic_volume (37%), e "quanti 5xx ha avuto il server" — l'unico esempio 5xx di
+# count_status contro i 6 di distribute_status — restava al 44%. La classe 4xx/5xx
+# era coperta senza tempo, il tempo senza classe, ma non la combinazione: è la
+# stessa forma di gap di LOGSEL-1b (firma assente, non feature assente).
+count_status	quanti 5xx stamattina
+count_status	quanti 5xx oggi
+count_status	quanti 5xx nell'ultima ora
+count_status	quanti 4xx stamattina
+count_status	quanti 4xx nel pomeriggio
+count_status	numero di 5xx di stamattina
+count_status	numero di 4xx di oggi
+count_status	quante risposte 5xx nelle ultime 2 ore
+count_status	conta i 5xx di ieri
+count_status	totale 5xx stamattina
+count_status	quanti errori 5xx ci sono stati oggi
+count_status	quanti 500 stamattina
+
+# ── C2 (2026-08-20) — l'indirizzo IP senza la parola "ip".
+# Prima l'unico segnale per filter_ip erano le PAROLE `\bip\b`/`client|indirizz`,
+# quindi "richieste da 192.168.1.100" non attivava nulla e finiva su tail_log.
+# Con il placeholder <IP> (normalize-query.sh sezione 0) questi esempi insegnano la
+# FORMA: gli indirizzi letterali qui sotto diventano tutti <IP> in normalizzazione,
+# quindi il modello non vede alcun ottetto e generalizza a indirizzi mai visti.
+filter_ip	richieste da 192.168.1.100
+filter_ip	richieste da 10.20.30.40 stamattina
+filter_ip	traffico da 172.16.5.9
+filter_ip	cosa arriva da 10.1.2.3
+filter_ip	chiamate da 192.168.0.7 di oggi
+filter_ip	attività di 172.30.44.12 nell'ultima ora
+filter_ip	quante richieste da 10.0.0.5
+filter_ip	mostrami 192.168.10.20

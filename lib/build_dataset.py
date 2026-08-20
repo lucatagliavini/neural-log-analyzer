@@ -251,6 +251,13 @@ def _word_sub(norm, literal, replacement):
 def normalize_query(query, cfg):
     norm = query.lower()
 
+    # 0. IP → <IP>. Replica di normalize-query.sh sezione 0: riconoscimento per
+    #    FORMA, come <LOGFILE> e <PATTERN>. Sta in testa perché un IPv4 è una forma
+    #    lessicale autonoma e nessuna altra sezione deve poterne consumare un pezzo.
+    #    I confini \b coincidono fra sed -E e re: il punto non è un word char, quindi
+    #    le due implementazioni delimitano gli stessi span.
+    norm = re.sub(r'\b([0-9]{1,3}\.){3}[0-9]{1,3}\b', '<IP>', norm)
+
     # 1. APP (longest-match)
     detected_app = ''
     for alias in cfg['entity_app_keys']:
@@ -317,6 +324,28 @@ def normalize_query(query, cfg):
     elif re.search(r"'[^']*\*[^']*\.log'", norm):
         norm = re.sub(r"'[^']*\*[^']*\.log'", '<LOGFILE>', norm)
         logfile_done = True
+
+    # a-ter) SRCH-4 — nome di log di SISTEMA quotato senza wildcard: virgolette
+    #    rimosse, nome LETTERALE. Replica di normalize-query.sh sezione (a-ter):
+    #    senza questo passo entrambe le stringhe quotate di
+    #    `trova "..." nel "server.log"` diventavano <PATTERN> e il bigramma che
+    #    discrimina SRCH-2 — che matcha la sottostringa letterale — non si attivava.
+    #
+    #    Tre dettagli su cui la parità bit-a-bit si gioca, e che una replica
+    #    "ragionevole" sbaglierebbe:
+    #      1. si iterano ENTRAMBI i tipi di virgoletta (come il `for` in bash), non
+    #         if/elif come la (a-bis) subito sotto
+    #      2. lo strip di '.log' è case-SENSITIVE, come `${_span%.log}` in bash
+    #      3. gli span si raccolgono UNA VOLTA prima di mutare la stringa, come la
+    #         process substitution in bash, che è uno snapshot
+    if not logfile_done:
+        for quo in ('"', "'"):
+            for span in re.findall(quo + r'[^' + quo + r']*' + quo, norm):
+                inner = span[1:-1]
+                base = inner[:-len('.log')] if inner.endswith('.log') else inner
+                resolved = cfg['system_log_synonyms'].get(base.lower(), base.lower())
+                if resolved in cfg['system_log_bases']:
+                    norm = norm.replace(span, inner)
 
     # a-bis) Qualsiasi stringa quotata RESTANTE (non glob-like) → <PATTERN>.
     #    Simmetrico a <LOGFILE>; deve girare DOPO la (a), stessa priorità.

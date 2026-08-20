@@ -22,7 +22,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 NC_BIN="$ROOT_DIR/../neural-c/neural-c.sh"
 # Il dataset vive nel framework da NLP-1 (2026-08-17), non più nel profilo.
 DATASET="$ROOT_DIR/nlp/dataset/queries.txt"
-NUM_FEATURES=113
+NUM_FEATURES=114
 
 WORK="$ROOT_DIR/tmp/train-regression-$$"
 rm -rf "$WORK"
@@ -31,23 +31,30 @@ trap 'rm -rf "$WORK"' EXIT
 
 RED="\033[31m"; GREEN="\033[32m"; RESET="\033[0m"
 
-# Checksum di riferimento — rigenerato il 2026-08-19 (SRCH-2/QUOTE-1: +2 feature,
-# 111 → 113), verificato bit-identico su 3 run consecutivi sulla stessa macchina.
+# Checksum di riferimento — rigenerato il 2026-08-20 (C2: nuova feature <ip>,
+# 113 → 114, più 20 esempi per C1/C2), verificato bit-identico su 3 run consecutivi
+# sulla stessa macchina.
 #
 # Nota: questo checksum dipende da (topologia, dataset, seed, iperparametri).
 # Qualsiasi modifica al vocabolario o a queries_labeled.txt lo invalida per
 # costruzione — in quel caso rigenerarlo, non "aggiustarlo", e verificare che
 # la riproducibilità regga su almeno 3 run consecutivi.
-EXPECTED_WEIGHTS_MD5="734663c7e4e413cdcb294eddeeea9b85"
+#
+# Storia dei riferimenti, utile per riconoscere una regressione da una modifica
+# voluta: 111 feature fino al 2026-08-19, 113 con SRCH-2/QUOTE-1, 114 da C2.
+EXPECTED_WEIGHTS_MD5="4ffd799112a0ab14d25383d19983b56c"
 
 # La topologia deve combaciare con NUM_FEATURES del profilo: righe con un numero
 # di colonne diverso da num_features+num_outputs vengono scartate dalla
 # conversione sotto, e con dataset e topologia disallineati il dataset si
 # svuota (train fallirebbe con un errore esplicito).
-TOPOLOGY="113,48,16"
+# Derivata da NUM_FEATURES invece di riscritta a mano: erano lo stesso fatto in due
+# posti (più `--inputs` sotto, tre), e tenerli allineati a mano è precisamente il
+# modo in cui una divergenza passa inosservata (principio 2).
+TOPOLOGY="${NUM_FEATURES},48,16"
 
 echo "[INFO] Inizializzo il modello (seed 7, topologia $TOPOLOGY)..."
-"$NC_BIN" init "$WORK/model" --inputs 113 --layer 48:sigmoid --layer 16:sigmoid \
+"$NC_BIN" init "$WORK/model" --inputs "$NUM_FEATURES" --layer 48:sigmoid --layer 16:sigmoid \
     --loss mse --optimizer adam --learning-rate 0.01 --seed 7 --epochs 200 --force > /dev/null
 
 # DOPO l'init, non prima: `init` scrive un train.txt scaffold col solo commento

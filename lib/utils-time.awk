@@ -128,7 +128,90 @@ function parse_gc(s) {
     return parse_iso(s)
 }
 
+# in_range(epoch) → 1 se epoch cade nella finestra, 0 altrimenti.
+#
+# Un epoch ≤ 0 significa "istante IGNOTO", non "istante zero": è ciò che
+# restituiscono access_ts()/parse_*() quando la riga non ha un timestamp
+# riconoscibile. Viene INCLUSO, per il principio 5 (pruning conservativo): non
+# sapere quando è avvenuta una riga non è una ragione per affermare che sia fuori
+# dal periodo richiesto.
+#
+# Prima veniva escluso, perché `0 >= ts_from` è falso per qualunque finestra
+# reale. La conseguenza era il difetto misurato in FORMAT-1: su un file di formato
+# inatteso il tool rispondeva «Nessuna richiesta trovata nel periodo selezionato»
+# — un falso negativo PIENO, indistinguibile da "ho guardato e non c'era nulla".
+# FORMAT-1 ne ha rimosso la causa più frequente (il timestamp cercato per forma
+# invece che per posizione) ma non questa scelta, che resta il comportamento su
+# ogni riga che davvero non si sa datare.
+#
+# Il rovescio della medaglia — se NESSUNA riga del file è databile, il filtro non
+# esclude più niente e un risultato non filtrato sembrerebbe filtrato — è
+# presidiato da access_ts_format_warning(), che i tool chiamano nel loro END.
+# Includere senza quel guard scambierebbe un falso negativo con un falso positivo.
 function in_range(epoch) {
     if (time_from == "" && time_to == "") return 1
+    if (epoch <= 0) return 1
     return (epoch >= ts_from && epoch <= ts_to)
+}
+
+# access_ts_unmatched() → quante righe non hanno prodotto un timestamp in questo
+# file. Zero nel caso normale; un valore alto su un access log reale segnala
+# righe malformate o un formato in parte diverso da quello atteso.
+function access_ts_unmatched() {
+    return _ats_unmatched + 0
+}
+
+# Traccia su file, a livello DEBUG, quante righe non si è saputo datare. Il file
+# arriva da dispatch.sh (-v ats_debug_file) e vale solo con BOT_LOG_LEVEL=debug:
+# senza la variabile questo END non fa nulla, quindi il costo nel caso normale è
+# un confronto di stringa a fine esecuzione. Su file e non su stdout, che è il
+# canale su cui asseriscono i test (principio 3).
+#
+# Serve a rendere MISURABILE la scelta di includere le righe non databili
+# (in_range, sotto): se in produzione il numero è ~0 la decisione è gratuita, se è
+# alto significa che su quei file il filtro temporale sta filtrando meno di quanto
+# l'utente creda, e va rivista.
+END {
+    if (ats_debug_file != "" && _ats_unmatched > 0) {
+        printf "[DEBUG] utils-time: %d righe su %d senza timestamp riconosciuto (incluse per principio 5)\n", \
+               _ats_unmatched, NR >> ats_debug_file
+    }
+}
+
+# access_ts_format_warning() → 1 (e stampa il messaggio) se il file ha righe, un
+# filtro temporale è attivo e NESSUNA riga ha prodotto un timestamp: il filtro non
+# ha potuto filtrare, quindi il risultato mostrato NON è quello chiesto e va detto.
+# 0 (e nessun output) in tutti gli altri casi.
+#
+# È la contropartita necessaria di in_range(epoch<=0)=1 sopra: senza, il tool
+# presenterebbe un file intero come se fosse il periodo richiesto. È anche la
+# stessa distinzione già introdotta per grep_named_log da LOGSEL-1c — «formato non
+# riconosciuto» ≠ «nessuna riga trovata» — qui applicata ai tool che leggono
+# l'access log, che ne erano rimasti privi: access_ts_ok() esisteva da FORMAT-1 ma
+# non aveva un solo chiamante (principio 8: la funzione condivisa era stata creata
+# senza migrare chi doveva usarla).
+#
+# Vive qui e non in 7 copie nei tool perché utils-time.awk è caricato come primo
+# -f da tutti (principio 2).
+function access_ts_format_warning(    c_warn, c_reset) {
+    if (time_from == "" && time_to == "") return 0
+    if (NR == 0 || access_ts_ok()) return 0
+    c_warn  = (C_WARN  != "") ? C_WARN  : ""
+    c_reset = (C_RESET != "") ? C_RESET : ""
+    printf "\n  %sFormato non riconosciuto: nessuna delle %d righe lette ha un timestamp di access log.%s\n", \
+           c_warn, NR, c_reset
+    printf "  Il filtro temporale non è stato applicato — il risultato non è limitato al periodo richiesto.\n\n"
+    _ats_fmt_bad = 1
+    return 1
+}
+
+# access_ts_period_ok() → 0 se il periodo richiesto NON è stato applicato (formato
+# non riconosciuto), 1 altrimenti.
+#
+# I tool la usano per non stampare "Nessuna richiesta trovata NEL PERIODO
+# SELEZIONATO" subito dopo aver detto che il periodo non è stato applicato: le due
+# frasi insieme si contraddicono, e una contraddizione è peggio del falso negativo
+# che questo lavoro elimina — l'utente non sa più a quale delle due credere.
+function access_ts_period_ok() {
+    return (_ats_fmt_bad + 0) == 0
 }

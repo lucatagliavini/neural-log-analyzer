@@ -841,7 +841,23 @@ _dispatch_tool_run() {
     thr_v+=" -v req_time_warn_ms='${REQ_TIME_WARN_MS:-}' -v req_time_crit_ms='${REQ_TIME_CRIT_MS:-}'"
     thr_v+=" -v heap_warn_pct='${HEAP_USED_WARN_PCT:-}' -v heap_crit_pct='${HEAP_USED_CRIT_PCT:-}'"
     thr_v+=" -v gc_corr_warn_pct='${GC_CORR_WARN_PCT:-}' -v gc_corr_crit_pct='${GC_CORR_CRIT_PCT:-}'"
+    # Canale DEBUG per il conteggio delle righe senza timestamp riconosciuto
+    # (utils-time.awk, END). Serve a MISURARE in produzione quanto sia frequente il
+    # caso su cui poggia in_range(epoch<=0)=1: una riga non databile viene inclusa
+    # per il principio 5, e questo numero dice se è un'eventualità rara (atteso) o
+    # un fenomeno di massa (allora il filtro sta filtrando meno di quanto sembri).
+    # Passato solo a livello debug, e su file — mai su stdout, che è il canale su
+    # cui asseriscono i test (principio 3).
+    # Fallback a /dev/stderr quando BOT_LOG_FILE non è impostato, esattamente come
+    # utils-log.sh ("vuoto = stderr"): altrimenti BOT_LOG_LEVEL=debug da solo non
+    # produceva nulla e la misura sembrava dire "zero righe non databili" quando in
+    # realtà non era stata scritta. Un canale diagnostico che tace quando è mal
+    # configurato è indistinguibile da uno che dice "tutto bene" — lo stesso falso
+    # verde dei test che non girano (NLP-1) e dei checksum mai verificati (c1951e3).
+    local ats_dbg=""
+    [[ "${BOT_LOG_LEVEL:-warn}" == "debug" ]] && ats_dbg="${BOT_LOG_FILE:-/dev/stderr}"
     local tw_args="$common_f $theme_v $thr_v -v time_from='${TIME_FROM:-}' -v time_to='${TIME_TO:-}'"
+    tw_args+=" -v ats_debug_file='${ats_dbg}'"
 
     case "$tool" in
         count_status)

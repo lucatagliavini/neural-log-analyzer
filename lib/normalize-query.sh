@@ -46,6 +46,29 @@ DETECTED_APP=""
 DETECTED_ENV=""
 DETECTED_NODE=""
 
+# ─── 0. Normalizzazione IP → <IP> ─────────────────────────────────────────────
+# Un indirizzo IPv4 letterale diventa <IP>, come un nome di log diventa <LOGFILE>
+# e una stringa quotata <PATTERN>: riconoscimento per FORMA, non per elenco.
+#
+# Il difetto che chiude (trovato 2026-08-20 con le asserzioni di Level 1b):
+# "richieste da 192.168.1.100 stamattina" veniva instradata a tail_log invece di
+# filter_ip. I soli segnali disponibili per filter_ip erano gli unigrammi `\bip\b`
+# e `client|indirizz`, cioè PAROLE: una query che porta l'indirizzo e non la
+# parola non attivava nulla. E i 6 esempi filter_ip del dataset contengono IP
+# letterali (172.30.169.1, 10.156.7.250, …), quindi il modello era esposto a
+# ottetti specifici invece che alla forma — la stessa non-generalizzazione che
+# <LOGFILE> ha risolto per i nomi di log.
+#
+# Sta in testa a tutto perché un IP è una forma lessicale autonoma: normalizzarlo
+# per primo evita che un'altra sezione ne consumi una parte.
+#
+# Non interferisce con IP_FILTER: param-extract.sh estrae l'indirizzo dalla query
+# GREZZA (chatbot.sh:363 le passa "$query", non NORM_QUERY), quindi il valore
+# reale resta disponibile ai tool.
+if echo "$norm_query" | grep -qE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b'; then
+    norm_query=$(echo "$norm_query" | sed -E 's/\b([0-9]{1,3}\.){3}[0-9]{1,3}\b/<IP>/g')
+fi
+
 # ─── 1. Normalizzazione APP (longest-match) ───────────────────────────────────
 # Ordina gli alias per lunghezza decrescente: "contactmanager" prima di "cc"
 _sorted_apps=$(for k in "${!ENTITY_APP[@]}"; do printf '%d %s\n' "${#k}" "$k"; done \
@@ -165,6 +188,43 @@ if echo "$norm_query" | grep -qE '"[^"]*\*[^"]*\.log"'; then
 elif echo "$norm_query" | grep -qE "'[^']*\*[^']*\.log'"; then
     norm_query=$(echo "$norm_query" | sed -E "s/'[^']*\*[^']*\.log'/<LOGFILE>/g")
     _logfile_done=1
+fi
+
+# a-ter) SRCH-4 — nome di log di SISTEMA fra virgolette, senza wildcard: le
+#    virgolette si RIMUOVONO e il nome resta LETTERALE, non diventa <PATTERN>.
+#
+#    Il gap (segnalato dall'utente il 2026-08-19, test manuale in produzione):
+#      trova "No HeadersTranscoder provided" nel "server.log" di oggi
+#    → entrambe le stringhe quotate diventavano <PATTERN> in (a-bis), perché
+#    "server.log" senza '*' non è glob-like per la (a). Il bigramma che discrimina
+#    SRCH-2 (nlp/bigrams.txt) matcha la sottostringa LETTERALE
+#    server.log|gc.log|access.log: sostituita da <PATTERN> non si attivava, e la
+#    query cadeva su search_all_logs (87%) invece di grep_named_log.
+#
+#    Perché letterale e non <LOGFILE>: la (b) sotto esclude deliberatamente i log
+#    di sistema dalla generalizzazione a <LOGFILE> (hanno tool dedicati), quindi
+#    emettere <LOGFILE> qui contraddirebbe quella scelta a due passi di distanza.
+#    Lasciandolo letterale la query diventa identica alla forma SENZA virgolette,
+#    che già instrada correttamente — nessuna nuova feature, nessun nuovo confine
+#    da insegnare alla rete: si riusa quello che funziona già.
+#
+#    Deve girare DOPO la (a) — un glob quotato resta <LOGFILE> — e PRIMA della
+#    (a-bis), che altrimenti assorbirebbe la stringa in <PATTERN>.
+#    Il riconoscimento passa da system_log_kind_of() (utils-logfiles.sh), unica
+#    fonte di verità sui sinonimi dei log di sistema: nessun secondo rilevatore
+#    parallelo che possa divergere (principio 8).
+if [[ "$_logfile_done" -eq 0 ]]; then
+    for _quo in '"' "'"; do
+        while IFS= read -r _span; do
+            [[ -z "$_span" ]] && continue
+            if [[ -n "$(system_log_kind_of "${_span%.log}" 2>/dev/null)" ]]; then
+                # Sostituzione via parameter expansion e non sed: il contenuto è
+                # testo arbitrario dell'utente e non va reinterpretato come regex.
+                norm_query="${norm_query//${_quo}${_span}${_quo}/${_span}}"
+            fi
+        done < <(echo "$norm_query" | grep -oE "${_quo}[^${_quo}]*${_quo}" \
+                     | sed -e "s/^${_quo}//" -e "s/${_quo}\$//")
+    done
 fi
 
 # a-bis) Qualsiasi stringa quotata RESTANTE (non glob-like, gestita sopra) →
