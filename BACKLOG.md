@@ -8,10 +8,35 @@ Aggiornato: 2026-08-20
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
-| TIME-D1b | **Misurare in produzione quante righe non sono databili** (conseguenza di D2, sezione FASE-1). Vedi le istruzioni operative subito sotto la tabella | Alla prossima esecuzione in prod |
+| FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** (aperta e in parte chiusa il 2026-08-20). Lo stesso difetto — una classe che copre alcune desinenze italiane e non altre — è emerso **tre volte** in una sessione: `ultim[aei]` senza la `o` (`utils-time.sh`, T3), `applicativ[oa]?` senza la `i` (`param-extract.sh`, P2), `prim[ei]` senza `a`/`o` (`param-extract.sh`, LOG_ORDER). Nessuno dava errore: producevano un parametro vuoto o un default, cioè un filtro che **si disattiva**. La passata (`grep -rnoE '[a-z]{4,}\[[aeio]{2,3}\]\??'`) ha esaminato **21 occorrenze** in `lib/`, `profiles/`, `nlp/`: tutte verificate, **un solo difetto residuo trovato e corretto** (`prim[ei]`). Interessante: `quant[eo]\|quanti` (`nlp/unigrams.txt:39`) era già stato patchato con un'alternativa esplicita invece di estendere la classe — segno che il problema si era già presentato e la correzione era stata locale invece che sistematica. **Resta aperto solo come promemoria**: il comando è nel backlog, va rieseguito quando si aggiunge un pattern flesso nuovo | Promemoria |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
 
-### TIME-D1b — istruzioni operative
+### TIME-D1b — **CHIUSA il 2026-08-20: misurata, zero righe non databili**
+
+**Esito: `_ats_unmatched == 0`.** Misurato sul nodo 4 di produzione (`lxprjbliq04`, profilo
+`liquido`) subito dopo il deploy, su quattro tool e tre formati di file diversi:
+
+| tool | sorgente | volume | righe non databili |
+|---|---|---|---|
+| `count_status` | access log, 57.4 MB | **173.469 richieste** nella finestra 06:00→12:00 | **0** |
+| `filter_errors` | server log | 2 WARN nel periodo | **0** |
+| `slow_requests` | access log | 9.643 richieste lente | **0** |
+| `filter_ip` | access log | — | **0** |
+
+**Il silenzio è un dato, non un canale rotto** — distinzione essenziale qui, ed è verificabile:
+nella stessa esecuzione sono arrivate le altre righe DEBUG (`select_log_files_grouped`,
+`dispatch_tool count_status: totale=2165ms select=133ms analisi=2032ms`), quindi il canale
+funzionava e l'assenza della riga `utils-time` significa davvero zero.
+
+**Conseguenza**: la scelta di D2 (`in_range(epoch<=0)` include, principio 5) è **gratuita** su
+questi log. Elimina la classe di falso negativo di FORMAT-1 senza allargare di una singola
+riga i risultati reali. Il guard `access_ts_format_warning()` resta come rete per il caso di
+mismatch totale, che su un profilo o una tecnologia diversa può presentarsi.
+
+**Da rieseguire** se si monta un profilo nuovo o una tecnologia di log diversa: il numero
+dipende dal formato del file, non dal codice. Istruzioni conservate sotto.
+
+### TIME-D1b — istruzioni operative (conservate per profili/formati futuri)
 
 **Il contesto in tre righe.** `in_range(epoch <= 0)` ora **include** la riga: un epoch 0
 significa «istante ignoto», e non sapere quando è avvenuta una riga non è una ragione per

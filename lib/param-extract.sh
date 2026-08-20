@@ -82,8 +82,26 @@ fi
 # Direzione di lettura per tail_log/tail_named_log: "prime/iniziali/all'inizio"
 # → head, altrimenti tail (default). Stesso schema di TAIL_N: un parametro, non
 # una nuova classe — "prime" vs "ultime" è la direzione, non il tipo di analisi.
+# `prim[aeio]` e non `prim[ei]`: "prima riga" e "primo record" — le due forme
+# singolari più naturali in italiano — non matchavano, quindi LOG_ORDER restava
+# "tail" e il bot mostrava l'ULTIMA riga a chi aveva chiesto la prima. Silenzioso
+# per definizione: l'output è ben formato, solo preso dal capo sbagliato del file.
+# Trovato il 2026-08-20 con una passata sistematica sulle classi di caratteri
+# flesse, dopo che lo stesso difetto era emerso due volte nella stessa sessione
+# (`ultim[aei]` in utils-time.sh, `applicativ[oa]?` qui sotto): non è un caso
+# isolato ma una forma ricorrente, e va cercata invece che attesa.
+#
+# "primavera" resta escluso dal `\b` finale (dopo la 'a' segue 'v', nessun
+# confine) — il falso positivo era già presidiato da un test.
+#
+# Il ramo negativo esiste perché in italiano "prima" è anche TEMPORALE ("prima di
+# mezzogiorno"), non posizionale: senza, una finestra temporale espressa con
+# "prima di" farebbe leggere il file dal capo sbagliato.
 LOG_ORDER="tail"
-if echo "$query" | grep -qE "\bprim[ei]\b|\biniziali\b|all.inizio"; then
+if echo "$query" | grep -qE "\biniziali\b|all.inizio"; then
+    LOG_ORDER="head"
+elif echo "$query" | grep -qE "\bprim[aeio]\b" \
+     && ! echo "$query" | grep -qE "\bprima (di|del|dell|delle|dei|degli|che)\b"; then
     LOG_ORDER="head"
 fi
 

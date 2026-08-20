@@ -67,6 +67,20 @@ assert_eq "'prime righe' -> head"      "head" "$(_extract 'mostrami le prime rig
 assert_eq "'righe iniziali' -> head"   "head" "$(_extract 'righe iniziali del cc.log' LOG_ORDER)"
 assert_eq "'dall'inizio' -> head"      "head" "$(_extract "leggi il log dall'inizio" LOG_ORDER)"
 # "primavera" non deve attivare head: \bprim[ei]\b richiede il confine di parola
+# Flessioni singolari (2026-08-20): `prim[ei]` non copriva "prima"/"primo", quindi
+# a chi chiedeva la PRIMA riga il bot mostrava l'ULTIMA — output ben formato, preso
+# dal capo sbagliato del file. Stessa forma di `ultim[aei]` (utils-time.sh) e
+# `applicativ[oa]?` (SYSLOG_KIND): classe di caratteri flessa incompleta.
+assert_eq "'prima riga' -> head"        "head" "$(_extract 'prima riga del cc.log' LOG_ORDER)"
+assert_eq "'primo record' -> head"      "head" "$(_extract 'primo record del cc.log' LOG_ORDER)"
+assert_eq "'primi N eventi' -> head"    "head" "$(_extract 'primi 5 eventi' LOG_ORDER)"
+# "prima" in italiano è anche TEMPORALE ("before"), non posizionale: una finestra
+# espressa con "prima di" non deve far leggere il file dal capo sbagliato.
+assert_eq "'prima di X' resta temporale" "tail" \
+    "$(_extract 'errori prima di mezzogiorno' LOG_ORDER)"
+assert_eq "'prima del X' resta temporale" "tail" \
+    "$(_extract 'errori prima del deploy' LOG_ORDER)"
+
 assert_eq "falso positivo evitato ('primavera')" "tail" \
     "$(_extract 'log della primavera scorsa' LOG_ORDER)"
 
