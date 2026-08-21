@@ -1,6 +1,6 @@
 # Backlog — neural-log-analyzer
 
-Aggiornato: 2026-08-20
+Aggiornato: 2026-08-21
 
 ---
 
@@ -9,6 +9,7 @@ Aggiornato: 2026-08-20
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
 | FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
+| GAPREP-1 | **`gap-report.sh` misura sullo stadio sbagliato della pipeline, e per questo non viene letto** (trovata 2026-08-21). `vocab-gap.sh:75` fa `query = tolower($2)` sul labeled **grezzo**: nessuna normalizzazione, nessuna nozione di potere discriminante. Misurato: dei 43 token distinti che il report stampa, **6 sono coordinate** (`database`, `messaging`, `jgroups`, `integr`, `nodo`, `produzione` — che LOGF-3 **vieta** nel vocabolario e che `normalize-query.sh` assorbe in `<LOGFILE>`/`<NODE>`/`<ENV>`), **17 sono stop word grammaticali** escluse per scelta, e fra i restanti ci sono frammenti CamelCase (`daolavaparametri`, `claim`, `integrations`) e parole a basso potere discriminante che la regola del progetto esclude di proposito — `richieste` compare in 4 classi. **≈86% di rumore strutturale.** Non è un difetto cosmetico: è la ragione **meccanica** per cui `fallimenti — 3 esempi` è stato stampato da `train.sh` a ogni addestramento e mai letto (FLEX-1b), cioè un canale diagnostico reso inutile dal proprio rapporto segnale/rumore. Direzione: tokenizzare il testo **normalizzato** (elimina le coordinate per costruzione, come già fatto per la misura di VOCFIX-1 D3) e filtrare per numero di classi in cui il token compare, che è il criterio che il vocabolario usa davvero. **Non implementata**: cambia cosa il report dichiara, quindi va decisa con l'utente | Media |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
 
 ### FLEX-1 — classi di caratteri flesse, e FLEX-1b — la parola senza feature (2026-08-20)
@@ -196,6 +197,171 @@ riaddestrato e verificato su entrambi i profili nella stessa sessione in cui è 
 segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manuale
 (nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
 implementato su richiesta esplicita dell'utente ("implementiamo domani").
+
+## VOCFIX-1 — Quattro difetti trovati validando una tabella di esempi — **FATTO** (2026-08-20/21)
+
+**Origine: nessun task, una richiesta di documentazione.** L'utente ha chiesto una tabella
+«nomi dei tool + query di esempio per ciascuno, sui 2 profili in PROD». Gli esempi potevano
+essere inventati; sono invece stati **validati contro il classificatore vero** — 48 query ×
+2 profili = 96 dry-run, replicando la sequenza di `chatbot.sh` via `_front_end()` (il punto
+di replica canonico creato da FASE-1). La validazione ha trovato quattro difetti che nessun
+test copriva, e questo è il dato di metodo della voce: **scrivere documentazione verificabile
+è un harness**, perché obbliga a percorrere la pipeline sugli input che l'utente digiterà.
+
+Una misura collaterale utile: le confidenze coincidono **cifra per cifra** sui due profili
+per ogni query priva di coordinate. È la prova empirica che NLP-1 (vocabolario, dataset e
+pesi nel framework) è stato applicato per intero.
+
+### D1 — Il ranking di `--dry-run` era ordinato al contrario
+
+`lib/infer-dry.sh` ordinava con `sort -rn -k1`. `nc_predict` emette **notazione scientifica**
+per i valori piccoli (`9.5657479403040116e-05`) e `-n` non la interpreta: legge `9.56` e lo
+mette in cima. Il sintomo su «statistiche GC del nodo 4»:
+
+```
+ ·  ── soglia 25% ──         ← il separatore SOPRA il rank 1
+1.    0.0%  count_status
+2.    0.0%  filter_app_errors
+3.   99.5%  gc_stats          ← il vincitore vero, al terzo posto
+```
+
+**Il routing di produzione non era affetto**: `infer.sh:52` confronta con `awk`, che la
+notazione scientifica la capisce. Ma è un difetto di visualizzazione **nell'unico strumento
+che serve a diagnosticare il misrouting** — cioè inganna esattamente quando lo si consulta.
+
+Fix: `LC_ALL=C sort -grk1`. Due cause, non una:
+- `-g` (general numeric) invece di `-n`, per la notazione scientifica;
+- `LC_ALL=C` perché **sia `-n` sia `-g` usano il separatore decimale della locale**: sotto
+  `LC_NUMERIC=it_IT` (separatore `,`) `0.995` viene letto come `0` e tutti i tool pareggiano
+  a zero. Qui non si riproduce solo perché `it_IT` non è installata — **il server di
+  produzione può averla**. È un difetto latente corretto senza averlo osservato, ed è
+  l'eccezione giustificata alla regola «prima misura, poi correggi»: la condizione è
+  l'ambiente, non il codice.
+
+Principio 8 applicato: cercato `sort -n` su valori potenzialmente decimali altrove.
+`normalize-query.sh:75` ordina lunghezze intere (`${#k}`) — immune a entrambe le cause, non
+toccato.
+
+### D2 — `TOOL_DESC[service_times]` dichiarava la sorgente sbagliata, in entrambi i profili
+
+Diceva «Tempi di esecuzione servizi SOA **dal server.log**», ma `service_times.awk:2` dice
+«Sorgente: access log Undertow», usa `access_ts()`/`access_time_ms()`, e
+`TOOL_SOURCES[service_times]="access"`. Il commento in `nlp/tools.conf` **cita questa esatta
+divergenza** come la ragione per cui `TOOL_SOURCES` è stata creata (HELP-1) — ma la prosa che
+l'utente legge nell'help non è stata migrata insieme. È il **principio 8 applicato all'help**:
+centralizzata la partizione tool→sorgente, lasciata indietro la descrizione. Corretto nei due
+`domain.conf` e in `README.md`, dove sono stati aggiunti anche i tre tool mancanti dalla
+tabella (`show_help`, `search_all_logs`, `list_logs`).
+
+### D3 — Tre misrouting, e la causa radice era una fuga di sottostringa nel vocabolario
+
+I tre gap misurati (identici sui due profili, quindi nel vocabolario condiviso):
+
+| query | attesa | prima | dopo |
+|---|---|---|---|
+| `quante chiamate 503 stamattina su claimcenter` | `count_status` | `traffic_volume` 77% | **97.2%** |
+| `quali richieste hanno superato i 10 secondi ieri` | `slow_requests` | `traffic_volume` 67% | **98.9%** |
+| `quali comandi posso usare` | `show_help` | nessun tool sopra soglia | **98.1%** |
+
+La diagnosi iniziale — «copertura mancante» — era **sbagliata su una misura sbagliata**:
+avevo contato le occorrenze sul file *grezzo*, ma le feature si calcolano sul testo
+**normalizzato**, dove `api.log` e `performance_integr.log` diventano `<LOGFILE>`. Il numero
+era 25 volte troppo grande, e correggerlo ha cambiato l'intervento. Rimisurato sullo stadio
+giusto, il difetto vero è **una fuga di sottostringa**: `[[ =~ ]]` è un match non ancorato.
+
+| pattern | catturava anche | misura sul corpus normalizzato |
+|---|---|---|
+| `ora \|ore \|ora$` :: **2** | l'interno di **errore**, `oraria`, `peggiorano`, `lavorare` | 21 query prendevano una feature di finestra temporale con peso 2 |
+| `per` :: 1 | `performance` (21), `recupera` (14) | 37 spurie su 1152, contro 77 legittime |
+| `500` / `404` :: 1 | `5000` (una soglia in ms), `clv00404` | 2 esempi `slow_requests` attivavano `500`, 1 `count_status` attivava `404` |
+
+**La causa che rendeva il difetto invisibile**: `ora |ore |ora$` è scritto **correttamente** —
+lo spazio finale *è* il confine di parola che l'autore intendeva. Ma
+`query-to-features.sh:47` fa `pattern="${pattern// /}"` e `build_dataset.py:204` fa
+`.replace(' ','')`: **è la pipeline che degrada il pattern**, in entrambi i backend
+(la parità regge, il difetto è simmetrico). Rileggere il vocabolario non lo mostra mai.
+Corretto in `\bor[ae]\b|\borari`, e — principio 8 — anche nei **due bigram** (righe 9 e 15 di
+`bigrams.txt`) che avevano la stessa forma: lì la co-presenza «exception … errore» si
+attivava senza che la query nominasse alcuna finestra temporale.
+
+Il caso più insidioso è `500` su `5000`: **la rete aveva imparato che un codice di stato può
+significare "richiesta lenta"**, che è precisamente la confusione status-code ↔ latenza dei
+primi due gap. La causa radice e il sintomo erano la stessa cosa.
+
+**Una collisione che ha cambiato il pattern da scrivere.** Per il gap B serviva l'unità di
+misura della soglia. Un `second` nudo avrebbe codificato la confusione invece di risolverla,
+perché il corpus contiene **i due sensi opposti della stessa radice**: «quante chiamate al
+second**o**» è una *frequenza* (`traffic_volume`), «sopra i 3 second**i**» è una *soglia*
+(`slow_requests`). Il discriminante è il **numero grammaticale**, quindi il pattern giusto è
+`secondi\b` — il plurale esclude da solo il senso di frequenza, senza pattern composito.
+Verificato dopo il retrain: `quante richieste al secondo oggi` → `traffic_volume` 76%,
+`richieste sopra i 3 secondi` → `slow_requests` 99.1%.
+
+Per il gap A il discriminante non è **nessuna delle due parole da sola**: `chiamate` vive
+nella sezione traffico ed è genuinamente ambigua («chiamate lente», «chiamate 500», «quante
+chiamate al minuto» sono tre tool). È la **co-presenza** di un quantificatore e di un codice
+di stato — quello è un conteggio per codice, non un volume per finestra. Da qui il bigram
+`quant[eo]|quanti|conta|contami|numero :: \b(400|404|500|503|4xx|5xx)\b|status|stato :: 2`.
+Su `quante chiamate 503 al minuto`, dove l'ambiguità è reale, il bot attiva **entrambi**
+(`count_status` 69.4% + `traffic_volume` 45.2%): il multi-label è la risposta corretta a una
+domanda ambigua, non un misrouting.
+
+Il gap C era vettore **identicamente nullo**: ogni pattern della sezione help richiedeva una
+seconda parola specifica, e `comandi` da solo non attivava nulla. Aggiunto `comand :: 2`.
+Il `vocab-linter` che segnala i vettori tutto-zero — **la classe di difetto esatta del gap C** —
+ne riportava già uno pre-esistente: chiuso nella stessa passata, perché un esempio a vettore
+nullo è un esempio da cui la rete non può imparare.
+
+**Retrain**: 4 feature nuove (`secondi\b`, `superat|oltre\b`, `comand`, + il bigram),
+**115 → 119**; 19 esempi labeled nuovi, 1152 → 1171. Reinizializzazione + training (early
+stopping, epoca 815). Modello condiviso: un solo ciclo copre entrambi i profili.
+
+### D4 — `resolve-logs.sh` stampava il comando invece del messaggio (2026-08-21)
+
+Tutte e **5** le uscite d'errore erano `echo "echo '[ERROR] …' >&2" >&2`: l'utente leggeva
+la stringa letterale `echo '[ERROR] resolve-logs: …' >&2`.
+
+La forma eval-able **non è sbagliata in sé** — `normalize-query.sh` la usa correttamente. La
+differenza sta nel **contratto del chiamante**, e non è stilistica:
+
+| script | invocazione | stdout dopo `exit 1` |
+|---|---|---|
+| `normalize-query.sh` | `source <(script)` | **eseguito sempre** → la forma eval-able è l'unico modo per far arrivare il messaggio |
+| `resolve-logs.sh` | `res=$(script) \|\| { … }` (`chatbot.sh:242`) | **scartato** → `eval` non è mai raggiunto, la forma eval-able è codice morto |
+
+Verificato dal vivo su entrambi i percorsi. Corretto in `echo "[ERROR] …" >&2`, con un
+commento in testa al file che spiega perché i due file **devono** divergere — altrimenti la
+prossima passata di uniformazione riapre il bug per simmetria.
+
+### La fixture che congelava un valore derivato
+
+Dopo il retrain l'unico FAIL della suite era `tests/test-train-regression.sh`, che aveva
+`NUM_FEATURES=115` letterale. Il commento accanto spiegava che `TOPOLOGY` era *derivata* da
+`NUM_FEATURES` «invece di riscritta a mano (principio 2)»: **la centralizzazione si era
+fermata un livello troppo in basso** — aveva eliminato la duplicazione fra `TOPOLOGY` e
+`--inputs`, non quella fra il test e `nlp/tools.conf`.
+
+Il sintomo era anche diagnosticamente fuorviante: `[FAIL] checksum atteso ≠ ottenuto` accusa
+la riproducibilità di `neural-c`, cioè l'unica cosa che il test deve misurare, quando la causa
+è un dataset più vecchio del vocabolario. Corretto sourciando `nlp/tools.conf` (che calcola
+già `NUM_FEATURES = |UNIGRAMS| + |BIGRAMS|` e `MODEL_TOPOLOGY`), più una **guard esplicita**
+sulle colonne del dataset che fallisce *prima* delle 200 epoche e nomina il rimedio
+(`./build-dataset.sh`) — la stessa forma di verifica che `train.sh` fa in ARCH-4. Validata con
+una mutazione deliberata sul dataset, ripristinato bit-identico.
+
+Volutamente **non** si passa per `nlp_resolve_paths()`: quella risolve profilo → framework, e
+un profilo con vocabolario proprio renderebbe il checksum pinnato valido solo per quel profilo.
+
+### Verifica finale
+
+- **175 PASS / 0 FAIL** su `liquido` **e** su `usnext`, `--parity` inclusa
+- `--parity` **1171/1171** su entrambi, **119 feature**
+- `test-train-regression.sh`: checksum `7e6fc068…`, **3 run bit-identici**
+- Le 48 query della tabella: **96/96** su due profili, incluse le 3 che fallivano
+- Spot-check sui confini a rischio (frequenza vs soglia, query con «errore» dopo la rimozione
+  della feature spuria con peso 2): nessuna regressione, `errori delle ultime 2 ore` →
+  `filter_errors` 66% con il secondo a 19%
+- `vocab-linter`: 0 vettori tutto-zero (era 1)
 
 ## FASE-1 — La prima fase della pipeline: tre harness e 9 difetti — **FATTO** (2026-08-20)
 
