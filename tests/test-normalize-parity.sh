@@ -16,7 +16,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROFILE_DIR="$ROOT_DIR/profiles/liquido"
-VENV_PYTHON="$ROOT_DIR/.venv/bin/python3"
+source "$ROOT_DIR/lib/utils-python.sh"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -25,9 +25,27 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ ! -x "$VENV_PYTHON" ]]; then
-    echo "[ERROR] $VENV_PYTHON non trovato — richiede .venv (pip install -r requirements.txt)" >&2
-    exit 1
+# VENVGATE-1: prima qui c'era `[[ ! -x "$ROOT_DIR/.venv/bin/python3" ]] && exit 1`,
+# con un messaggio che suggeriva `pip install -r requirements.txt`. Due cose
+# sbagliate:
+#
+#   1. il venv NON è necessario — test-normalize-parity.py importa build_dataset,
+#      che usa solo stdlib. Il python3 di sistema basta, e in produzione è l'unico
+#      che c'è: là questo test FALLIVA per una ragione puramente ambientale, e
+#      `run-tests.sh --parity` riportava un FAIL senza che nulla fosse rotto.
+#   2. `exit 1` confonde "non ho potuto misurare" con "la misura è fallita".
+#      Sono cose diverse e il chiamante deve poterle distinguere — la stessa
+#      lezione di GAPREP-1, dove gap-report.sh dichiarava «nessun gap» per una
+#      misura mai avvenuta.
+#
+# Ora: exit 2 = non misurabile (nessun python3), riportato da run-tests.sh come
+# «NON eseguito» e non come PASS né come FAIL.
+PY="$(resolve_python || true)"
+if [[ -z "$PY" ]]; then
+    echo "[UNAVAILABLE] parità non misurata: nessun python3 disponibile." >&2
+    echo "              Il confronto bash/Python richiede un interprete; non è" >&2
+    echo "              un fallimento della parità, è una misura non eseguita." >&2
+    exit 2
 fi
 
-exec "$VENV_PYTHON" "$SCRIPT_DIR/test-normalize-parity.py" --profile "$PROFILE_DIR"
+exec "$PY" "$SCRIPT_DIR/test-normalize-parity.py" --profile "$PROFILE_DIR"

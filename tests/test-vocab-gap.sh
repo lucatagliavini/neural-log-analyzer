@@ -50,6 +50,25 @@ section() { printf "\n${BOLD}── %s ${RESET}${DIM}%s${RESET}\n" "$1" "──�
 _FIX="$(mktemp -d)"
 trap 'rm -rf "$_FIX"' EXIT
 
+# Le sezioni 1-6 misurano l'output di vocab-gap.sh, che ha BISOGNO di un
+# interprete Python (GAPREP-1). Su una macchina che non ne ha nessuno questo
+# harness non può misurare — e "non misurabile" non è "fallito": senza questa
+# guardia si vedrebbero sei FAIL che accusano il codice per una mancanza
+# d'ambiente. È la stessa distinzione che gap-report.sh e test-normalize-parity.sh
+# fanno con exit 2 (VENVGATE-1).
+#
+# Esce 2 e NON 0: uscire 0 lo farebbe contare fra i PASS da run-tests.sh, cioè un
+# verde per un test che non è stato eseguito — precisamente il difetto corretto in
+# GAPREP-1, reintrodotto dal test che lo protegge. Il chiamante distingue i tre
+# esiti (0 PASS, 2 SKIP, altro FAIL).
+source "$ROOT_DIR/lib/utils-python.sh"
+if ! resolve_python >/dev/null 2>&1; then
+    printf "\n${DIM}test-vocab-gap.sh: NON eseguito — nessun python3 disponibile.${RESET}\n"
+    printf "${DIM}  Non è un fallimento: vocab-gap.sh richiede Python per normalizzare${RESET}\n"
+    printf "${DIM}  il dataset allo stesso stadio delle feature (vedi GAPREP-1).${RESET}\n\n"
+    exit 2
+fi
+
 # ─── Fixture ──────────────────────────────────────────────────────────────────
 # system.conf/entities.conf REALI da liquido: servono gli alias veri (claimcenter,
 # database.log) perché la normalizzazione è ciò che si sta testando — una fixture
@@ -180,19 +199,23 @@ assert_true "la vista umana tronca a --top 2" \
 # ─── 7. Degradazione senza python3: mai un falso verde ───────────────────────
 section "Senza python3: dichiara di NON aver misurato"
 
-_FB="$_FIX/fakebin"; mkdir -p "$_FB"
-for _b in bash grep awk sed mktemp cut sort wc tr head rm cat basename dirname printf env; do
-    _p=$(command -v "$_b" 2>/dev/null) && ln -sf "$_p" "$_FB/$_b"
-done
-assert_true "il PATH della fixture non contiene python3" \
-    "$(PATH="$_FB" command -v python3 >/dev/null 2>&1 && echo 0 || echo 1)"
+# NLA_PYTHON verso un path inesistente, non un PATH svuotato.
+#
+# Lo svuotamento del PATH ha smesso di funzionare con VENVGATE-1 (2026-08-21):
+# resolve_python() trova `.venv/bin/python3` per path ASSOLUTO, quindi il PATH non
+# c'entra più — e infatti quel test dava exit 127 (un altro comando mancante nella
+# fakebin), cioè verificava un guasto diverso da quello che credeva. L'override è
+# deterministico e non dipende da quali binari la fixture ricorda di collegare.
+export NLA_PYTHON="$_FIX/python3-che-non-esiste"
+assert_true "con NLA_PYTHON inesistente, resolve_python non trova interpreti" \
+    "$( (source "$ROOT_DIR/lib/utils-python.sh"; resolve_python >/dev/null 2>&1) && echo 0 || echo 1)"
 
-_np_out=$(PATH="$_FB" "$_VG" --profile "$_P" 2>&1); _np_rc=$?
+_np_out=$("$_VG" --profile "$_P" 2>&1); _np_rc=$?
 assert_eq "vocab-gap.sh esce 2 (non misurabile), non 0 ne 1" "$_np_rc" "2"
 assert_true "il messaggio dice esplicitamente che la misura NON e stata eseguita" \
     "$(grep -qiE "NON . stata eseguita|non misur" <<< "$_np_out" && echo 1 || echo 0)"
 
-_gr_out=$(PATH="$_FB" "$ROOT_DIR/gap-report.sh" --profile "$_P" --compact 2>&1 \
+_gr_out=$("$ROOT_DIR/gap-report.sh" --profile "$_P" --compact 2>&1 \
           | sed 's/\x1b\[[0-9;]*m//g'); _gr_rc=$?
 assert_eq "gap-report.sh esce 0 (non deve abortire train.sh)" "$_gr_rc" "0"
 assert_true "gap-report.sh dice 'NON misurato'" \
@@ -202,6 +225,10 @@ assert_true "gap-report.sh NON dichiara 'nessun gap/candidato'" \
     "$(grep -qiE "nessun (gap|candidato)" <<< "$_gr_out" && echo 0 || echo 1)"
 
 # ─── 8. Stopword assenti o vuote: si degrada dicendolo ───────────────────────
+# L'override va rimosso qui: da qui in poi Python serve davvero, e lasciarlo
+# impostato farebbe fallire le asserzioni sotto per la ragione sbagliata.
+unset NLA_PYTHON
+
 section "report-stopwords.txt vuoto: filtro disattivato, dichiarato"
 
 printf '# solo commenti\n\n' > "$_P/report-stopwords.txt"

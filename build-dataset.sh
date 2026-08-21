@@ -36,15 +36,24 @@ source "$LIB_DIR/nlp-paths.sh"
 nlp_resolve_paths || exit 1
 source "$PROFILE_DIR/domain.conf"   # carica vocabolario e configurazione dominio
 
-# Backend Python (se disponibile): 1900× più veloce — nessun fork per riga
-VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python3"
+# Backend Python (se disponibile): 1900× più veloce — nessun fork per riga.
+#
+# La scelta dell'interprete passa da resolve_python() (lib/utils-python.sh), non da
+# un test su `.venv` scritto qui: fino al 2026-08-21 questo ramo pretendeva il venv,
+# che esisteva per PyTorch e non serve più a build_dataset.py (solo stdlib). In
+# produzione, dove c'è python3 e non c'è il venv, si cadeva sul ramo bash — 0,2 s
+# contro ≥110 s misurati. Vedi VENVGATE-1 e il commento in utils-python.sh.
+source "$SCRIPT_DIR/lib/utils-python.sh"
 BUILD_PY="$SCRIPT_DIR/lib/build_dataset.py"
-if [[ -x "$VENV_PYTHON" && -f "$BUILD_PY" ]]; then
-    echo "[INFO] Backend: Python ($("$VENV_PYTHON" -c 'import sys; print(sys.version.split()[0])'))"
-    "$VENV_PYTHON" "$BUILD_PY" --profile "$PROFILE_DIR"
+PY="$(resolve_python || true)"
+if [[ -n "$PY" && -f "$BUILD_PY" ]]; then
+    echo "[INFO] Backend: Python $("$PY" -c 'import sys; print(sys.version.split()[0])') ($(python_origin "$PY"))"
+    "$PY" "$BUILD_PY" --profile "$PROFILE_DIR"
     build_status=$?
 else
-    echo "[INFO] Backend: bash (venv non trovato in $SCRIPT_DIR/.venv)"
+    # Il ramo bash resta, e non è morto: è il fallback per una macchina senza
+    # alcun python3. Produce lo stesso dataset, molto più lentamente.
+    echo "[INFO] Backend: bash (nessun python3 disponibile)"
 
     # Pre-carica entities.conf se disponibile per la normalizzazione degli esempi
     _ENTITIES_CONF="$PROFILE_DIR/entities.conf"

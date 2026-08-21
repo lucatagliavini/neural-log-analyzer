@@ -513,10 +513,19 @@ run_unit_tests() {
               test-logdisc-4.sh test-access-format.sh test-profile-config.sh \
               test-train-regression.sh test-logline.sh test-logname-display.sh \
               test-help-sources.sh test-utils-time.sh test-repl-state.sh \
-              test-vocab-gap.sh; do
-        if bash "$SCRIPT_DIR/$_t"; then
+              test-vocab-gap.sh test-python-resolve.sh; do
+        # Tre esiti, non due (VENVGATE-1): 0 PASS, 2 NON ESEGUIBILE, altro FAIL.
+        # Un harness che non può misurare — perché manca qualcosa nell'ambiente,
+        # non perché il codice è rotto — non va contato fra i PASS (sarebbe un
+        # verde per una verifica mai avvenuta) né fra i FAIL (non c'è nulla di
+        # rotto). È la stessa distinzione di gap-report.sh, applicata al runner.
+        _t_rc=0
+        bash "$SCRIPT_DIR/$_t" || _t_rc=$?
+        if [[ "$_t_rc" -eq 0 ]]; then
             pass=$(( pass + 1 ))
             printf "  ${GREEN}PASS${RESET}  %s\n" "$_t"
+        elif [[ "$_t_rc" -eq 2 ]]; then
+            printf "  ${YELLOW}${BOLD}SKIP${RESET}  %s — non eseguibile in questo ambiente\n" "$_t"
         else
             fail=$(( fail + 1 ))
             printf "  ${RED}${BOLD}FAIL${RESET}  %s — vedi output sopra\n" "$_t"
@@ -603,9 +612,19 @@ if [[ "$RUN_PARITY" -eq 1 ]]; then
     print_header "PARITÀ — normalize-query.sh (bash) vs build_dataset.py (Python)"
     # Opt-in: ~4 min (2 fork bash per query × 1008). Delega al test standalone,
     # che è l'unica fonte di verità sul confronto — qui si aggrega solo l'esito.
-    if bash "$SCRIPT_DIR/test-normalize-parity.sh" --profile "$PROFILE_DIR"; then
+    # Tre esiti, non due (VENVGATE-1): 0 misurato, 2 NON misurabile (nessun
+    # python3), altro = divergenza vera. Prima il codice 1 dell'assenza di Python si
+    # confondeva con una divergenza, quindi su una macchina senza `.venv` — la
+    # produzione — questa riga diceva FAIL senza che nulla fosse rotto. Un "non
+    # eseguito" non va contato né fra i PASS (non è verificato) né fra i FAIL (non
+    # è rotto): è la stessa distinzione che gap-report.sh fa da GAPREP-1.
+    _parity_rc=0
+    bash "$SCRIPT_DIR/test-normalize-parity.sh" --profile "$PROFILE_DIR" || _parity_rc=$?
+    if [[ "$_parity_rc" -eq 0 ]]; then
         pass=$(( pass + 1 ))
         printf "  ${GREEN}PASS${RESET}  parità bash/Python su NORM_QUERY e vettori feature\n"
+    elif [[ "$_parity_rc" -eq 2 ]]; then
+        printf "  ${YELLOW}${BOLD}SKIP${RESET}  parità NON eseguita (nessun python3) — vedi output sopra\n"
     else
         fail=$(( fail + 1 ))
         printf "  ${RED}${BOLD}FAIL${RESET}  divergenza bash/Python — vedi output sopra\n"

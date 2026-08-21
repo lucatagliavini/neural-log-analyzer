@@ -80,11 +80,16 @@ nlp_resolve_paths || exit 2
 # python3 è RICHIESTO, senza fallback bash. La normalizzazione via
 # lib/normalize-query.sh in un ciclo shell costa **54s misurati** su 1171 query, e
 # questo script gira dentro train.sh a ogni addestramento: un fallback lento
-# sarebbe un rallentamento che nessuno riesce a spiegarsi. Serve il python3 di
-# SISTEMA (build_dataset.py importa solo stdlib): il .venv non c'entra, contiene
-# l'albero di dipendenze di PyTorch, rimosso il 2026-08-18.
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "[UNAVAILABLE] vocab-gap: python3 non trovato — il dataset non può essere" >&2
+# sarebbe un rallentamento che nessuno riesce a spiegarsi. Basta il python3 di
+# SISTEMA — build_dataset.py importa solo stdlib — e il .venv, se c'è, è un
+# override per-installazione, non un requisito (VENVGATE-1).
+# resolve_python() e non `command -v python3` scritto qui: il criterio di scelta
+# dell'interprete è uno per tutto il repo (VENVGATE-1). Prima erano tre, e questo
+# script era il quarto — l'ho introdotto io con GAPREP-1 lo stesso giorno.
+source "$SCRIPT_DIR/lib/utils-python.sh"
+PY="$(resolve_python || true)"
+if [[ -z "$PY" ]]; then
+    echo "[UNAVAILABLE] vocab-gap: nessun python3 trovato — il dataset non può essere" >&2
     echo "              normalizzato allo stesso stadio delle feature, quindi la" >&2
     echo "              misura NON è stata eseguita (nessun gap dichiarato)." >&2
     exit 2
@@ -122,7 +127,7 @@ CAND_FILE=$(mktemp)
 trap 'rm -f "$TOKEN_TABLE" "$CAND_FILE"' EXIT
 
 # ─── Fase 1: dump normalizzato → token, esempi, classi, classe prevalente ─────
-if ! python3 "$DUMP_PY" --profile "$PROFILE_DIR" > "$TOKEN_TABLE.raw" 2>"$TOKEN_TABLE.err"; then
+if ! "$PY" "$DUMP_PY" --profile "$PROFILE_DIR" > "$TOKEN_TABLE.raw" 2>"$TOKEN_TABLE.err"; then
     echo "[UNAVAILABLE] vocab-gap: dump_norm.py fallito — misura non eseguita:" >&2
     sed 's/^/              /' "$TOKEN_TABLE.err" >&2
     rm -f "$TOKEN_TABLE.raw" "$TOKEN_TABLE.err"
