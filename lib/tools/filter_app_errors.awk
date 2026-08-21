@@ -66,8 +66,15 @@ function extract_cause(line,    c, last) {
 }
 
 function register_error(type, logger, cause, ts,    key) {
+    # La CHIAVE resta un substr nudo: il taglio a 80 è il meccanismo che fa
+    # collassare due cause che differiscono solo nella coda, e un "…" la
+    # allungherebbe senza cambiare cosa raggruppa.
     key = type SUBSEP substr(cause, 1, 80)
-    dedup_add(key, type, substr(cause, 1, 80), ts, logger)
+    # Il terzo argomento invece viene STAMPATO (colonna ROOT CAUSE), quindi il
+    # taglio va dichiarato — TRUNC-1. La larghezza di colonna è calcolata da
+    # length(_dup_msg[k]) nella END, quindi si allarga da sé e la tabella resta
+    # allineata.
+    dedup_add(key, type, ellipsize(cause, 80), ts, logger)
     total++
 }
 

@@ -106,9 +106,9 @@ END {
         printf "%s%-5s%s  %s%s%s  %s%s\n", \
             color, rl, rst, \
             C_LBL, substr(_dup_ts[dk], 1, 19), C_RESET, \
-            substr(_dup_msg[dk], 1, 100), cnt_str
+            ellipsize(_dup_msg[dk], 100), cnt_str
         if (_dup_extra[dk] != "")
-            printf "       %s[%s]%s\n", C_LBL, substr(_dup_extra[dk], 1, 60), C_RESET
+            printf "       %s[%s]%s\n", C_LBL, ellipsize(_dup_extra[dk], 60), C_RESET
     }
 
     distinct = _dup_n

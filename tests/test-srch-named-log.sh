@@ -89,6 +89,22 @@ cat > "$_node/ClaimCenter/Guidewire/prod1nssd-cc.log" <<EOF
 [main] USER ${_today_plain}T10:03:00,000 WARN  searchHub lento
 EOF
 
+# TRUNC-1: riga volutamente più lunga del limite di display (100 caratteri), con
+# una CODA riconoscibile. Serve a due asserzioni: che il taglio ci sia (la coda
+# non deve comparire) e che venga DICHIARATO con "…". Prima del 2026-08-21 il
+# taglio era silenzioso, e un ID di correlazione tagliato era indistinguibile da
+# uno completo.
+#
+# In un log PROPRIO e non appeso a prod1nssd-cc.log: là ci sono asserzioni che
+# contano le righe ERROR ("trova 2 righe"), e aggiungerci una riga le fa fallire
+# per una ragione che non ha nulla a che vedere con ciò che verificano — provato,
+# 2 → 3. Una fixture condivisa accoppia test indipendenti.
+_trunc_pad=$(printf 'X%.0s' $(seq 1 120))
+echo "[main] USER ${_today_plain}T10:04:00,000 ERROR TruncToken_${_trunc_pad}_CODAFINALE" \
+    > "$_node/ClaimCenter/Guidewire/prod1nssd-rigalunga.log"
+echo "[main] USER ${_today_plain}T10:05:00,000 ERROR RigaCorta senza coda" \
+    >> "$_node/ClaimCenter/Guidewire/prod1nssd-rigalunga.log"
+
 # LOGSEL-1: log applicativo con formato NON Guidewire (nessun timestamp
 # ISO+livello riconoscibile) — righe presenti ma nessuna nel formato atteso.
 # Generico per costruzione: qualunque log con questo schema di contenuto
@@ -236,6 +252,23 @@ assert_eq "gc.log assente sotto ContactManager: [SKIP] esplicito, non output vuo
     "$([[ "$_out_noskip" == *"[SKIP]"* ]] && echo 1 || echo 0)"
 assert_eq "  il messaggio indica dove esiste davvero (ClaimCenter)" "1" \
     "$([[ "$_out_noskip" == *"ClaimCenter"* ]] && echo 1 || echo 0)"
+
+# ─── TRUNC-1: il troncamento di display va DICHIARATO ──────────────────────
+section "TRUNC-1: taglio a 100 caratteri annunciato con «…», non silenzioso"
+
+_out_trunc=$(_run 'errori nel rigalunga.log')
+assert_eq "la riga lunga viene effettivamente tagliata (coda assente)" "1" \
+    "$([[ "$_out_trunc" != *"CODAFINALE"* ]] && echo 1 || echo 0)"
+# Questa è l'asserzione del difetto: senza ellipsize() passa la prima e fallisce
+# questa, cioè il dato manca e nessuno lo dice.
+assert_eq "il taglio è annunciato con «…»" "1" \
+    "$([[ "$_out_trunc" == *"…"* ]] && echo 1 || echo 0)"
+assert_eq "  la riga tagliata è comunque riconoscibile (prefisso presente)" "1" \
+    "$([[ "$_out_trunc" == *"TruncToken_"* ]] && echo 1 || echo 0)"
+# Le righe corte NON devono guadagnare un «…» per il solo fatto di esistere:
+# ellipsize() deve marcare il taglio, non annunciarne uno che non c'è.
+assert_eq "una riga corta resta senza «…»" "1" \
+    "$(grep -F 'RigaCorta senza coda' <<< "$_out_trunc" | grep -qF '…' && echo 0 || echo 1)"
 
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""

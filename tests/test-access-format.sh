@@ -180,6 +180,51 @@ _svc_rows=$(echo "$_svc_out" | grep -cE '^\S+\s+[0-9]+\s+')
 assert_eq "solo 2 servizi distinti in output (portal, /), non 4 come prima della correzione" \
     "2" "$_svc_rows"
 
+# ─── access_url_service: la profondità è una coordinata (SVCGRAN-1) ─────────
+section "access_url_service: profondità configurabile, e l'avviso quando degenera"
+
+# Riproduce la struttura di liquido, dove il difetto è stato trovato in
+# produzione: tutti gli URL sotto UN unico contesto webapp. A profondità 1 il
+# raggruppamento collassa a un solo "servizio" e la tabella diventa l'access log
+# intero con dei percentili addosso; a profondità 3 separa i servizi veri.
+cat > "$_FIX/svcdepth.log" <<'EOF'
+10.0.0.1 [17/Aug/2026:10:00:00 +0200] "GET /app/rest/anagrafica/v1/get HTTP/1.1" 200 1 10 - -
+10.0.0.1 [17/Aug/2026:10:00:01 +0200] "GET /app/rest/anagrafica/v1/list HTTP/1.1" 200 1 20 - -
+10.0.0.1 [17/Aug/2026:10:00:02 +0200] "GET /app/rest/sinistri/v1/get HTTP/1.1" 200 1 30 - -
+10.0.0.1 [17/Aug/2026:10:00:03 +0200] "POST /app/ws/Fatturazione/soap11 HTTP/1.1" 200 1 40 - -
+EOF
+
+_svc_at() {
+    gawk -f "$LIB/utils-time.awk" -f "$LIB/utils-colors.awk" -f "$LIB/utils-access-undertow.awk" \
+        -f "$TOOLS/service_times.awk" -v svc_depth="$1" "$_FIX/svcdepth.log" 2>/dev/null \
+        | sed 's/\x1b\[[0-9;]*m//g'
+}
+_rows_at() { _svc_at "$1" | grep -cE '^\S+\s+[0-9]+\s+[0-9]'; }
+
+assert_eq "profondità 1 → 1 solo gruppo (è il difetto trovato su liquido)"  "1" "$(_rows_at 1)"
+assert_eq "profondità 2 → 2 gruppi (app/rest, app/ws)"                     "2" "$(_rows_at 2)"
+assert_eq "profondità 3 → 3 gruppi (anagrafica, sinistri, Fatturazione)"    "3" "$(_rows_at 3)"
+
+# Il nome mostrato deve essere il prefisso completo, non solo il segmento finale:
+# "rest" da solo non direbbe sotto quale applicazione.
+assert_eq "a profondità 3 il nome è il path completo, non il solo segmento" "1" \
+    "$(_svc_at 3 | grep -qE '^app/rest/anagrafica[[:space:]]' && echo 1 || echo 0)"
+
+# L'avviso è la rete di sicurezza: senza, un raggruppamento degenere è
+# indistinguibile da una risposta sensata — ed è per questo che il difetto è
+# rimasto invisibile fino a un test sui log di produzione.
+assert_eq "profondità 1: il tool AVVERTE di aver trovato un solo servizio" "1" \
+    "$(_svc_at 1 | grep -qi "un solo servizio" && echo 1 || echo 0)"
+assert_eq "  l'avviso nomina SERVICE_PATH_DEPTH, cioè cosa cambiare" "1" \
+    "$(_svc_at 1 | grep -q "SERVICE_PATH_DEPTH" && echo 1 || echo 0)"
+assert_eq "profondità 3: nessun avviso (il raggruppamento discrimina)" "1" \
+    "$(_svc_at 3 | grep -qi "un solo servizio" && echo 0 || echo 1)"
+
+# Retrocompatibilità: depth=1 deve dare esattamente ciò che dava access_url_root(),
+# altrimenti il cambio avrebbe alterato in silenzio il profilo usnext, che usa 1.
+assert_eq "profondità 1 equivale ad access_url_root (usnext non cambia)" "1" \
+    "$(_svc_at 1 | grep -qE '^app[[:space:]]+4[[:space:]]' && echo 1 || echo 0)"
+
 # ─── distribute_status / access_url_endpoint: granularità per-endpoint ───────
 section "access_url_endpoint: query string/matrix param tagliati, ID e UUID templatizzati"
 

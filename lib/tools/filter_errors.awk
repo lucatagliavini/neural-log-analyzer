@@ -18,6 +18,10 @@ function norm_key(msg,    k) {
     # lanciate da thread diversi (pattern JBoss/stderr).
     k = msg
     sub(/^Exception in thread "[^"]*" /, "", k)
+    # substr nudo, NON ellipsize(): questo valore è una CHIAVE di deduplicazione,
+    # mai stampato. Il taglio è il meccanismo che fa collassare istanze dello
+    # stesso errore, e un "…" la allungherebbe senza cambiare cosa raggruppa
+    # (TRUNC-1: la distinzione chiave/display è il punto della voce).
     return substr(k, 1, 80)
 }
 
@@ -51,7 +55,10 @@ function flush_exception(    dk, full_msg, f) {
             sub(/^\t/, "", msg)
             exc_frame_n++
             if (exc_frame_n <= 3)
-                exc_frame[exc_frame_n] = substr(msg, 1, 100)
+                # I frame vengono stampati (righe 2..n del messaggio in
+                # dedup_print, non troncate là), quindi QUESTO è il limite di
+                # display effettivo: il taglio va dichiarato — TRUNC-1.
+                exc_frame[exc_frame_n] = ellipsize(msg, 100)
             else
                 exc_omitted++
         }

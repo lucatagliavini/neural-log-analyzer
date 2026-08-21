@@ -99,6 +99,57 @@ function access_url_root(    _url, _a) {
 # ma non il resto: unificarle in una sola avrebbe reso service_times più
 # grossolano o distribute_status più aggressivo, perdendo la granularità che
 # serve a ciascun tool (USNEXT-2).
+# Prime `depth` componenti del path, per raggruppare per SERVIZIO a una
+# granularità che dipende dal deployment. Generalizza access_url_root(), che è il
+# caso depth=1 e resta usata da chi non ha bisogno di scegliere.
+#
+# SVCGRAN-1 (2026-08-21): perché la profondità è un parametro e non una costante.
+# service_times raggruppava sempre sul primo segmento, e su un deployment dove
+# ogni servizio ha il proprio context root quello è giusto — MISURATO su usnext:
+# profondità 1 → 6 gruppi (portal, spd, api, integration…), la granularità
+# corretta. Ma su liquido ogni URL vive sotto lo stesso contesto webapp
+# (/essigSXCC/…), quindi il raggruppamento collassava a UN SOLO gruppo: 214.594
+# chiamate sotto un'unica etichetta, cioè l'access log intero con dei percentili
+# addosso. Misurato sui 295.743 URL reali: profondità 1 → 1 gruppo, 2 → 13,
+# 3 → 37.
+#
+# Non era un difetto del codice ma una COORDINATA mancante (principio 7): quale
+# segmento identifichi un servizio dipende da come è montata l'applicazione, non
+# da cosa il tool sa fare. Quindi vive in system.conf (SERVICE_PATH_DEPTH) e i due
+# profili hanno valori diversi — 1 per usnext, 3 per liquido.
+#
+# Applica le stesse sostituzioni di access_url_endpoint() (ID numerici lunghi e
+# UUID): a profondità 1-3 raramente cambiano qualcosa, ma rendono il
+# raggruppamento stabile se un profilo imposta una profondità maggiore.
+# Limite noto: un segmento UUID con PREFISSO (`rb_42fa3696-bbf0-…`, il beacon di
+# monitoraggio, 105.183 chiamate su liquido e 700 su usnext) non viene collassato,
+# perché la regex ancora l'UUID subito dopo lo slash. Resta un gruppo per UUID,
+# che ruota raramente — non valeva rendere la regex più permissiva e rischiare di
+# collassare path legittimi anche in access_url_endpoint(), che la condivide.
+function access_url_service(depth,    _url, _n, _p, _i, _out) {
+    _url = access_url()
+    if (_url == "") return ""
+    sub(/\?.*/, "", _url)
+    sub(/;.*/, "", _url)
+    if (_url == "/" || _url == "") return "/"
+    gsub(/\/[0-9]{5,}/, "/{id}", _url)
+    gsub(/\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/, "/{uuid}", _url)
+    # Clamp di SANITÀ, non un default di configurazione: una profondità 0,
+    # negativa o vuota produrrebbe nomi di servizio vuoti e righe scartate in
+    # silenzio. L'obbligo di DICHIARARE il valore vive in dispatch.sh, che rifiuta
+    # di eseguire il tool se SERVICE_PATH_DEPTH manca (ARCH-6) — qui si evita solo
+    # che un'invocazione diretta di gawk (i test unitari lo fanno) degeneri.
+    if (depth + 0 < 1) depth = 1
+    # _p[1] è vuoto (lo slash iniziale), quindi il segmento N sta in _p[N+1].
+    _n = split(_url, _p, "/")
+    _out = ""
+    for (_i = 2; _i <= _n && _i <= depth + 1; _i++) {
+        if (_p[_i] == "") continue
+        _out = (_out == "") ? _p[_i] : _out "/" _p[_i]
+    }
+    return _out
+}
+
 function access_url_endpoint(    _url) {
     _url = access_url()
     if (_url == "") return ""

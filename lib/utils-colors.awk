@@ -84,3 +84,29 @@ function bar_color(v, max,    r) {
     if (r >= 0.2) return C_BAR_2
     return C_BAR_1
 }
+
+# ─── Troncamento DICHIARATO ───────────────────────────────────────────────────
+#
+# Taglia a n caratteri e aggiunge "…" SOLO se ha davvero tagliato. Serve perché
+# un troncamento silenzioso non è cosmetico: fino al 2026-08-21 (TRUNC-1)
+# grep_named_log stampava
+#
+#   ERROR  ...  DocumentMetadata..._Ext::validateMatchingThirdSubruleA (13432524.cc-1787133862806-375841
+#
+# e quell'ID di correlazione tagliato era INDISTINGUIBILE da uno completo: chi lo
+# copiava in una ricerca cercava una stringa che non esiste. Il progetto la
+# convenzione la ha già — slow_requests stampa «(mostrate le 30 più lente di
+# 14473)», tail_log «Ultimi 5 di 295229 righe totali» — era applicata a metà.
+#
+# Sta qui, in un file caricato da OGNI invocazione gawk (`common_f` in
+# dispatch.sh), perché i troncamenti silenziosi erano in quattro file diversi e
+# una copia per file sarebbe la premessa della prossima divergenza (principio 2).
+#
+# Usare SOLO sui valori che vengono STAMPATI. Non sulle chiavi di
+# deduplicazione: là il taglio è il meccanismo che fa collassare messaggi che
+# differiscono solo nella coda (`norm_key` in filter_errors.awk, `key_msg` in
+# grep_named_log.awk), e aggiungere un carattere le renderebbe soltanto più
+# lunghe senza cambiare cosa raggruppano.
+function ellipsize(s, n) {
+    return (length(s) > n) ? substr(s, 1, n) "…" : s
+}

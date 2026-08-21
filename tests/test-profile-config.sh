@@ -160,8 +160,13 @@ assert_true "ACCESS_LOG_FORMAT non supportato: messaggio dedicato" \
     "$([[ "$_out" == *"ACCESS_LOG_FORMAT='formato_inventato' non supportato"* ]] && echo 1 || echo 0)"
 assert_true "  elenca i formati access disponibili (undertow)" \
     "$([[ "$_out" == *"Formati disponibili:"*"undertow"* ]] && echo 1 || echo 0)"
-assert_true "  elenca le 6 funzioni che un nuovo parser deve fornire" \
-    "$([[ "$_out" == *"access_status()"* && "$_out" == *"access_ip()"* ]] && echo 1 || echo 0)"
+# 7 e non 6 da SVCGRAN-1 (2026-08-21): access_url_service() è entrata nel
+# contratto insieme alla profondità configurabile. Senza aggiornare l'elenco, un
+# nuovo parser di formato lo soddisferebbe e romperebbe service_times (principio 8:
+# centralizzare significa migrare anche il contratto, non solo il codice).
+assert_true "  elenca le 7 funzioni che un nuovo parser deve fornire" \
+    "$([[ "$_out" == *"access_status()"* && "$_out" == *"access_ip()"* \
+         && "$_out" == *"access_url_service()"* ]] && echo 1 || echo 0)"
 
 # Il default (nessun ACCESS_LOG_FORMAT in system.conf) deve essere "undertow":
 # i profili esistenti non lo dichiarano e devono continuare a funzionare.
@@ -172,6 +177,42 @@ assert_true "ACCESS_LOG_FORMAT assente: default undertow, nessun errore" \
     "$(_out=$("$ROOT_DIR/chatbot.sh" --profile "$_p7" --env prod --node 4 \
         --query "quanti errori 500 oggi" 2>&1 || true); \
       [[ "$_out" != *"non supportato"* ]] && echo 1 || echo 0)"
+
+# ─── SVCGRAN-1: SERVICE_PATH_DEPTH è obbligatoria, e il messaggio lo spiega ──
+section "SERVICE_PATH_DEPTH mancante: errore parlante, non un raggruppamento degenere"
+
+# ARCH-6 applicato a una coordinata nuova. Il valore NON ha default nel codice
+# perché la scelta è del deployment: misurato, profondità 1 è corretta su usnext
+# (6 gruppi) e degenere su liquido (1 gruppo su 214.594 chiamate). Un default
+# avrebbe nascosto la scelta invece di richiederla — che è esattamente come il
+# difetto è sopravvissuto per settimane.
+_p8="$_FIX/no_svc_depth"
+_mk_profile "$_p8"
+# LOG_BASE_DIR va rediretto sull'albero di fixture come per _p4.._p7: senza,
+# resolve-logs fallisce PRIMA di arrivare al dispatch e il test verificherebbe un
+# errore diverso da quello che vuole misurare.
+sed -i "s#^LOG_BASE_DIR=.*#LOG_BASE_DIR=\"$_FIX/logs\"#" "$_p8/system.conf"
+sed -i '/^SERVICE_PATH_DEPTH=/d' "$_p8/system.conf"
+_out8=$("$ROOT_DIR/chatbot.sh" --profile "$_p8" --env prod --node 4 \
+    --query "tempi dei servizi di oggi" 2>&1 || true)
+assert_true "nomina la variabile e il file dove impostarla" \
+    "$([[ "$_out8" == *"SERVICE_PATH_DEPTH"* && "$_out8" == *"system.conf"* ]] && echo 1 || echo 0)"
+assert_true "  spiega COSA significa il numero, non solo che manca" \
+    "$([[ "$_out8" == *"context root"* ]] && echo 1 || echo 0)"
+# Il guard sta PRIMA di require_tool_sources: un profilo mal configurato fallisce
+# su ogni nodo, un log mancante solo su questo. Va detta prima la cosa invariante.
+assert_true "  l'errore di configurazione precede quello di log mancante" \
+    "$([[ "$_out8" != *"[SKIP]"* ]] && echo 1 || echo 0)"
+
+# Il profilo COMPLETO non deve emettere quell'errore: senza questa, la prima
+# asserzione passerebbe anche se il guard scattasse sempre.
+_p9="$_FIX/with_svc_depth"
+_mk_profile "$_p9"
+sed -i "s#^LOG_BASE_DIR=.*#LOG_BASE_DIR=\"$_FIX/logs\"#" "$_p9/system.conf"
+assert_true "profilo con SERVICE_PATH_DEPTH: nessun errore di configurazione" \
+    "$(_o=$("$ROOT_DIR/chatbot.sh" --profile "$_p9" --env prod --node 4 \
+        --query "tempi dei servizi di oggi" 2>&1 || true); \
+      [[ "$_o" != *"SERVICE_PATH_DEPTH non impostato"* ]] && echo 1 || echo 0)"
 
 echo ""
 echo "═══════════════════════════════════════════════════"

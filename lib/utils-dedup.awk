@@ -55,7 +55,11 @@ function dedup_print(max_rows,    i, dk, rl, cnt, color, rst, cnt_str, n_lines, 
         cnt_str = (cnt > 1) ? sprintf(" %s(×%d)%s", CYAN, cnt, RESET) : ""
 
         n_lines = split(_dup_msg[dk], msg_lines, "\n")
-        printf "%s[%s] %-5s%s  %s%s\n", color, _dup_ts[dk], rl, rst, substr(msg_lines[1], 1, 120), cnt_str
+        # ellipsize() e non substr(): il taglio va DICHIARATO (TRUNC-1). Questo è
+        # il printer condiviso, quindi la correzione vale per tutti i suoi utenti
+        # (filter_errors e chiunque userà dedup_print), non solo per il tool in cui
+        # il difetto era stato notato.
+        printf "%s[%s] %-5s%s  %s%s\n", color, _dup_ts[dk], rl, rst, ellipsize(msg_lines[1], 120), cnt_str
         for (li = 2; li <= n_lines; li++)
             printf "  %s\n", msg_lines[li]
         if (_dup_extra[dk] != "")

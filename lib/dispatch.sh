@@ -818,7 +818,7 @@ _dispatch_tool_run() {
     # ai 6 tool, che dopo ACCESS-1 non contengono più regex di formato.
     local afmt="${ACCESS_LOG_FORMAT:-undertow}"
     if ! _require_awk_parser "utils-access-${afmt}.awk" "ACCESS_LOG_FORMAT" "$afmt" \
-            "access_status(), access_time_ms(), access_method(), access_url(), access_url_root(), access_ip() (vedi utils-access-undertow.awk)"; then
+            "access_status(), access_time_ms(), access_method(), access_url(), access_url_root(), access_url_service(), access_ip() (vedi utils-access-undertow.awk)"; then
         return 1
     fi
     local common_f="-f '$LIB_DIR/utils-time.awk' -f '$LIB_DIR/utils-logline.awk' -f '$LIB_DIR/utils-colors.awk' -f '$LIB_DIR/utils-${fmt}.awk' -f '$LIB_DIR/utils-access-${afmt}.awk' -f '$LIB_DIR/utils-dedup.awk'"
@@ -899,10 +899,29 @@ _dispatch_tool_run() {
                 "$logs_expr"
             ;;
         service_times)
+            # Il guard di CONFIGURAZIONE va prima di require_tool_sources, che è un
+            # guard di DISPONIBILITÀ DATI: un profilo senza SERVICE_PATH_DEPTH
+            # fallirà su ogni nodo e ogni giorno, mentre un log mancante è
+            # specifico di questo nodo. Dire prima la cosa che non cambierà.
+            #
+            # ARCH-6: nessun default implicito. Quante componenti del path
+            # identifichino un servizio dipende da come è montata l'applicazione —
+            # una COORDINATA del profilo, non una capacità del tool (SVCGRAN-1,
+            # principio 7). Misurato: profondità 1 dà 6 gruppi su usnext (giusto) e
+            # UN SOLO gruppo su liquido, dove tutto vive sotto /essigSXCC/. Un
+            # default qui nasconderebbe la scelta invece di richiederla.
+            if [[ -z "${SERVICE_PATH_DEPTH:-}" ]]; then
+                echo "[ERROR] SERVICE_PATH_DEPTH non impostato in system.conf del profilo." >&2
+                echo "        Indica quante componenti del path URL identificano un servizio:" >&2
+                echo "        1 se ogni servizio ha il proprio context root (/portal, /api, …)," >&2
+                echo "        di più se convivono sotto un'unica webapp (/app/rest/servizio → 3)." >&2
+                return 1
+            fi
             require_tool_sources service_times || return
             logs_expr="$(open_logs)"
             print_log_source "$logs_expr"
             eval gawk "$tw_args" -f "$TOOLS_DIR/service_times.awk" \
+                -v svc_depth="$SERVICE_PATH_DEPTH" \
                 "$logs_expr"
             ;;
         gc_stats)

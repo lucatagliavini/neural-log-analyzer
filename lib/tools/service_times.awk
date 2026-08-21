@@ -1,7 +1,15 @@
-# Aggrega i tempi di risposta per nome servizio (primo segmento del path URL).
+# Aggrega i tempi di risposta per nome servizio.
 # Sorgente: access log Undertow (stessa struttura di slow_requests).
 # Parametri: -v time_from="YYYY-MM-DDTHH:MM"  -v time_to="YYYY-MM-DDTHH:MM"
 #            -v threshold_ms="0"   (filtra solo richieste sopra soglia, 0 = tutte)
+#            -v svc_depth="N"      (componenti del path che identificano il
+#                                   servizio; da SERVICE_PATH_DEPTH in system.conf)
+#
+# SVCGRAN-1: `svc_depth` non ha un default qui. Il numero di segmenti che
+# identifica un servizio dipende da come è montata l'applicazione — una
+# COORDINATA, non una capacità del tool (principio 7) — e ARCH-6 vieta i default
+# impliciti nel codice: il guard sta in dispatch.sh, che rifiuta di invocare
+# questo tool se il profilo non lo dichiara.
 #
 # Formato campi access log: IP [datetime] "METHOD /path HTTP/..." STATUS BYTES TIME_MS ...
 
@@ -23,7 +31,7 @@ BEGIN {
     ms = _ms
     if (ms < threshold_ms + 0) next
 
-    _svc = access_url_root()
+    _svc = access_url_service(svc_depth)
     if (_svc == "") next
     svc = _svc
 
@@ -55,6 +63,26 @@ END {
     if (length(svc_count) == 0) {
         if (access_ts_period_ok()) print "Nessun dato trovato nell'access log."
         exit
+    }
+
+    # Raggruppamento DEGENERE: un solo servizio significa che la profondità
+    # configurata non discrimina nulla su questi URL, e la tabella che segue è
+    # l'access log intero con dei percentili addosso — una risposta ben formata
+    # che non risponde. Va DETTO (SVCGRAN-1): il difetto è rimasto invisibile per
+    # settimane proprio perché il tool non aveva modo di segnalarlo, ed è stato
+    # trovato solo eseguendolo sui log di produzione e guardando l'output.
+    #
+    # La soglia è "un gruppo solo", non "pochi gruppi": due gruppi possono essere
+    # la verità di un deployment con due servizi, uno solo non lo è mai —
+    # raggruppare per una chiave costante non è raggruppare.
+    if (length(svc_count) == 1) {
+        for (s in svc_count) _only = s
+        printf "%s⚠ Un solo servizio (%s): la profondità configurata (%s) non distingue nulla su questi URL.%s\n", \
+            C_WARN, _only, (svc_depth == "" ? "?" : svc_depth), C_RESET
+        printf "%s  I numeri sotto sono quindi quelli dell'intero access log, non di un servizio.%s\n", \
+            C_LBL, C_RESET
+        printf "%s  Alzare SERVICE_PATH_DEPTH in system.conf del profilo per separarli.%s\n\n", \
+            C_LBL, C_RESET
     }
 
     col_svc = length("SERVIZIO")
