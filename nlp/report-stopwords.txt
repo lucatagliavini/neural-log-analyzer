@@ -1,0 +1,190 @@
+# report-stopwords.txt — parole funzionali italiane, escluse dal GAP REPORT.
+#
+# ⚠️  QUESTO FILE NON È VOCABOLARIO.
+#
+# Sta accanto a unigrams.txt/bigrams.txt ma non ha nulla a che vedere con le
+# feature: non esclude niente dalla vettorizzazione, non influenza il modello, e
+# modificarlo NON richiede build-dataset.sh né train.sh. Esclude soltanto delle
+# RIGHE dall'output di vocab-gap.sh. Per questo si chiama `report-stopwords` e non
+# `stopwords`: il nome corto inviterebbe esattamente la confusione sbagliata.
+#
+# Sta nel framework e non nel profilo perché è LINGUA ITALIANA, non una coordinata
+# del cliente (NLP-1). Un profilo può sovrascriverlo, e — a differenza di
+# unigrams.txt — farlo NON gli fa ottenere pesi propri: vedi il commento su
+# STOPWORDS_FILE in lib/nlp-paths.sh.
+#
+# ─── Perché serve, misurato ───────────────────────────────────────────────────
+#
+# Il gap report ha un secondo filtro, il numero di classi in cui un token compare
+# (potere discriminante). Da solo NON basta: misurato il 2026-08-21, `della`
+# compare in **1 sola classe**, esattamente come `impattano`. Un token raro è raro
+# sia perché è una parola funzionale usata di sfuggita, sia perché è un termine di
+# dominio che manca al vocabolario — e nessun conteggio distingue i due casi.
+# È un fatto linguistico, non statistico, quindi si risolve con una lista.
+#
+# ─── La regola, e perché non è "tutte le parole funzionali" ───────────────────
+#
+# Una parola entra qui solo se è funzionale **e non ha valore di collocazione**,
+# cioè non è concentrata in una classe per via di un modo di dire del dominio.
+# La concentrazione si MISURA (`vocab-gap.sh` mostra la colonna "classi"), e una
+# parola grammaticale concentrata in 1-2 classi è quasi sempre metà di una
+# collocazione che vale un'occhiata umana — non rumore da nascondere.
+#
+# Non è una regola teorica: **scrivendo questo file ho fatto due volte l'errore**,
+# e la misura l'ha intercettato. Erano già in lista e sono state rimosse:
+#   dall     32 esempi, **31 in filter_ip** — è `dall'ip` / `dall'indirizzo`
+#   come     18 esempi, filter_app_errors — è `loggati come info`, la definizione
+#            stessa di quel tool
+#   dove      9 esempi, **9 su 9 in search_all_logs** — è `dove compare`
+# Nasconderle avrebbe reso invisibili tre segnali reali: esattamente il difetto
+# che GAPREP-1 corregge, reintrodotto dal suo stesso rimedio.
+#
+# Al contrario `posso`/`puoi`/`fare` restano in lista pur essendo concentrate su
+# show_help, perché il loro segnale è **già catturato dai compositi** del
+# vocabolario (`posso.fare`, `cosa.puoi`, `posso.usar`, `come.posso.usar`): la
+# forma nuda non aggiunge nulla.
+#
+# ─── Cosa NON mettere qui ─────────────────────────────────────────────────────
+#
+# Mai un termine di dominio. Contro-esempi concreti, deliberatamente ASSENTI:
+#   alta      25 esempi — "latenza alta", "alta frequenza": termine di dominio
+#   prima     "prima riga" è POSIZIONALE (vedi FLEX-1, LOG_ORDER): mai stopword
+#   secondo   ambiguo per numero grammaticale ("al secondo" = frequenza) — un gap
+#             legittimo da valutare, non da nascondere
+#   durante   temporale, rilevante per le finestre
+#   nodo      è una COORDINATA, non una parola funzionale: la normalizzazione la
+#             assorbe in <NODE> quando è seguita dal numero, e nei casi residui
+#             ci pensa il conteggio classi (7 classi → in fondo alla lista)
+#
+# Nemmeno una parola che il vocabolario copre già: sarebbe inerte (un token
+# coperto non arriva a questo filtro) ma si leggerebbe come una contraddizione fra
+# i due file. Rimosse per questo: `dalla`/`dalle` (`dall[ea]`, range orari),
+# `chi` (`\bchi\b`, filter_ip), `stato` (`status|stato`), `dammi` (fra i verbi
+# imperativi di richiesta).
+#
+# ─── Nota sul filtro di lunghezza ─────────────────────────────────────────────
+#
+# vocab-gap.sh scarta i token sotto i 4 caratteri, quindi le forme brevi (di, il,
+# la, in, su, e, a, che, non) non arrivano mai a essere confrontate con questa
+# lista. Sono comunque incluse: la lista è un fatto sulla lingua, non
+# sull'implementazione corrente del tokenizzatore.
+
+# ─── Articoli e preposizioni, forme semplici ──────────────────────────────────
+# NB: `per` è deliberatamente assente pur essendo una preposizione — è una FEATURE
+# del vocabolario (`\bper\b` in unigrams.txt, sezione Conteggio/aggregazione, dove
+# porta il senso di "per ora", "per endpoint"). Elencarlo qui non avrebbe effetto
+# (un token coperto non arriva mai a questo filtro) ma si leggerebbe come una
+# contraddizione fra i due file.
+che
+non
+con
+tra
+fra
+
+# ─── Preposizioni articolate ed elisioni ──────────────────────────────────────
+del
+dell
+della
+dello
+delle
+degli
+dei
+all
+alla
+allo
+alle
+agli
+nel
+nell
+nella
+nello
+nelle
+negli
+dal
+dallo
+dagli
+sul
+sull
+sulla
+sullo
+sulle
+sugli
+coi
+coll
+
+# ─── Pronomi, dimostrativi, indefiniti ────────────────────────────────────────
+questo
+questa
+questi
+queste
+quello
+quella
+quelli
+quelle
+stesso
+stessa
+stessi
+stesse
+qualcosa
+qualcuno
+ognuno
+ciascuno
+altro
+altra
+altri
+altre
+
+# ─── Interrogativi e relativi ─────────────────────────────────────────────────
+cosa
+quale
+quali
+cui
+
+# ─── Ausiliari e copule ───────────────────────────────────────────────────────
+sono
+essere
+stati
+stata
+state
+hanno
+avuto
+avete
+abbiamo
+siamo
+siete
+
+# ─── Verbi modali e volitivi della formula di richiesta ───────────────────────
+# "voglio vedere gli errori", "posso avere il conteggio": portano l'atto
+# linguistico, non l'intento — compaiono in tutte le classi indistintamente.
+posso
+puoi
+possiamo
+potete
+potrei
+voglio
+vuoi
+vogliamo
+vorrei
+devo
+fare
+fatto
+faccio
+vedere
+visto
+avere
+
+# ─── Avverbi e congiunzioni generiche ─────────────────────────────────────────
+anche
+solo
+poco
+tanto
+troppo
+ancora
+sempre
+oppure
+quindi
+mentre
+senza
+proprio
+davvero
+qualche

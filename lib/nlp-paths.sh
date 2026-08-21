@@ -20,6 +20,8 @@
 #   UNIGRAMS_FILE    vocabolario unigram (profilo se presente, altrimenti framework)
 #   BIGRAMS_FILE     vocabolario bigram
 #   TOOLS_CONF_FILE  NUM_TOOLS / TOOL_THRESHOLD / MODEL_TOPOLOGY / TOOL_NAMES
+#   STOPWORDS_FILE   parole funzionali escluse dal gap report — vuoto se assente,
+#                    e NON influenza MODEL_DIR (vedi il commento alla risoluzione)
 #   DATASET_DIR      directory del dataset
 #   LABELED_FILE     dataset/queries_labeled.txt (input di build-dataset)
 #   DATASET_FILE     dataset/queries.txt (generato, input di train)
@@ -67,6 +69,32 @@ nlp_resolve_paths() {
     BIGRAMS_FILE=$(_nlp_resolve_file bigrams.txt)   || return 1
     TOOLS_CONF_FILE=$(_nlp_resolve_file tools.conf) || return 1
 
+    # report-stopwords.txt — risoluzione MORBIDA, deliberatamente NON via
+    # _nlp_resolve_file, per due ragioni distinte.
+    #
+    # 1. NON deve poter rompere il bot. _nlp_resolve_file fa `return 1` se il file
+    #    manca in entrambe le posizioni, e nlp_resolve_paths() è chiamata PRIMA di
+    #    domain.conf in tutto il progetto, chatbot.sh incluso: un artefatto che
+    #    serve solo alla leggibilità di un report diagnostico non deve avere il
+    #    potere di impedire l'avvio. Assente → stringa vuota, e vocab-gap.sh
+    #    disattiva il filtro dicendolo. È il principio 5: degradare, non morire.
+    #
+    # 2. NON entra nel calcolo di NLP_CUSTOM più sotto — e la riga che manca è
+    #    voluta, non dimenticata. NLP_CUSTOM deriva MODEL_DIR: un profilo che
+    #    sovrascrive un artefatto ottiene pesi propri, perché il modello condiviso
+    #    è addestrato su input diversi dai suoi. Le stopword non sono un input del
+    #    modello: non toccano le feature, non richiedono build-dataset.sh né
+    #    train.sh, cambiano solo quali RIGHE compaiono nel report. Farle
+    #    partecipare regalerebbe un modello privato a un profilo che ha soltanto
+    #    personalizzato una diagnostica.
+    if   [[ -f "$PROFILE_DIR/report-stopwords.txt" ]]; then
+        STOPWORDS_FILE="$PROFILE_DIR/report-stopwords.txt"
+    elif [[ -f "$NLP_DIR/report-stopwords.txt" ]]; then
+        STOPWORDS_FILE="$NLP_DIR/report-stopwords.txt"
+    else
+        STOPWORDS_FILE=""
+    fi
+
     # Il dataset è una DIRECTORY: si risolve per directory, non per file, così un
     # profilo che la sovrascrive fornisce entrambi i file (labeled e generato) e non
     # una combinazione incoerente dei due.
@@ -103,6 +131,6 @@ nlp_resolve_paths() {
     # infer-dry.sh da chatbot.sh, build_dataset.py da build-dataset.sh. Un processo
     # figlio eredita solo le variabili esportate, quindi senza export la
     # risoluzione fatta dal padre sarebbe invisibile al figlio.
-    export NLP_DIR UNIGRAMS_FILE BIGRAMS_FILE TOOLS_CONF_FILE \
+    export NLP_DIR UNIGRAMS_FILE BIGRAMS_FILE TOOLS_CONF_FILE STOPWORDS_FILE \
            DATASET_DIR LABELED_FILE DATASET_FILE MODEL_DIR NLP_CUSTOM
 }
