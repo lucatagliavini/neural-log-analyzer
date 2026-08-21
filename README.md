@@ -52,7 +52,7 @@ Il modello classifica la query e attiva uno o più dei seguenti tool:
 | `slow_requests` | Richieste con tempo di risposta sopra soglia |
 | `traffic_volume` | Volume di traffico per finestra temporale |
 | `filter_errors` | Righe ERROR/WARN dal server.log con classe e messaggio |
-| `service_times` | Tempi di esecuzione servizi SOA dal server.log |
+| `service_times` | Tempi di esecuzione servizi SOA per nome servizio, dall'access log |
 | `gc_stats` | Statistiche GC: pause, heap usage, frequenza |
 | `correlate_gc_slow` | Correlazione tra pause GC e richieste lente |
 | `tail_log` | Ultime N righe di un file di log |
@@ -60,6 +60,9 @@ Il modello classifica la query e attiva uno o più dei seguenti tool:
 | `filter_app_errors` | Errori applicativi nel server.log (status 5xx e exception come INFO) |
 | `tail_named_log` | Ultime N righe di un log applicativo custom specifico (cc.log, api.log, …) |
 | `grep_named_log` | Filtra un log applicativo custom per livello ERROR/WARN/INFO o pattern testuale |
+| `show_help` | Lista degli strumenti disponibili con esempi di utilizzo |
+| `search_all_logs` | Cerca un pattern in tutti i log del nodo, di tutte le app presenti (con colonna APP) |
+| `list_logs` | Elenca i log realmente presenti sul nodo attivo |
 
 ## Struttura del progetto
 

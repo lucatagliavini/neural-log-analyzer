@@ -50,8 +50,21 @@ for prob in $probs; do
     i=$(( i + 1 ))
 done
 
-# Ordina per prob decrescente
-sorted=$(printf '%s\n' "${pairs[@]}" | sort -rn -k1)
+# Ordina per prob decrescente.
+#
+# `sort -g` e non `-n`: nc_predict emette notazione scientifica per i valori
+# piccoli (es. "9.5657479403040116e-05") e `-n` NON la interpreta — legge quel
+# valore come 9.56 e lo mette in cima, davanti a un 0.99 legittimo. Il sintomo
+# era un ranking con il vincitore vero al terzo posto e il separatore di soglia
+# stampato SOPRA il rank 1, cioè esattamente il contrario di ciò che questo
+# strumento serve a mostrare. Il routing di produzione non era affetto:
+# infer.sh confronta con awk, che la notazione scientifica la capisce.
+#
+# `LC_ALL=C` perché sia -n sia -g usano il separatore decimale della locale:
+# sotto una locale italiana (LC_NUMERIC=it_IT, separatore ",") "0.995" viene
+# letto come 0 e tutti i tool pareggiano a zero. Qui non si riproduce solo
+# perché it_IT non è installata — il server di produzione può averla.
+sorted=$(printf '%s\n' "${pairs[@]}" | LC_ALL=C sort -grk1)
 
 # Colori
 G="${C_OK}"; Y="${C_WARN}"; D="${C_LBL}"; B="${C_BOLD}"; R="${C_RESET}"; C="${C_ACCENT}"

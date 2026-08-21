@@ -6,13 +6,18 @@
 # Modificare questo file RICHIEDE rebuild del dataset e riaddestramento.
 
 # ── exception + tempo → filter_errors ────────────────────────────────────────
-exception|eccezion|warn      :: ora |ore |ultim|recent|stamatt|stanott
+# `\bor[ae]\b` e non `ora |ore `: gli spazi vengono RIMOSSI dai pattern da
+# query-to-features.sh e build_dataset.py, quindi `ora |ore ` diventava `ora|ore`
+# e matchava l'interno di **errore** — la co-presenza si attivava su "exception
+# ... errore" senza che la query nominasse alcuna finestra temporale.
+# Stesso difetto corretto in unigrams.txt (vedi il commento su `\bor[ae]\b`).
+exception|eccezion|warn      :: \bor[ae]\b|ultim|recent|stamatt|stanott
 
 # ── lento + servizi → service_times (non slow_requests) ──────────────────────
 lent[oaie]|slow|latenz       :: servizi|servizio|soa\b|backend|web.?service
 
 # ── volume + tempo → traffic_volume (non tail_log) ────────────────────────────
-volum|andament|picco         :: ora |ore |ultim|minut|giorn
+volum|andament|picco         :: \bor[ae]\b|ultim|minut|giorn
 
 # ── righe/tail + recente → tail_log (non traffic_volume) ─────────────────────
 rig[ah]|tail\b               :: ultim|recent|recenti
@@ -58,3 +63,15 @@ quali.log|che.log|quali.file.di.log|che.file.di.log|tutti.i.log :: ci.sono|sono.
 # asserzioni di run-tests.sh — mai in awk, dove `\b` è backspace, non confine
 # di parola.
 server.log|gc.log|access.log :: <pattern>|cerca\b|trova\b|ricerca\b|search\b :: 2
+
+# ── conteggio + codice di stato → count_status (non traffic_volume) ───────────
+# "quante chiamate 503 stamattina" vinceva traffic_volume al 77% con count_status
+# secondo al 35%: `chiamata|chiamate` vive nella sezione traffico di unigrams.txt
+# (accanto a `traffico|traffich`) ed è genuinamente ambigua — "chiamate lente",
+# "chiamate 500" e "quante chiamate al minuto" sono tre tool diversi. Il
+# discriminante non è nessuna delle due parole da sola ma la CO-PRESENZA di un
+# quantificatore e di un codice di stato: quello è un conteggio per codice, non un
+# volume per finestra. Peso 2 per battere l'unigram di traffico.
+# patternB ripete i codici con \b per la ragione spiegata in unigrams.txt (senza,
+# "5000 ms" li attiverebbe e la co-presenza scatterebbe su una query di latenza).
+quant[eo]|quanti|conta|contami|numero :: \b(400|404|500|503|4xx|5xx)\b|status|stato :: 2

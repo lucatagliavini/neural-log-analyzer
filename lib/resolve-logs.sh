@@ -30,10 +30,26 @@
 # codice", consolidato 2026-08-06 rimuovendo la duplicazione
 # 'undertow_access_log'/'server'/'gc' che c'era prima in questo file).
 #
+# Gli errori qui sotto si emettono in CHIARO su stderr, non nella forma
+# eval-able `echo "echo '...' >&2" >&2` che usa normalize-query.sh — e la
+# differenza NON è stilistica, sta nel contratto del chiamante:
+#   normalize-query.sh  →  `source <(script)`   stdout eseguito SEMPRE, anche
+#                                               dopo `exit 1`: la forma
+#                                               eval-able è l'unico modo per
+#                                               far arrivare il messaggio.
+#   resolve-logs.sh     →  `res=$(script) || {` stdout SCARTATO se rc≠0
+#                                               (chatbot.sh:242): `eval` non
+#                                               viene mai raggiunto, quindi la
+#                                               forma eval-able è codice morto e
+#                                               all'utente arriva la stringa
+#                                               letterale su stderr — che è il
+#                                               bug corretto il 2026-08-21.
+# Non "uniformare" i due file: cambiare forma qui richiede prima cambiare il
+# modo in cui chatbot.sh invoca questo script.
 
 # Carica sistema e dominio dal profilo attivo
 if [[ -z "${PROFILE_DIR:-}" ]]; then
-    echo "echo '[ERROR] resolve-logs: PROFILE_DIR non impostata' >&2" >&2
+    echo "[ERROR] resolve-logs: PROFILE_DIR non impostata" >&2
     exit 1
 fi
 source "$PROFILE_DIR/system.conf"
@@ -51,13 +67,13 @@ APP="${4:-$DEFAULT_APP}"
 
 # ─── Validazione ─────────────────────────────────────────────────────────────
 if [[ -z "$ENV_NAME" ]]; then
-    echo "echo '[ERROR] resolve-logs: ambiente non specificato' >&2" >&2
+    echo "[ERROR] resolve-logs: ambiente non specificato" >&2
     exit 1
 fi
 
 ENV_CODE="${ENV_NODE_CODE[$ENV_NAME]:-}"
 if [[ -z "$ENV_CODE" ]]; then
-    echo "echo '[ERROR] resolve-logs: ambiente sconosciuto: $ENV_NAME' >&2" >&2
+    echo "[ERROR] resolve-logs: ambiente sconosciuto: $ENV_NAME" >&2
     exit 1
 fi
 
@@ -71,7 +87,7 @@ if [[ ! -d "$NODE_DIR" ]]; then
     # Fallback: scoperta dinamica tramite utils-nodes.sh (unica fonte di verità)
     NODE_DIR=$(list_env_node_dirs "$ENV_NAME" | head -1)
     if [[ -z "$NODE_DIR" ]]; then
-        echo "echo '[ERROR] resolve-logs: nodo non trovato in $BASE_DIR/$ENV_NAME' >&2" >&2
+        echo "[ERROR] resolve-logs: nodo non trovato in $BASE_DIR/$ENV_NAME" >&2
         exit 1
     fi
     NODE_NUM=$(node_num_from_dir "$NODE_DIR")
@@ -84,7 +100,7 @@ fi
 # dispatch.sh.
 for _b in ACCESS_LOG_BASE SERVER_LOG_BASE GC_LOG_BASE; do
     if [[ -z "${!_b:-}" ]]; then
-        echo "echo '[ERROR] resolve-logs: $_b non impostato in system.conf' >&2" >&2
+        echo "[ERROR] resolve-logs: $_b non impostato in system.conf" >&2
         exit 1
     fi
 done

@@ -21,12 +21,16 @@ errore|errori             :: 2
 # fallimenti, fallisce/falliscono. Peso 2 come `errore|errori`, perché in
 # "richieste fallite" è l'UNICA parola che porta il segnale di errore.
 fallit|fallim|fallis      :: 2
-500                       :: 1
-400                       :: 1
-404                       :: 1
-503                       :: 1
-5xx                       :: 1
-4xx                       :: 1
+# \b obbligatorio: senza, "5000" (una soglia in ms) attiva `500` e insegna alla
+# rete che un codice di stato può significare "richiesta lenta". Nel corpus
+# c'erano 2 esempi slow_requests ("chiamate sopra i 5000ms") che attivavano `500`
+# e 1 count_status ("codice errore clv00404") che attivava `404`.
+\b500\b                   :: 1
+\b400\b                   :: 1
+\b404\b                   :: 1
+\b503\b                   :: 1
+\b5xx\b                   :: 1
+\b4xx\b                   :: 1
 status|stato              :: 1
 http                      :: 1
 # "risposte HTTP ricevute", "ricevuti N codici" — solo count_status (1 classe)
@@ -35,7 +39,16 @@ rispost[ae]|ricevut       :: 1
 access\b|accessi\b        :: 1
 
 # ── Tempo / finestre temporali ────────────────────────────────────────────────
-ora |ore |ora$            :: 2
+# ATTENZIONE — qui NON si usa lo spazio come confine di parola: sia
+# query-to-features.sh (`${pattern// /}`) sia build_dataset.py (`.replace(' ','')`)
+# RIMUOVONO gli spazi dai pattern, quindi il vecchio `ora |ore |ora$` diventava
+# `ora|ore|ora$` e catturava l'interno di **errore** — 21 query del corpus
+# prendevano una feature di finestra temporale con peso 2 per la parola più
+# centrale del dominio (anche `oraria`, `peggiorano`, `lavorare`).
+# Il pattern SCRITTO era corretto: è la pipeline che lo degradava, ed è per questo
+# che il difetto non si vedeva rileggendo il vocabolario. Dove serve uno spazio si
+# usa `.` (come in `sopra.i\b` più sotto); dove serve un confine, `\b`.
+\bor[ae]\b|\borari        :: 2
 minut                     :: 2
 giorn                     :: 1
 ieri                      :: 1
@@ -58,7 +71,10 @@ raggrupp                  :: 1
 statistich|statistic      :: 1
 ripartizion|suddivision|breakdown :: 1
 frequen                   :: 1
-per                       :: 1
+# \b: senza, `per` catturava performance (21 query) e recupera (14), contro 77
+# occorrenze legittime. Nessun segnale perso — "performance" ha già una feature
+# propria (`prestazion|performanc`, sezione Performance/latenza).
+\bper\b                   :: 1
 list[ae]                  :: 1
 tutt[ie]                  :: 1
 numero|numer              :: 1
@@ -73,6 +89,17 @@ response.time|sopra.soglia|impiegano.troppo|risposta.ritardat|ritardat :: 1
 timeout                   :: 1
 # "sopra i 2 secondi", "sopra la soglia" — solo slow_requests (1 classe)
 sopra\b                   :: 1
+# Unità di misura della soglia, come `\bms\b|millisec` sopra. PLURALE OBBLIGATORIO:
+# il corpus contiene i due sensi opposti della stessa radice — "quante chiamate al
+# second|o|" è una FREQUENZA (traffic_volume, riga 67 del labeled) mentre "sopra i 3
+# second|i|" è una SOGLIA (slow_requests, riga 989). Un `second` nudo avrebbe
+# codificato quella confusione invece di risolverla; il numero grammaticale la
+# discrimina da solo, senza pattern composito.
+secondi\b                 :: 1
+# Verbi di superamento soglia: "hanno superato i 10 secondi", "oltre i 5 secondi".
+# `oltre\b` e non `oltre`: evita "oltremodo" e simili (stessa classe di difetto di
+# `per`/`ora` più sopra).
+superat|oltre\b           :: 1
 # "tempi di risposta", "response time" — max 4 classi ma peso basso; rinforza service_times e slow_requests
 # (NON aggiungere "risposta" da solo: 4 classi, troppo generico — il pattern composito è ok)
 tempi\b                   :: 1
@@ -178,12 +205,17 @@ dove.appare|dove.si.trova|in.quali.log|cerca.ovunque|in.tutti.i.log :: 2
 # ── Help / assistenza (C14) ───────────────────────────────────────────────────
 aiuto|help\b|\baiutami\b         :: 2
 cosa.sai|cosa.puoi|cosa.fai|che.strumenti|comandi.disponibili :: 2
+# `comand` nudo, oltre al composito `comandi.disponibili` sopra: "quali comandi
+# posso usare" non attivava NULLA (vettore identicamente nullo → nessun tool sopra
+# soglia), perché ogni pattern di questa sezione richiedeva una seconda parola
+# specifica. Solo show_help (1 classe) → peso 2, come gli altri discriminatori.
+comand                           :: 2
 come.funzion|come.si.usa|come.posso.usar|come.ti.uso :: 2
 istruzion|guida\b|menu\b|capabilit|funzionalit :: 2
-quali.log.sai|che.tipo.di.log|quali.analisi|che.*analisi|che.query :: 2
+quali.log.sai|quali.log.puoi|puoi.lavorar|che.tipo.di.log|quali.analisi|che.*analisi|che.query :: 2
 opzioni.disponibil|strumenti.disponibil|strumenti.*hai :: 2
 # "cosa posso fare", "cosa fai" — solo show_help (1 classe); "cosa" da solo è stop word (9 classi)
-posso.fare|puoi.fare|cosa.fare|cosa.posso :: 2
+posso.fare|puoi.fare|cosa.fare|cosa.posso|posso.usar|posso.chieder :: 2
 # "analisi disponibili" — max 2 classi (show_help + gc_stats/correlate) ma con peso basso
 analisi\b                        :: 1
 

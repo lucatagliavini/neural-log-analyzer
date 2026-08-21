@@ -1320,3 +1320,49 @@ distribute_status	quali endpoint sono rotti
 #   fallit*  = "richieste HTTP fallite"  → count_status / distribute_status
 # "quali endpoint sono rotti" resta perché "endpoint" è un segnale HTTP esplicito
 # e non ambiguo, quindi non introduce alcun confine sottile.
+
+# ─── NLPGAP-1 (2026-08-20): tre gap trovati validando gli esempi di help ──────
+#
+# Emersi generando la tabella tool → query di esempio: 3 query su 96 sbagliavano
+# tool, identiche sui due profili (quindi nel vocabolario condiviso, non nei
+# profili). Come per C2, il problema era di GENERALIZZAZIONE più che di copertura:
+# due dei tre gap avevano una causa a monte nel vocabolario, non nel dataset.
+#
+#   A. "quante chiamate 503 stamattina" → traffic_volume 77% (count_status 35%)
+#      Causa: `chiamata|chiamate` vive nella sezione traffico di unigrams.txt ed è
+#      genuinamente ambigua. Risolto col bigram quantificatore × codice di stato;
+#      gli esempi sotto lo ancorano, e i controesempi traffic_volume difendono il
+#      confine — "quante chiamate AL MINUTO" deve restare un volume.
+#   B. "quali richieste hanno superato i 10 secondi ieri" → traffic_volume 67%
+#      Causa: la query attivava DUE feature, `ieri` e un `per` spurio dentro
+#      "su-per-ato". Mancavano `secondi\b` e `superat|oltre\b`.
+#   C. "quali comandi posso usare" → nessun tool sopra soglia
+#      Causa: vettore identicamente nullo. Ogni pattern di help richiedeva una
+#      seconda parola specifica ("comandi DISPONIBILI"). Aggiunto `comand`.
+
+# A — conteggio per codice di stato (il quantificatore non basta: serve il codice)
+count_status	quante chiamate 503 stamattina
+count_status	quante chiamate 500 ci sono state
+count_status	quante chiamate 404 oggi
+count_status	quante richieste 503 nelle ultime due ore
+count_status	numero di chiamate 500 di ieri
+count_status	conta le chiamate 503 di stamattina
+
+# A — controesempi: stesso quantificatore, nessun codice → resta un volume
+traffic_volume	quante chiamate al minuto stamattina
+traffic_volume	quante chiamate per ora oggi
+
+# B — soglia di latenza espressa in secondi, con verbo di superamento
+slow_requests	quali richieste hanno superato i 10 secondi
+slow_requests	richieste che hanno superato i 5 secondi ieri
+slow_requests	quali chiamate hanno superato la soglia
+slow_requests	chiamate oltre i 3 secondi
+slow_requests	richieste oltre i 2000 ms
+slow_requests	chiamate che superano i 10 secondi
+
+# C — "comandi" come sinonimo di "strumenti", senza seconda parola
+show_help	quali comandi posso usare
+show_help	che comandi ci sono
+show_help	elenco dei comandi
+show_help	quali comandi hai
+show_help	che comandi posso dare
