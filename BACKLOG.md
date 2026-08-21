@@ -9,6 +9,8 @@ Aggiornato: 2026-08-21
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
 | FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
+| SVCGRAN-1 | **`service_times` è degenere sul profilo `liquido`: una riga per 214.594 chiamate** (trovata 2026-08-21 eseguendo i 16 tool sui log di produzione). Usa `access_url_root()` (`lib/utils-access-undertow.awk:82`), cioè il **primo segmento del path** — scelta *documentata* (righe 92-100: "servizio macro", granularità deliberatamente diversa da `access_url_endpoint()` di `distribute_status`). Ma su `liquido` ogni URL vive sotto lo stesso contesto webapp `/essigSXCC/…`, quindi il raggruppamento collassa sempre a **un solo gruppo**: il tool restituisce l'intero access log sotto un'unica etichetta, con percentili che sono quelli globali. Misurato su 295.743 URL reali: profondità 1 → **1 gruppo**, profondità 2 → **13** (`ping`, `ClaimCenter.do`, `rest`, `ws`, `resources`, `service`…), profondità 3 → **37**. Non è codice rotto, è una **coordinata sbagliata per questo cliente** (principio 7): per un deployment dove ogni servizio ha il proprio context root, il segmento 1 è giusto. Aggravante: il tool **non avverte** di essere degenere, quindi produce una risposta ben formata che non dice nulla. Direzione da decidere con l'utente — profondità configurabile in `system.conf`, auto-rilevata, o un avviso quando i gruppi sono ≤1 — e valutare il riuso della sostituzione di ID/UUID già in `access_url_endpoint()`, perché a profondità 2 un beacon con UUID nel path (105.183 chiamate su `liquido`) diventerebbe un gruppo per UUID | Media |
+| TRUNC-1 | **`grep_named_log` tronca a 100 caratteri senza dirlo** (trovata 2026-08-21, stesso sweep). `lib/tools/grep_named_log.awk:109` fa `substr(_dup_msg[dk], 1, 100)` e `:111` `substr(_dup_extra[dk], 1, 60)`, senza marcatore: un ID di correlazione tagliato a metà (`13432524.cc-1787133862806-375841`) è **indistinguibile** da uno completo, e chi legge non ha modo di sapere che manca qualcosa. La convenzione del progetto esiste ed è applicata altrove sullo stesso schermo — `slow_requests` stampa «(mostrate le 30 più lente di 14473)», `tail_log` «Ultimi 5 di 295229 righe totali» — quindi è un caso di convenzione applicata a metà, non di convenzione mancante. Fix piccolo: aggiungere `…` quando la lunghezza originale supera il limite. Priorità bassa perché non falsa un numero, ma può far copiare un ID sbagliato in una ricerca | Bassa |
 | VENVGATE-1 | **Il gate su `.venv` in `build-dataset.sh:42` è vestigiale** (trovata 2026-08-21 lavorando a GAPREP-1). Lo script pretende `.venv/bin/python3` e altrimenti cade sul ramo bash, **molto più lento** — ma `lib/build_dataset.py` importa **solo stdlib** (`re`, `sys`, `os`, `argparse`, `shlex`) e il `.venv` contiene l'albero di dipendenze di **PyTorch**, rimosso il 2026-08-18 con `lib/train.py` (verificato: `functorch`, `filelock`, `fsspec`, `jinja2` in `site-packages`). Il gate protegge quindi da una dipendenza che non esiste più. Conseguenza **misurata**: in produzione (`lxprworkerlana01`) c'è `/usr/bin/python3` 3.12.3 e **nessun** `.venv`, quindi ogni `build-dataset.sh` prende la strada lenta senza motivo. Incoerenza aggiuntiva introdotta da GAPREP-1: `vocab-gap.sh` controlla `command -v python3` (corretto), `build-dataset.sh` controlla `.venv` — due script che rilevano Python in due modi diversi. Fix: allineare il rilevamento su `python3` di sistema con `.venv` come override se presente. **Non fatto**: tocca il percorso di generazione del dataset, va verificato con la parità 1171/1171 prima di cambiarlo | Media |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
 
@@ -197,6 +199,95 @@ riaddestrato e verificato su entrambi i profili nella stessa sessione in cui è 
 segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manuale
 (nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
 implementato su richiesta esplicita dell'utente ("implementiamo domani").
+
+## THR-1 — La soglia di latenza espressa in secondi veniva ignorata — **FATTO** (2026-08-21)
+
+**Trovata alla prima esecuzione dei 16 tool sui log di produzione**, dopo che l'utente ha
+chiesto se avessi testato davvero in produzione. Fino a quel momento avevo verificato tre
+query in `--dry-run` e una reale: la differenza fra quella verifica e questa è tutto ciò
+che serviva a far emergere il difetto.
+
+**Il numero che lo riassume.** Stessa domanda, due formulazioni, contro lo stesso access
+log da 88 MB:
+
+| query | soglia usata | risultati |
+|---|---|---|
+| `chiamate lente sopra 5 secondi di stamattina` | **1000 ms** | **14.473** |
+| `chiamate lente sopra 5000 ms di stamattina` | 5000 ms | **1.214** |
+
+**12× di differenza secondo come la domanda è formulata.** E il difetto non è silenzioso
+per metà: la soglia sbagliata è *stampata* («soglia: 1000 ms»), ma nessuno la rilegge come
+una contraddizione di ciò che ha chiesto.
+
+### Tre difetti in cinque righe di codice
+
+`lib/param-extract.sh:59-65` riconosceva **solo `ms`**, e se non lo trovava cadeva sul
+default 1000 quando la query conteneva `lent`, su nulla altrimenti:
+
+| formulazione | prima | dopo |
+|---|---|---|
+| `sopra 5000 ms` | 5000 ✓ | 5000 |
+| `sopra 5 secondi` | **1000** | 5000 |
+| `sopra i 5 secondi` | **1000** | 5000 |
+| `sopra 5000ms` (attaccato) | **1000** | 5000 |
+| `oltre 3 secondi` | **vuoto** | 3000 |
+| `che hanno superato i 10 secondi` | **vuoto** | 10000 |
+| `sopra 2 sec` | **vuoto** | 2000 |
+| `sopra 500 millisecondi` | **1000** | 500 |
+
+Le due cause minori sono altrettanto istruttive: `[0-9]+ ms` pretendeva lo **spazio**, e
+`millisecondi` per esteso non era previsto.
+
+### Il fatto era già nel file, dodici righe sopra
+
+`param-extract.sh:47` — la `sed` che disambigua `STATUS_CODE` sottraendo i numeri con
+ruolo di unità di misura — **elencava già** `ms|millisecond[oi]?|secondi?|sec\b`. Cioè lo
+stesso file sapeva che «5 secondi» è una latenza *per non confonderla con uno status
+code*, e non lo sapeva quando doveva **leggerla**. Lo stesso fatto scritto due volte, una
+completa e una no: principio 8 nella sua forma più pura.
+
+Il fix quindi non aggiunge un secondo elenco ma ne **estrae uno solo** (`_U_MS`, `_U_SEC`,
+`_U_OTHER`) usato da entrambi i punti. `STATUS_CODE` verificato non regredito su 11 casi,
+compresi i tre che dipendono dalla sottrazione (`ultime 500 righe`, `sopra i 450 minuti`,
+`sopra 500 ms` → nessuno status).
+
+### Perché è sopravvissuto fino a un test in produzione
+
+Le asserzioni su `THRESHOLD_MS` in `run-tests.sh` erano **quattro, tutte in
+millisecondi** — cioè nell'unica unità che funzionava. Il parametro *era* coperto; era
+coperto solo dove non si rompeva. Aggiunte 9 asserzioni: **8 falliscono senza il fix**
+(la nona, `sopra 1 secondo` → 1000, passa anche prima perché il default coincide col
+valore giusto — corretta ma non discriminante, e vale dirlo).
+
+Una riga esiste solo per proteggere l'ordine dei rami: `millisecondi` **contiene**
+`secondi`, quindi se i secondi venissero provati prima, `500 millisecondi` darebbe
+500.000.
+
+### Il difetto era stato reso raggiungibile il giorno prima
+
+VOCFIX-1 (2026-08-20) ha aggiunto `secondi\b` e `superat|oltre\b` al vocabolario perché
+«quali richieste hanno superato i 10 secondi» finiva su `traffic_volume`. Corretto il
+routing, quelle query arrivano a `slow_requests` — che non sa leggerne la soglia. **Il
+modello è stato insegnato a sentire i secondi mentre il tool non sapeva usarli**: una
+correzione a monte ha scoperto un difetto a valle che il misrouting mascherava. È il
+motivo per cui un fix di routing va seguito da una prova end-to-end, non da un dry-run.
+
+**Limite noto documentato nel codice**: solo valori interi. `sopra 1,5 secondi` cade sul
+default, perché il separatore decimale italiano è la virgola e distinguerlo da un elenco
+richiede un'analisi che nessuna query reale oggi giustifica. E `s` nudo come unità non è
+supportato di proposito: qui un falso positivo non produce lentezza ma una **soglia
+sbagliata**, cioè un difetto di correttezza — l'eccezione dichiarata al pruning
+conservativo del principio 5.
+
+### Sweep di produzione: cosa altro è stato verificato
+
+15 tool su 16 eseguiti sui log reali del nodo 4 (`search_all_logs` escluso per durata).
+Oltre a THR-1 sono emerse **SVCGRAN-1** e **TRUNC-1** (aperte, vedi tabella), e un
+sospetto **scartato**: `filter_errors` dichiarava «nessun errore nel server log» con 113
+HTTP 500 in corso, ed è **corretto** — le 43 righe ERROR/WARN del `server.log` sono tutte
+alle 08:18, fuori dalla finestra 11:03→13:03 richiesta, e i 500 sono loggati come INFO,
+che è precisamente la ragione per cui esiste `filter_app_errors` (il quale li trova).
+Verificare il sospetto prima di correggerlo ha evitato un fix a un difetto inesistente.
 
 ## GAPREP-1 — Un canale diagnostico reso inutile dal proprio rumore — **FATTO** (2026-08-21)
 
