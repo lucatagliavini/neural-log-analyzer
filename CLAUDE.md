@@ -62,8 +62,11 @@ GitHub (`lucatagliavini/neural-log-analyzer`).
 # Test suite
 bash tests/run-tests.sh
 
-# Report gap nel vocabolario/dataset per classe
+# Gap nel vocabolario: lista unica ordinata per forza del candidato (poche classi
+# prima, poi più esempi). Misura sul testo NORMALIZZATO, come le feature (GAPREP-1).
 ./gap-report.sh --profile profiles/liquido
+./gap-report.sh --profile profiles/liquido --top 0     # tutti i candidati
+./vocab-gap.sh  --profile profiles/liquido --porcelain # TSV per uso da script
 
 # Analisi offline dei tempi di risposta (richiede QUERY_LOG_DIR impostato)
 ./perf-report.sh --profile profiles/liquido
@@ -146,6 +149,12 @@ La prova che la collocazione precedente era sbagliata: montare il secondo profil
   l'indice del neurone di output nei pesi condivisi, quindi sta qui e non nel profilo —
   duplicarlo significa che una divergenza produce misrouting **silenzioso**.
 - **`dataset/`** — `queries_labeled.txt` → `queries.txt` (generato).
+- **`report-stopwords.txt`** — parole funzionali italiane escluse dal **gap report**.
+  **Non è vocabolario**: non tocca le feature, non influenza i pesi, e modificarlo non
+  richiede `build-dataset.sh` né `train.sh`. Sta in `nlp/` perché è lingua italiana
+  (stesso criterio del vocabolario), ma è l'unico artefatto qui che **non** entra nel
+  calcolo di `NLP_CUSTOM`: un profilo che lo sovrascrive non ottiene pesi propri, perché
+  non ha cambiato un input del modello (GAPREP-1).
 - **`models/intent_classifier/`** — i pesi. Sono la **conseguenza deterministica** di
   vocabolario + dataset + iperparametri: se gli input sono condivisi, il modello lo è
   per costruzione (prova: i pesi dei due profili avevano md5 identico già prima di
@@ -318,6 +327,14 @@ specifico:
 - `../neural-c` — framework neurale in C, cartella sorella richiesta. Unico motore di
   training/inferenza, su x86_64 e ppc64le (invocato via `neural-c.sh`, che seleziona il
   binario giusto per architettura — mai il binario direttamente).
-- Python 3 + `.venv` (opzionale) — solo per accelerare `build-dataset.sh`
-  (`lib/build_dataset.py`); senza, il ramo bash produce lo stesso risultato più
-  lentamente. Non più necessario per il training.
+- **Python 3** — mai per il training (quello è `neural-c`), ma due usi distinti, con due
+  livelli di necessità diversi:
+  - `build-dataset.sh`: **opzionale**, solo velocità. Autodetect di `.venv/bin/python3`
+    (`lib/build_dataset.py`); senza, il ramo bash dà lo stesso risultato più lentamente.
+  - `vocab-gap.sh`/`gap-report.sh`: **richiesto** (GAPREP-1, 2026-08-21). Usano
+    `lib/dump_norm.py` per normalizzare il dataset allo stesso stadio delle feature —
+    l'equivalente in bash costa **54s misurati** su 1171 query e girerebbe a ogni
+    `train.sh`. Basta il `python3` di **sistema**: `build_dataset.py` importa solo
+    stdlib, il `.venv` non serve (contiene l'albero di PyTorch, rimosso il 2026-08-18).
+    Se manca, il report **si disattiva dichiarandolo** (`? gap NON misurato`, exit 2) e
+    `train.sh` continua: non produce mai un falso «nessun gap».

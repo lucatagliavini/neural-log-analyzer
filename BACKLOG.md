@@ -9,7 +9,7 @@ Aggiornato: 2026-08-21
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
 | FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
-| GAPREP-1 | **`gap-report.sh` misura sullo stadio sbagliato della pipeline, e per questo non viene letto** (trovata 2026-08-21). `vocab-gap.sh:75` fa `query = tolower($2)` sul labeled **grezzo**: nessuna normalizzazione, nessuna nozione di potere discriminante. Misurato: dei 43 token distinti che il report stampa, **6 sono coordinate** (`database`, `messaging`, `jgroups`, `integr`, `nodo`, `produzione` — che LOGF-3 **vieta** nel vocabolario e che `normalize-query.sh` assorbe in `<LOGFILE>`/`<NODE>`/`<ENV>`), **17 sono stop word grammaticali** escluse per scelta, e fra i restanti ci sono frammenti CamelCase (`daolavaparametri`, `claim`, `integrations`) e parole a basso potere discriminante che la regola del progetto esclude di proposito — `richieste` compare in 4 classi. **≈86% di rumore strutturale.** Non è un difetto cosmetico: è la ragione **meccanica** per cui `fallimenti — 3 esempi` è stato stampato da `train.sh` a ogni addestramento e mai letto (FLEX-1b), cioè un canale diagnostico reso inutile dal proprio rapporto segnale/rumore. Direzione: tokenizzare il testo **normalizzato** (elimina le coordinate per costruzione, come già fatto per la misura di VOCFIX-1 D3) e filtrare per numero di classi in cui il token compare, che è il criterio che il vocabolario usa davvero. **Non implementata**: cambia cosa il report dichiara, quindi va decisa con l'utente | Media |
+| VENVGATE-1 | **Il gate su `.venv` in `build-dataset.sh:42` è vestigiale** (trovata 2026-08-21 lavorando a GAPREP-1). Lo script pretende `.venv/bin/python3` e altrimenti cade sul ramo bash, **molto più lento** — ma `lib/build_dataset.py` importa **solo stdlib** (`re`, `sys`, `os`, `argparse`, `shlex`) e il `.venv` contiene l'albero di dipendenze di **PyTorch**, rimosso il 2026-08-18 con `lib/train.py` (verificato: `functorch`, `filelock`, `fsspec`, `jinja2` in `site-packages`). Il gate protegge quindi da una dipendenza che non esiste più. Conseguenza **misurata**: in produzione (`lxprworkerlana01`) c'è `/usr/bin/python3` 3.12.3 e **nessun** `.venv`, quindi ogni `build-dataset.sh` prende la strada lenta senza motivo. Incoerenza aggiuntiva introdotta da GAPREP-1: `vocab-gap.sh` controlla `command -v python3` (corretto), `build-dataset.sh` controlla `.venv` — due script che rilevano Python in due modi diversi. Fix: allineare il rilevamento su `python3` di sistema con `.venv` come override se presente. **Non fatto**: tocca il percorso di generazione del dataset, va verificato con la parità 1171/1171 prima di cambiarlo | Media |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
 
 ### FLEX-1 — classi di caratteri flesse, e FLEX-1b — la parola senza feature (2026-08-20)
@@ -197,6 +197,142 @@ riaddestrato e verificato su entrambi i profili nella stessa sessione in cui è 
 segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manuale
 (nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
 implementato su richiesta esplicita dell'utente ("implementiamo domani").
+
+## GAPREP-1 — Un canale diagnostico reso inutile dal proprio rumore — **FATTO** (2026-08-21)
+
+**Il difetto non era l'assenza di un segnale, era il suo rapporto segnale/rumore.**
+`vocab-gap.sh` girava dentro `train.sh` a **ogni** addestramento e nessuno lo leggeva. È
+già costato un difetto reale: FLEX-1b ha scoperto che `richieste fallite` — *letteralmente
+un esempio di training* — non attivava alcun tool perché non esisteva feature per
+`fallit*`, e questo report lo segnalava (`fallimenti — 3 esempi`) da settimane.
+
+Due cause, entrambe **di misura**, più una di presentazione.
+
+### Causa 1 — stadio sbagliato della pipeline (il terzo caso in due giorni)
+
+`vocab-gap.sh:75` faceva `query = tolower($2)` sul labeled **grezzo**, mentre le feature
+si calcolano sul **normalizzato**. Il report dichiarava quindi "non coperti" proprio i
+token che `nlp/unigrams.txt` **vieta per contratto** (LOGF-3, zero nomi concreti) e che
+`normalize-query.sh` assorbe: `database`/`messaging`/`jgroups`/`integr` → `<LOGFILE>`,
+`nodo` → `<NODE>`, `produzione` → `<ENV>`, `claimcenter` → `<APP>`. **Consigliava di
+aggiungere al vocabolario esattamente ciò che non può starci.**
+
+È lo stesso errore di VOCFIX-1 D3 (contare `api.log` sul file grezzo: numero 25× troppo
+grande) e di un terzo caso emerso nella stessa giornata — misurare la copertura con `awk`,
+dove `\b` è **backspace** e non confine di parola, che faceva sembrare scoperti
+`access\b`, `tempi\b`, `secondi\b`, `sopra\b`. Da qui il commento in `vocab-gap.sh` che
+vieta di spostare la Fase 2 in awk: **deve** restare `grep -E`.
+
+### Causa 2 — nessuna nozione di potere discriminante
+
+I commenti di `unigrams.txt` dicono "solo count_status (1 classe) → peso 2", "max 4 classi
+→ peso 1", "stop word (9 classi)". Erano annotazioni **scritte a mano**: nessuno script le
+calcolava. Ora il numero di classi è una colonna, ed è la **prima chiave di ordinamento**.
+
+Il conteggio si fa su **tutte** le etichette, non solo la primaria: il dataset è
+multi-label, e `class = labels[1]` sottostimava la diffusione proprio sui token ambigui,
+cioè dove la metrica serve.
+
+### Causa 3 — lo stesso token una volta per classe
+
+113 righe in 16 blocchi alle impostazioni di default, con i token diffusi ripetuti. Ora è
+una **lista unica** ordinata a due chiavi — poche classi prima, a parità più esempi — e
+non un punteggio composito, che darebbe lo stesso ordine senza essere leggibile.
+
+### La soluzione a tre filtri, e perché il terzo non è opzionale
+
+1. **Normalizzazione** (`lib/dump_norm.py`, riusa `bd.load_profile`/`bd.normalize_query`):
+   elimina le coordinate **per costruzione**, non per euristica. In Python perché il
+   percorso bash costa **54s misurati** su 1171 query, dentro `train.sh`; 84 ms in
+   Python, 640×. Basta il `python3` di sistema.
+2. **Filtro placeholder**: `<logfile>` e `<ip>` **sono** pattern del vocabolario
+   (`unigrams.txt:234`, `:148`), quindi `<` e `>` non sono separatori — spezzarli darebbe
+   il token `logfile` con **155 occorrenze in cima alla lista**, che non combacia col
+   pattern `<logfile>`. `<app>`/`<env>`/`<node>` invece non sono nel vocabolario per
+   scelta architetturale (sono coordinate estratte a valle) e vanno scartati, o il report
+   consiglierebbe «aggiungi `<node>` al vocabolario».
+3. **`nlp/report-stopwords.txt`** — 99 parole funzionali italiane. Serve perché il
+   conteggio classi **da solo non basta**: misurato, `della` compare in **1 sola classe,
+   esattamente come `impattano`**. Un token raro è raro sia perché è grammatica usata di
+   sfuggita, sia perché è un termine di dominio che manca — e nessun conteggio distingue i
+   due casi. È un fatto linguistico, non statistico.
+
+**Il rimedio ha quasi reintrodotto il difetto, e la misura l'ha intercettato.** Scrivendo
+la lista stopword avevo incluso tre parole che si sono rivelate **candidati veri**:
+
+| parola | misura | cosa era davvero |
+|---|---|---|
+| `dall` | 32 esempi, **31 in `filter_ip`** | la collocazione `dall'ip` / `dall'indirizzo` |
+| `come` | 18 esempi, `filter_app_errors` | `loggati come info`, la definizione stessa del tool |
+| `dove` | 9 esempi, **9 su 9 in `search_all_logs`** | `dove compare` |
+
+Nasconderle avrebbe reso invisibili tre segnali reali — il difetto che questa voce
+corregge, reintrodotto dal suo stesso rimedio. Da lì la **regola** scritta nel file: una
+parola entra solo se è funzionale **e non ha valore di collocazione**, e la concentrazione
+si misura. Rimosse anche `dalla`/`dalle`/`chi`/`stato`/`dammi`, che sono **già** feature
+del vocabolario (`dall[ea]`, `\bchi\b`, `status|stato`, i verbi imperativi): inerti nel
+filtro, ma contraddittorie a leggersi.
+
+Al contrario `posso`/`puoi`/`fare` **restano** pur essendo concentrate su `show_help`,
+perché il loro segnale è già catturato dai compositi (`posso.fare`, `cosa.puoi`,
+`posso.usar`): la forma nuda non aggiunge nulla.
+
+**Due errori miei, corretti dalla misura, che restano nel codice come commento:** avevo
+ammesso le **cifre** fra i caratteri dei token, riempiendo la cima della lista di `1000`,
+`2026`, `8101`, `0473954` — un numero in una query è un *valore* consumato da
+`param-extract.sh`, non un candidato. E `--porcelain` rispettava `--top`, quindi
+`gap-report.sh` contava le righe ricevute e annunciava «6 candidati» invece di 74: il
+numero che l'utente legge a ogni training era sbagliato **per difetto**, il modo peggiore
+di sbagliarlo.
+
+### Due difetti preesistenti trovati per strada, in `gap-report.sh`
+
+- **Un check verde per una misura mai avvenuta.** `... || true` **dentro** la command
+  substitution (riga 123) inghiottiva qualunque codice di uscita; `grep -c "[GAP]"` dava
+  0 e lo script stampava «✓ Vocabolario: nessun gap rilevante». Bastava un `unigrams.txt`
+  cancellato. Ora i codici sono distinti — `0` misurato, `2` **non misurabile**, altro
+  errore — e nessun ramo esce non-zero, perché `train.sh:166` invoca `gap-report.sh` sotto
+  `set -euo pipefail` e un exit non-zero abortirebbe l'addestramento.
+- **`exit 0` se manca il dataset numerico** (riga 56): saltava **tutto** il report, anche
+  la sezione vocabolario, che si calcola da `queries_labeled.txt` e non ne ha bisogno. Un
+  profilo appena creato non riceveva nemmeno la parte misurabile.
+
+### La riga che l'utente vede a ogni training
+
+```
+! Vocabolario: 74 candidati non coperti  (top: attività, dove, code)
+  → Esegui: ./gap-report.sh --profile profiles/liquido  per il dettaglio
+```
+
+È la modifica più importante del lotto, e la ragione è misurata: la riga compact
+**esisteva già** ed era accurata, ma mostrava un **numero** — e `fallimenti — 3 esempi` è
+passato inosservato per settimane. Tre parole concrete danno una ragione per guardare; un
+conteggio no.
+
+### Esito
+
+| | prima | dopo |
+|---|---|---|
+| righe | **113** in 16 blocchi, token ripetuti | **74** candidati unici, 25 mostrati |
+| stadio | labeled grezzo | testo normalizzato |
+| ordine | alfabetico dentro ogni classe | poche classi prima, poi più esempi |
+| coordinate | in cima (`database`, `messaging`, `nodo`…) | **assenti per costruzione** |
+| copertura di test | **zero** | `tests/test-vocab-gap.sh`, **25 asserzioni** |
+
+Verificato: 176 PASS / 0 FAIL su `liquido` **e** `usnext` con `--parity` (1171/1171, 119
+feature); checksum dei pesi `7e6fc068…` **invariato** (nessun retrain: vocabolario,
+dataset e modello non sono stati toccati); `train.sh` end-to-end; ramo senza `python3`
+verificato con un `PATH` costruito senza di esso.
+
+L'harness è stato validato con **due mutazioni deliberate** su `vocab-gap.sh` — conteggio
+classi sulla sola etichetta primaria, e placeholder spezzati — ciascuna delle quali
+produce **un solo** FAIL mirato, sull'asserzione giusta. `impattano` e `ripetuti`
+discriminano i due meccanismi: il primo vive solo in una riga multi-label (quindi cade con
+la logica vecchia), il secondo in due righe single-label (quindi regge).
+
+**Nota sui profili**: il report **dipende dal profilo** anche con `nlp/` condiviso — 74
+candidati su `liquido`, 76 su `usnext` — perché la normalizzazione usa `entities.conf`, e
+sono le coordinate del cliente a decidere quali token vengono assorbiti.
 
 ## VOCFIX-1 — Quattro difetti trovati validando una tabella di esempi — **FATTO** (2026-08-20/21)
 
