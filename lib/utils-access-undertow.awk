@@ -126,7 +126,51 @@ function access_url_root(    _url, _a) {
 # perché la regex ancora l'UUID subito dopo lo slash. Resta un gruppo per UUID,
 # che ruota raramente — non valeva rendere la regex più permissiva e rischiare di
 # collassare path legittimi anche in access_url_endpoint(), che la condivide.
-function access_url_service(depth,    _url, _n, _p, _i, _out) {
+# Rimuove dal path le SEQUENZE di segmenti dichiarate trasparenti, cioè presenti in
+# ogni URL di una famiglia e prive di informazione sul servizio.
+#
+# SVCGRAN-2 (2026-08-21): serve perché su liquido i servizi SOAP vivono in
+# /essigSXCC/ws/**it/unipol/sx/webservice**/fiduciari/WsUtility/soap11 — quattro
+# componenti di *package Java* prima che cominci il nome. Con la sola profondità i
+# 14 servizi SOAP collassavano in `essigSXCC/ws/it`, e alzare il numero non
+# risolveva: misurato, profondità 8 dà **1337 gruppi** perché sfascia i REST.
+# Il difetto non era «troppo poco profondo» ma «un prefisso fisso consuma le
+# componenti», e questa funzione toglie esattamente quello.
+#
+# SEQUENZE e non singoli segmenti, ed è la ragione per cui la lista è di stringhe
+# con gli slash dentro: `service` da solo è SIGNIFICATIVO in
+# /essigSXCC/service/ccfeireceiverequest (275 chiamate, MAX 147 s). Un filtro
+# per-segmento distruggerebbe quell'endpoint mentre ripulisce i SOAP.
+#
+# Applicate dalla più LUNGA alla più corta, indipendentemente dall'ordine in cui il
+# profilo le scrive: `it/unipol/sx` e `it/unipol/sx/webservice` possono coesistere, e
+# se vincesse la corta resterebbe un `webservice` orfano in mezzo al nome. Far
+# dipendere il risultato dall'ordine di scrittura sarebbe una trappola silenziosa.
+#
+# Confronto letterale con index(), non gsub(): una sequenza è un pezzo di path, non
+# una regex, e passarla a gsub renderebbe un `.` o un `+` in un nome di segmento un
+# metacarattere — cioè un difetto che si manifesta solo su certi profili.
+function _svc_strip_transparent(url, transparent,    _n, _s, _i, _j, _tmp, _pat, _p) {
+    if (transparent == "") return url
+    _n = split(transparent, _s, "|")
+
+    # Insertion sort per lunghezza decrescente.
+    for (_i = 2; _i <= _n; _i++) {
+        _tmp = _s[_i]; _j = _i - 1
+        while (_j >= 1 && length(_s[_j]) < length(_tmp)) { _s[_j+1] = _s[_j]; _j-- }
+        _s[_j+1] = _tmp
+    }
+
+    for (_i = 1; _i <= _n; _i++) {
+        if (_s[_i] == "") continue
+        _pat = "/" _s[_i] "/"
+        _p = index(url, _pat)
+        if (_p > 0) url = substr(url, 1, _p) substr(url, _p + length(_pat))
+    }
+    return url
+}
+
+function access_url_service(depth, transparent,    _url, _n, _p, _i, _out) {
     _url = access_url()
     if (_url == "") return ""
     sub(/\?.*/, "", _url)
@@ -134,6 +178,7 @@ function access_url_service(depth,    _url, _n, _p, _i, _out) {
     if (_url == "/" || _url == "") return "/"
     gsub(/\/[0-9]{5,}/, "/{id}", _url)
     gsub(/\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/, "/{uuid}", _url)
+    _url = _svc_strip_transparent(_url, transparent)
     # Clamp di SANITÀ, non un default di configurazione: una profondità 0,
     # negativa o vuota produrrebbe nomi di servizio vuoti e righe scartate in
     # silenzio. L'obbligo di DICHIARARE il valore vive in dispatch.sh, che rifiuta

@@ -31,7 +31,7 @@ BEGIN {
     ms = _ms
     if (ms < threshold_ms + 0) next
 
-    _svc = access_url_service(svc_depth)
+    _svc = access_url_service(svc_depth, svc_transparent)
     if (_svc == "") next
     svc = _svc
 

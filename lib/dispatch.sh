@@ -918,10 +918,26 @@ _dispatch_tool_run() {
                 return 1
             fi
             require_tool_sources service_times || return
+            # SERVICE_PATH_TRANSPARENT è OPZIONALE, a differenza della profondità, e
+            # la differenza non è incoerenza: l'assenza di una profondità è
+            # ambigua (quale numero avrebbe voluto il profilo?), l'assenza di
+            # prefissi trasparenti ha un solo significato possibile — non c'è
+            # nulla da saltare — e produce esattamente il comportamento di prima.
+            # Pretendere una lista vuota scritta a mano sarebbe cerimonia senza
+            # protezione (SVCGRAN-2).
+            local _svc_transp=""
+            if declare -p SERVICE_PATH_TRANSPARENT >/dev/null 2>&1; then
+                _svc_transp="$(IFS='|'; printf '%s' "${SERVICE_PATH_TRANSPARENT[*]}")"
+            fi
             logs_expr="$(open_logs)"
             print_log_source "$logs_expr"
+            # svc_transparent va racchiuso in apici SINGOLI dentro la stringa: questo
+            # gawk è invocato via `eval`, e il separatore della lista è `|` — senza
+            # quoting eval lo interpreterebbe come una PIPE e spezzerebbe il comando.
+            # Stesso motivo per cui tw_args scrive -v time_from='...'.
             eval gawk "$tw_args" -f "$TOOLS_DIR/service_times.awk" \
                 -v svc_depth="$SERVICE_PATH_DEPTH" \
+                -v svc_transparent="'$_svc_transp'" \
                 "$logs_expr"
             ;;
         gc_stats)

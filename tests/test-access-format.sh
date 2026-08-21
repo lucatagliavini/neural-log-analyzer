@@ -225,6 +225,56 @@ assert_eq "profondità 3: nessun avviso (il raggruppamento discrimina)" "1" \
 assert_eq "profondità 1 equivale ad access_url_root (usnext non cambia)" "1" \
     "$(_svc_at 1 | grep -qE '^app[[:space:]]+4[[:space:]]' && echo 1 || echo 0)"
 
+# ─── SVCGRAN-2: prefissi trasparenti ────────────────────────────────────────
+section "access_url_service: sequenze trasparenti saltate nel conteggio profondità"
+
+# Riproduce la struttura reale di liquido: i SOAP hanno quattro componenti di
+# package Java prima del nome del servizio, i REST no, e c'è un `service` al primo
+# livello che NON deve essere toccato.
+cat > "$_FIX/svctrans.log" <<'EOF'
+10.0.0.1 [17/Aug/2026:10:00:00 +0200] "POST /app/ws/it/unipol/sx/webservice/fiduciari/WsUtility/soap11 HTTP/1.1" 200 1 10 - -
+10.0.0.1 [17/Aug/2026:10:00:01 +0200] "POST /app/ws/it/unipol/sx/webservice/ivr/CliIdentify HTTP/1.1" 200 1 20 - -
+10.0.0.1 [17/Aug/2026:10:00:02 +0200] "POST /app/ws/it/unipol/sx/service/verbatel/VerbatelAPI/soap11 HTTP/1.1" 200 1 30 - -
+10.0.0.1 [17/Aug/2026:10:00:03 +0200] "GET /app/rest/anagrafica/v1/get HTTP/1.1" 200 1 40 - -
+10.0.0.1 [17/Aug/2026:10:00:04 +0200] "GET /app/service/ccfeireceiverequest HTTP/1.1" 200 1 50 - -
+EOF
+
+_T="it/unipol/sx/webservice|it/unipol/sx/service"
+_svct() {
+    gawk -f "$LIB/utils-time.awk" -f "$LIB/utils-colors.awk" -f "$LIB/utils-access-undertow.awk" \
+        -f "$TOOLS/service_times.awk" -v svc_depth="$1" -v svc_transparent="${2:-}" \
+        "$_FIX/svctrans.log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g'
+}
+_has() { _svct "$1" "$2" | grep -qE "^$3[[:space:]]" && echo 1 || echo 0; }
+
+# Fail-before: SENZA le sequenze trasparenti i tre SOAP collassano su un gruppo.
+assert_eq "senza trasparenti, i SOAP collassano in 'app/ws/it'" "1" "$(_has 4 "" 'app/ws/it/unipol')"
+
+# Con le sequenze: ogni SOAP diventa il proprio servizio, col nome vero.
+assert_eq "con trasparenti, 'app/ws/fiduciari/WsUtility' esiste"  "1" "$(_has 4 "$_T" 'app/ws/fiduciari/WsUtility')"
+assert_eq "con trasparenti, 'app/ws/ivr/CliIdentify' esiste"      "1" "$(_has 4 "$_T" 'app/ws/ivr/CliIdentify')"
+# La seconda sequenza (…/sx/service/) deve funzionare come la prima.
+assert_eq "con trasparenti, 'app/ws/verbatel/VerbatelAPI' esiste" "1" "$(_has 4 "$_T" 'app/ws/verbatel/VerbatelAPI')"
+assert_eq "  e 'app/ws/it/unipol' NON esiste più"                "0" "$(_has 4 "$_T" 'app/ws/it/unipol')"
+
+# LA riga che protegge il motivo per cui sono SEQUENZE e non segmenti: `service` al
+# primo livello è un endpoint vero, e un filtro per-segmento lo distruggerebbe.
+assert_eq "'app/service/ccfeireceiverequest' sopravvive (service NON è un segmento filtrato)" \
+    "1" "$(_has 4 "$_T" 'app/service/ccfeireceiverequest')"
+
+# I REST non devono essere toccati dalle sequenze SOAP.
+assert_eq "i REST restano invariati con le sequenze attive" "1" "$(_has 4 "$_T" 'app/rest/anagrafica/v1')"
+
+# L'ordine di dichiarazione non deve contare: la sequenza più lunga vince sempre.
+# Con la corta prima, un filtro naïve lascerebbe 'webservice' orfano nel nome.
+_T_rev="it/unipol/sx|it/unipol/sx/webservice"
+assert_eq "ordine invertito nella lista: stesso risultato (più lunga prima)" "1" \
+    "$(_has 4 "$_T_rev" 'app/ws/fiduciari/WsUtility')"
+
+# Lista vuota = comportamento identico a prima del 2026-08-21 (usnext).
+assert_eq "lista vuota: nessuna differenza rispetto alla sola profondità" \
+    "$(_svct 4 "" | md5sum)" "$(_svct 4 | md5sum)"
+
 # ─── distribute_status / access_url_endpoint: granularità per-endpoint ───────
 section "access_url_endpoint: query string/matrix param tagliati, ID e UUID templatizzati"
 
