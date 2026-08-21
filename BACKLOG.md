@@ -9,9 +9,7 @@ Aggiornato: 2026-08-21
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
 | FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
-| SVCGRAN-1 | **`service_times` è degenere sul profilo `liquido`: una riga per 214.594 chiamate** (trovata 2026-08-21 eseguendo i 16 tool sui log di produzione). Usa `access_url_root()` (`lib/utils-access-undertow.awk:82`), cioè il **primo segmento del path** — scelta *documentata* (righe 92-100: "servizio macro", granularità deliberatamente diversa da `access_url_endpoint()` di `distribute_status`). Ma su `liquido` ogni URL vive sotto lo stesso contesto webapp `/essigSXCC/…`, quindi il raggruppamento collassa sempre a **un solo gruppo**: il tool restituisce l'intero access log sotto un'unica etichetta, con percentili che sono quelli globali. Misurato su 295.743 URL reali: profondità 1 → **1 gruppo**, profondità 2 → **13** (`ping`, `ClaimCenter.do`, `rest`, `ws`, `resources`, `service`…), profondità 3 → **37**. Non è codice rotto, è una **coordinata sbagliata per questo cliente** (principio 7): per un deployment dove ogni servizio ha il proprio context root, il segmento 1 è giusto. Aggravante: il tool **non avverte** di essere degenere, quindi produce una risposta ben formata che non dice nulla. Direzione da decidere con l'utente — profondità configurabile in `system.conf`, auto-rilevata, o un avviso quando i gruppi sono ≤1 — e valutare il riuso della sostituzione di ID/UUID già in `access_url_endpoint()`, perché a profondità 2 un beacon con UUID nel path (105.183 chiamate su `liquido`) diventerebbe un gruppo per UUID | Media |
 | DEPLOYVER-1 | **`deploy.sh` contiene logica reale ma non è versionato** (trovata 2026-08-21 correggendo l'esclusione del lock). È gitignorato per progetto (`.gitignore:21`) perché contiene l'host dell'installazione (`HOST="root@lxprworkerlana01"`), e non esiste alcun template versionato (`git ls-files | grep deploy` → vuoto). Ma il file non è solo configurazione: contiene il **sentinel di identità** che impedisce a `rsync --delete` di cancellare una dest sbagliata (documentato nelle sue righe 21-40 come «un'invariante che il codice garantisce» invece di una disciplina dell'operatore), due liste di esclusione, e la logica di deploy delle due cartelle sorelle. Conseguenza **misurata**: l'esclusione di `.neural-c.lock` aggiunta oggi vive **solo su questa macchina**, non è rivedibile da nessuno e si perde se il file viene ricreato — e la stessa cosa vale per il sentinel, cioè per la protezione più importante dello script. Direzione: estrarre le coordinate (`HOST`, `DEST`) in un `deploy.local.conf` non versionato — stesso schema già usato per `system.local.conf` — e versionare lo script. **Non fatto**: cambia il modo in cui si deploya, quindi va concordato | Media |
-| TRUNC-1 | **`grep_named_log` tronca a 100 caratteri senza dirlo** (trovata 2026-08-21, stesso sweep). `lib/tools/grep_named_log.awk:109` fa `substr(_dup_msg[dk], 1, 100)` e `:111` `substr(_dup_extra[dk], 1, 60)`, senza marcatore: un ID di correlazione tagliato a metà (`13432524.cc-1787133862806-375841`) è **indistinguibile** da uno completo, e chi legge non ha modo di sapere che manca qualcosa. La convenzione del progetto esiste ed è applicata altrove sullo stesso schermo — `slow_requests` stampa «(mostrate le 30 più lente di 14473)», `tail_log` «Ultimi 5 di 295229 righe totali» — quindi è un caso di convenzione applicata a metà, non di convenzione mancante. Fix piccolo: aggiungere `…` quando la lunghezza originale supera il limite. Priorità bassa perché non falsa un numero, ma può far copiare un ID sbagliato in una ricerca | Bassa |
 | VENVGATE-1 | **Il gate su `.venv` in `build-dataset.sh:42` è vestigiale** (trovata 2026-08-21 lavorando a GAPREP-1). Lo script pretende `.venv/bin/python3` e altrimenti cade sul ramo bash, **molto più lento** — ma `lib/build_dataset.py` importa **solo stdlib** (`re`, `sys`, `os`, `argparse`, `shlex`) e il `.venv` contiene l'albero di dipendenze di **PyTorch**, rimosso il 2026-08-18 con `lib/train.py` (verificato: `functorch`, `filelock`, `fsspec`, `jinja2` in `site-packages`). Il gate protegge quindi da una dipendenza che non esiste più. Conseguenza **misurata**: in produzione (`lxprworkerlana01`) c'è `/usr/bin/python3` 3.12.3 e **nessun** `.venv`, quindi ogni `build-dataset.sh` prende la strada lenta senza motivo. Incoerenza aggiuntiva introdotta da GAPREP-1: `vocab-gap.sh` controlla `command -v python3` (corretto), `build-dataset.sh` controlla `.venv` — due script che rilevano Python in due modi diversi. Fix: allineare il rilevamento su `python3` di sistema con `.venv` come override se presente. **Non fatto**: tocca il percorso di generazione del dataset, va verificato con la parità 1171/1171 prima di cambiarlo | Media |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
 
@@ -200,6 +198,95 @@ riaddestrato e verificato su entrambi i profili nella stessa sessione in cui è 
 segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manuale
 (nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
 implementato su richiesta esplicita dell'utente ("implementiamo domani").
+
+## SVCGRAN-1 — La granularità del "servizio" è una coordinata, non una costante — **FATTO** (2026-08-21)
+
+`service_times` restituiva **una riga per 214.594 chiamate**: `essigSXCC`, cioè l'access log
+intero sotto un'unica etichetta con dei percentili addosso. Raggruppava su
+`access_url_root()`, il **primo segmento del path**.
+
+**Non era codice rotto, e questo è il punto della voce.** La scelta era documentata
+(`utils-access-undertow.awk`: "servizio macro", granularità deliberatamente diversa da
+`access_url_endpoint()`), ed è **giusta** per un deployment dove ogni servizio ha il proprio
+context root. La prova è nel secondo profilo, misurata sull'access log reale del nodo 3:
+
+| profondità | `usnext` (24.086 righe) | `liquido` (295.743 righe) |
+|---|---|---|
+| 1 | **6 gruppi** — `portal`, `spd`, `api`, `integration`… ✓ | **1 gruppo** ✗ |
+| 2 | 6 gruppi (nessun guadagno) | 13 gruppi |
+| 3 | 17 gruppi (più fine del necessario) | **37 gruppi** ✓ |
+
+Due deployment della **stessa tecnologia** con strutture URL diverse, che hanno bisogno di
+valori diversi: è la definizione di una coordinata (principio 7). Quindi
+`SERVICE_PATH_DEPTH` vive in `system.conf` — 1 per `usnext`, 3 per `liquido` — e **non ha un
+default nel codice** (ARCH-6): `dispatch.sh` rifiuta di eseguire il tool se il profilo non lo
+dichiara, con un messaggio che spiega *cosa significa* il numero, non solo che manca.
+
+Nuova funzione condivisa `access_url_service(depth)`, che generalizza `access_url_root()` —
+depth=1 le è equivalente, verificato da un'asserzione dedicata, così `usnext` non è cambiato
+di una virgola. Applica le stesse sostituzioni di ID/UUID di `access_url_endpoint()`: a
+profondità 1-3 raramente cambiano qualcosa, ma rendono stabile una profondità maggiore.
+
+**L'avviso è la parte che conta più del parametro.** Il tool ora dice, quando trova un solo
+gruppo, che la profondità configurata non distingue nulla e che i numeri sotto sono quelli
+dell'access log intero. La soglia è **un** gruppo e non "pochi": due gruppi possono essere la
+verità di un deployment con due servizi, uno solo non lo è mai — raggruppare per una chiave
+costante non è raggruppare. Senza questo avviso il difetto era invisibile per costruzione, ed
+è rimasto tale finché non si è guardato l'output sui log di produzione.
+
+Tre dettagli di ordine, tutti con una ragione:
+
+- il **guard di configurazione precede** `require_tool_sources`, che è un guard di
+  disponibilità dati: un profilo senza la variabile fallisce su ogni nodo e ogni giorno, un
+  log mancante solo su quel nodo. Va detta prima la cosa che non cambierà.
+- il clamp `depth < 1 → 1` dentro la funzione è di **sanità, non un default**: evita che
+  un'invocazione diretta di gawk (i test unitari) produca nomi vuoti. L'obbligo di dichiarare
+  vive in `dispatch.sh`, e il commento lo dice per non farlo leggere come default nascosto.
+- `access_url_service()` è stata aggiunta all'**elenco delle funzioni** che
+  `_require_awk_parser` richiede a un parser di formato (`dispatch.sh`), e l'asserzione che lo
+  verifica è passata da «le 6 funzioni» a «le 7». Senza, un futuro
+  `utils-access-combined.awk` soddisferebbe il contratto e romperebbe `service_times`
+  (principio 8: migrare anche il contratto, non solo il codice).
+
+`access_url_root()` **non** è stata rimossa pur non avendo più chiamanti di produzione: è
+parte dell'interfaccia dichiarata per i parser di formato ed è testata.
+
+## TRUNC-1 — Il troncamento di display va dichiarato — **FATTO** (2026-08-21)
+
+`grep_named_log` tagliava i messaggi a 100 caratteri **senza dirlo**, quindi
+`13432524.cc-1787133862806-375841` — un ID di correlazione mutilato — era indistinguibile da
+uno completo, e chi lo copiava in una ricerca cercava una stringa che non esiste. La
+convenzione del progetto esisteva già **sullo stesso schermo**: `slow_requests` stampa
+«(mostrate le 30 più lente di 14473)», `tail_log` «Ultimi 5 di 295229 righe totali».
+
+**La passata di principio 8 ha triplicato l'ambito, e questo è il valore della voce.** Il
+difetto era stato notato in un file; cercando la stessa forma (`substr(x, 1, N)`) ne sono
+emersi altri, fra cui uno **condiviso**:
+
+| dove | cosa |
+|---|---|
+| `utils-dedup.awk` | il **printer condiviso**, quindi il difetto valeva per tutti i suoi utenti |
+| `grep_named_log.awk` | messaggio a 100, thread a 60 |
+| `filter_app_errors.awk` | la colonna ROOT CAUSE |
+| `filter_errors.awk` | i frame di stack trace |
+
+Correggere solo il primo avrebbe lasciato tre gap identici, più difficili da notare perché
+«sembra già risolto». Da qui `ellipsize(s, n)` in `utils-colors.awk`, che è caricato da **ogni**
+invocazione gawk.
+
+**La distinzione che rende la voce non meccanica: chiave contro display.** Tre dei `substr`
+trovati **non** vanno toccati — `norm_key()` in `filter_errors`, `key_msg` in `grep_named_log`,
+la chiave di `register_error` — perché là il taglio *è il meccanismo* che fa collassare
+messaggi che differiscono solo nella coda, e un `…` le allungherebbe senza cambiare cosa
+raggruppano. Ognuno ha ora un commento che lo dice, così la prossima passata non li
+"corregge". Nemmeno l'allineamento delle tabelle si rompe: `filter_app_errors` calcola la
+larghezza di colonna da `length(_dup_msg[k])`, quindi si allarga da sé.
+
+Quattro asserzioni in `test-srch-named-log.sh`, incluse due che discriminano: che una riga
+**corta** non guadagni un `…` inesistente, e che il prefisso resti riconoscibile. La fixture
+sta in un **log proprio** e non appesa a `prod1nssd-cc.log`: là ci sono asserzioni che contano
+le righe ERROR, e aggiungerne una le faceva fallire per una ragione estranea a ciò che
+verificano (provato, 2 → 3). Una fixture condivisa accoppia test indipendenti.
 
 ## THR-1 — La soglia di latenza espressa in secondi veniva ignorata — **FATTO** (2026-08-21)
 
