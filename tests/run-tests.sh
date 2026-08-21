@@ -352,10 +352,28 @@ PARAM_TESTS=(
     "slow_requests|STATUS_CODE=,THRESHOLD_MS=500|richieste sopra i 500 ms"
 
     # ── THRESHOLD_MS ─────────────────────────────────────────────────────────
+    # NB: fino al 2026-08-21 le asserzioni qui erano SOLO in millisecondi, cioè
+    # nell'unica unità che funzionava — ed è la ragione per cui THR-1 è sopravvissuto
+    # fino a un test sui log di produzione. Le righe in secondi sotto sono il
+    # fail-before: senza il fix danno 1000 (o vuoto), non il valore convertito.
     "slow_requests|THRESHOLD_MS=1000|dammi le chiamate lente in produzione nodo 5"
     "slow_requests|THRESHOLD_MS=2000|richieste più lente di 2000 ms"
     "slow_requests|THRESHOLD_MS=3000|chiamate oltre 3000 ms stamattina"
     "count_status|THRESHOLD_MS=|quanti errori 500 ci sono stati stamattina"
+    # secondi → millisecondi (il modo in cui una persona la dice davvero)
+    "slow_requests|THRESHOLD_MS=5000|chiamate lente sopra 5 secondi"
+    "slow_requests|THRESHOLD_MS=5000|chiamate lente sopra i 5 secondi"
+    "slow_requests|THRESHOLD_MS=3000|richieste oltre 3 secondi"
+    "slow_requests|THRESHOLD_MS=10000|richieste che hanno superato i 10 secondi"
+    "slow_requests|THRESHOLD_MS=2000|chiamate lente sopra 2 sec"
+    "slow_requests|THRESHOLD_MS=1000|chiamate lente con latenza sopra 1 secondo"
+    # millisecondi per esteso, e forma attaccata senza spazio — due esempi di
+    # training del corpus usano `5000ms`, e prima davano 1000
+    "slow_requests|THRESHOLD_MS=500|chiamate lente sopra 500 millisecondi"
+    "slow_requests|THRESHOLD_MS=5000|chiamate lente sopra i 5000ms"
+    # `millisecondi` CONTIENE `secondi`: se l'ordine dei rami si invertisse, questa
+    # darebbe 500000 invece di 500. È la riga che protegge quell'ordine.
+    "slow_requests|THRESHOLD_MS=500|richieste più lente di 500 millisecondi"
 
     # ── IP_FILTER ────────────────────────────────────────────────────────────
     "filter_ip|IP_FILTER=10.0.0.1|traffico dall'ip 10.0.0.1"

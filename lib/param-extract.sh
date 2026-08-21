@@ -42,9 +42,24 @@ eval "$(resolve_time_range "$query")"
 # le occorrenze in cui il numero è legato a un quantificatore o a un'unità di
 # misura, poi si cerca lo status in ciò che resta. Uno stesso numero non può avere
 # due ruoli nella stessa frase.
-_sq_status=$(echo "$query" | sed -E '
+# Unità di misura della LATENZA, enumerate una volta sola perché servono in DUE
+# punti: qui, per sottrarre dalla frase i numeri che hanno ruolo di soglia prima
+# di cercare uno status code, e sotto, per LEGGERE quella soglia.
+#
+# Erano scritte due volte, e la seconda era incompleta: fino al 2026-08-21
+# l'estrazione di THRESHOLD_MS riconosceva solo `ms`, quindi «chiamate lente sopra
+# 5 secondi» cadeva sul default 1000 — mentre QUESTA riga, dodici righe sopra, già
+# sapeva che «5 secondi» è una latenza. Il fatto era nel file, nel posto sbagliato.
+# Misurato in produzione: la stessa domanda dava 14.473 risultati posta in secondi
+# e 1.214 posta in millisecondi. Principio 8: un solo punto di verità, e tutti i
+# chiamanti migrati.
+_U_MS='ms|millisecond[oi]?'
+_U_SEC='secondi?|sec\b'
+_U_OTHER='minut[oi]|or[ae]|giorn[oi]|rig[ah]|record|linee|lin\b'
+
+_sq_status=$(echo "$query" | sed -E "
     s/(ultim|prim)[aeio]+ +[0-9]+//g;
-    s/[0-9]+ *(ms|millisecond[oi]?|secondi?|sec\b|minut[oi]|or[ae]|giorn[oi]|rig[ah]|record|linee|lin\b)//g')
+    s/[0-9]+ *($_U_MS|$_U_SEC|$_U_OTHER)//g")
 STATUS_CODE=""
 if   echo "$_sq_status" | grep -qE "\b[45][0-9]{2}\b"; then
     STATUS_CODE=$(echo "$_sq_status" | grep -oE "\b[45][0-9]{2}\b" | head -1)
@@ -56,10 +71,42 @@ elif echo "$query" | grep -qE "4xx"; then
     STATUS_CODE="4xx"
 fi
 
-# Soglia latenza in ms: "più lente di N ms" / "sopra i N ms" / "oltre N ms"
+# Soglia latenza, in millisecondi. Accetta sia i millisecondi che i SECONDI, che
+# sono il modo in cui una persona la dice davvero: "sopra 5 secondi", "oltre 3
+# secondi", "che hanno superato i 10 secondi".
+#
+# Tre difetti corretti il 2026-08-21, trovati eseguendo i 16 tool sui log di
+# produzione (THR-1):
+#
+#   a) i SECONDI non venivano convertiti. `5 secondi` finiva sul default 1000 se
+#      la query conteneva `lent`, e su NIENTE altrimenti. Otto esempi di training
+#      esprimono la soglia in secondi: il bot sbagliava su query insegnate.
+#   b) `[0-9]+ ms` pretendeva lo SPAZIO, quindi `5000ms` attaccato non veniva
+#      letto — e il corpus contiene `sopra i 5000ms` in due esempi.
+#   c) `millisecondi` per esteso non era riconosciuto.
+#
+# L'ordine dei rami NON è indifferente: i millisecondi vanno provati PRIMA, perché
+# `millisecondi` contiene la sottostringa `secondi`. Il ramo dei secondi non può
+# comunque sbagliarsi su "500 millisecondi" (le cifre devono precedere `sec`
+# direttamente, e lì precedono `mil`), ma l'ordine rende la cosa vera per
+# costruzione invece che per fortuna.
+#
+# `s` nudo come unità NON è supportato di proposito: "sopra 5 s" è una forma che
+# nessuno digita, e `[0-9]+ *s\b` rischierebbe di catturare un numero con altro
+# ruolo. Qui un falso positivo non è lentezza ma una SOGLIA SBAGLIATA, cioè un
+# difetto di correttezza — l'eccezione al pruning conservativo del principio 5.
+#
+# Limite noto: solo valori interi. "sopra 1,5 secondi" non viene letto (cadrebbe
+# sul default), perché il separatore decimale italiano è la virgola e distinguerlo
+# da un elenco richiederebbe un'analisi che oggi non serve a nessuna query reale.
 THRESHOLD_MS=""
-if echo "$query" | grep -qE "[0-9]+ ms"; then
-    THRESHOLD_MS=$(echo "$query" | grep -oE "[0-9]+ ms" | grep -oE "[0-9]+" | head -1)
+if echo "$query" | grep -qE "[0-9]+ *($_U_MS)\b"; then
+    THRESHOLD_MS=$(echo "$query" | grep -oE "[0-9]+ *($_U_MS)\b" | grep -oE "[0-9]+" | head -1)
+elif echo "$query" | grep -qE "[0-9]+ *($_U_SEC)"; then
+    _thr_sec=$(echo "$query" | grep -oE "[0-9]+ *($_U_SEC)" | grep -oE "[0-9]+" | head -1)
+    # 10# forza la base decimale: senza, un valore con zero iniziale ("sopra 05
+    # secondi") sarebbe interpretato come ottale da $(( )).
+    THRESHOLD_MS=$(( 10#$_thr_sec * 1000 ))
 elif echo "$query" | grep -qE "lent"; then
     THRESHOLD_MS="1000"  # default: > 1 secondo
 fi
