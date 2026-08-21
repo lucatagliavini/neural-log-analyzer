@@ -19,11 +19,28 @@
 # `shlex`), quindi il `python3` di sistema gli basta.
 #
 # Costo misurato del difetto: in produzione (`lxprworkerlana01`) esiste
-# `/usr/bin/python3` 3.12.3 e NON esiste `.venv`, quindi ogni `build-dataset.sh`
-# prendeva il ramo bash — **0,2 s contro ≥110 s** (54 s misurati per la sola
-# normalizzazione di 1171 query, e il ramo bash fa due subprocess per riga).
-# Il gate proteggeva da una dipendenza che non esiste più, al prezzo di rinunciare
-# all'unico backend veloce proprio sulla macchina che ne ha più bisogno.
+# `/usr/bin/python3` e NON esiste `.venv`, quindi ogni `build-dataset.sh` prendeva
+# il ramo bash — **0,2 s contro ≥110 s** (54 s misurati per la sola normalizzazione
+# di 1171 query, e il ramo bash fa due subprocess per riga). Il gate proteggeva da
+# una dipendenza che non esiste più, al prezzo di rinunciare all'unico backend
+# veloce proprio sulla macchina che ne ha più bisogno.
+#
+# ─── Le versioni, e una mia affermazione da correggere ────────────────────────
+#
+# Avevo scritto che in produzione ci fosse **3.12.3**, come in locale. Non l'avevo
+# verificato: avevo letto solo il PATH dell'interprete. La versione reale è
+# **3.9.25** — due minor release di distanza, ed è precisamente la differenza che
+# rende non ovvia la domanda «i due interpreti producono lo stesso dataset?».
+#
+# Verificato dal vivo DOPO il deploy, ed è più forte di quel che avevo affermato:
+# `build-dataset.sh` su 3.9.25 in produzione rigenera `queries.txt` con md5
+# **identico** a quello prodotto da 3.12.3 in locale, e `gap-report.sh` dà gli
+# stessi 74 candidati. Quindi l'output è stabile fra 3.9 e 3.12 — per misura, non
+# perché l'avessi presupposto.
+#
+# Conseguenza pratica per chi tocca questi script: il codice Python del progetto
+# deve restare compatibile con **3.9**, non solo con la versione locale. Niente
+# `match`, niente unione di tipi con `|` negli annotamenti, niente novità 3.10+.
 #
 # La terza incoerenza l'ho introdotta io lo stesso giorno con GAPREP-1, aggiungendo
 # un quarto consumatore di Python con un quarto criterio. Da qui questo file: il

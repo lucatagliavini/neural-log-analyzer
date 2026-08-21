@@ -208,7 +208,7 @@ stato rimosso il 2026-08-18 e il motore è `neural-c` (C, nessuna dipendenza Pyt
 basta. Verificato: in `.venv/…/site-packages` ci sono ancora `functorch`, `filelock`,
 `fsspec`, `jinja2`.
 
-**Il costo, misurato.** In produzione esiste `/usr/bin/python3` 3.12.3 e **non** esiste il
+**Il costo, misurato.** In produzione esiste `/usr/bin/python3` **3.9.25** e **non** esiste il
 `.venv`. Ogni `build-dataset.sh` sul server prendeva quindi il ramo bash:
 
 | ramo | tempo |
@@ -247,8 +247,19 @@ configurazione (ARCH-6).
 **La verifica che rende sicuro rimuovere il gate**: il dataset generato dal `python3` di
 **sistema** è **bit-identico** a quello committato (generato dal venv). Se i due interpreti
 divergessero, la produzione otterrebbe un dataset diverso dal locale e il modello sarebbe
-addestrato su input non riproducibili. Entrambi 3.12.3 — questa verifica dice che *questi
-due* concordano, non che l'output sia indipendente dalla versione.
+addestrato su input non riproducibili.
+
+**E qui una mia affermazione era sbagliata, corretta dalla verifica in produzione.** Avevo
+scritto che in produzione ci fosse **3.12.3** come in locale: non l'avevo verificato, avevo
+letto solo il PATH dell'interprete. La versione reale è **3.9.25** — due minor release di
+distanza, cioè esattamente la differenza che rende non ovvia la domanda. Verificato dal vivo
+dopo il deploy, e l'esito è **più forte** di quello che avevo affermato: `build-dataset.sh` su
+3.9.25 rigenera `queries.txt` con md5 identico a quello di 3.12.3, e `gap-report.sh` dà gli
+stessi 74 candidati. L'output è stabile fra 3.9 e 3.12 **per misura**, non per presupposto.
+
+Conseguenza operativa che prima non era scritta da nessuna parte: il codice Python del
+progetto deve restare compatibile con **3.9**, non con la versione della macchina di
+sviluppo. Niente `match`, niente `X | Y` negli annotamenti, niente novità 3.10+.
 
 **Tre esiti invece di due, in tutta la suite.** Correggendo il `exit 1` è emersa la
 domanda generale: come si riporta un test che *non può* misurare? Ora `0` = misurato,
