@@ -9,7 +9,6 @@ Aggiornato: 2026-08-21
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
 | FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
-| SVCGRAN-2 | **Una profondità sola non serve due famiglie di URL nello stesso profilo** (trovata 2026-08-21 **verificando SVCGRAN-1 in produzione**, cioè dal fix stesso). Con `SERVICE_PATH_DEPTH=3` su `liquido` i servizi REST si separano correttamente (`essigSXCC/rest/caidigitale`, `essigSXCC/rest/claims`, …), ma i **SOAP** collassano tutti in **una riga** `essigSXCC/ws/it` — perché vivono in `/essigSXCC/ws/it/unipol/sx/webservice/<area>/<Servizio>/soap11`, dove le componenti 3-6 sono un **package Java**, non un servizio. Misurato sull'access log del nodo 4: **14 servizi SOAP distinti** invisibili come tali, fra cui il singolo endpoint più trafficato di tutto il log (`WsUtility`, 5.789 chiamate) e `VerbatelAPI` (208), `AnagraficaSinistriService` (113), `CliIdentify` (74). Servirebbe profondità 7-8 per i SOAP, che però renderebbe i REST assurdamente fini (`rest/<svc>/<versione>/<metodo>`). Non è una regressione — prima erano invisibili **tutti** i servizi, ora 37 su ~50 — ma è una **degenerazione parziale che l'avviso non cattura**, perché scatta solo a un gruppo. Direzione: la **mappa di pattern per profilo** valutata e scartata quando si è scelta la profondità (regex → nome servizio, es. `/ws/.*/([A-Za-z]+)/soap11` → `SOAP $1`), oppure una seconda coordinata «prefisso → profondità aggiuntiva». **Non fatto**: è la stessa decisione di design di SVCGRAN-1, riaperta da un dato che allora non avevo | Media |
 | DEPLOYVER-1 | **`deploy.sh` contiene logica reale ma non è versionato** (trovata 2026-08-21 correggendo l'esclusione del lock). È gitignorato per progetto (`.gitignore:21`) perché contiene l'host dell'installazione (`HOST="root@lxprworkerlana01"`), e non esiste alcun template versionato (`git ls-files | grep deploy` → vuoto). Ma il file non è solo configurazione: contiene il **sentinel di identità** che impedisce a `rsync --delete` di cancellare una dest sbagliata (documentato nelle sue righe 21-40 come «un'invariante che il codice garantisce» invece di una disciplina dell'operatore), due liste di esclusione, e la logica di deploy delle due cartelle sorelle. Conseguenza **misurata**: l'esclusione di `.neural-c.lock` aggiunta oggi vive **solo su questa macchina**, non è rivedibile da nessuno e si perde se il file viene ricreato — e la stessa cosa vale per il sentinel, cioè per la protezione più importante dello script. Direzione: estrarre le coordinate (`HOST`, `DEST`) in un `deploy.local.conf` non versionato — stesso schema già usato per `system.local.conf` — e versionare lo script. **Non fatto**: cambia il modo in cui si deploya, quindi va concordato | Media |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
 
@@ -198,6 +197,94 @@ riaddestrato e verificato su entrambi i profili nella stessa sessione in cui è 
 segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manuale
 (nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
 implementato su richiesta esplicita dell'utente ("implementiamo domani").
+
+## SVCGRAN-2 — Un prefisso fisso che consumava le componenti — **FATTO** (2026-08-21)
+
+Chiusa poche ore dopo SVCGRAN-1, che l'aveva aperta: con `SERVICE_PATH_DEPTH=3` i REST si
+separavano ma i **14 servizi SOAP** collassavano in una riga, `essigSXCC/ws/it`, **6.967
+chiamate a 446 ms medi**.
+
+### La misura che ha escluso la strada ovvia
+
+| profondità | gruppi | esito |
+|---|---|---|
+| 3 (allora) | 37 | SOAP tutti in `ws/it` |
+| 4 | 59 | SOAP in `ws/it/unipol` — peggio |
+| 8 | **1337** | sfascia i REST, inutilizzabile |
+
+Il difetto **non era «troppo poco profondo»**: era che un prefisso fisso e privo di
+informazione — `it/unipol/sx/webservice`, cioè un **package Java** — consuma quattro
+componenti prima che cominci il nome del servizio. Alzare il numero peggiora la cosa, perché
+la stessa profondità serve due famiglie di URL con forme diverse.
+
+### La soluzione: sequenze trasparenti
+
+`SERVICE_PATH_TRANSPARENT` in `system.conf` — sequenze di componenti saltate nel conteggio
+della profondità. Con `it/unipol/sx/webservice` e `it/unipol/sx/service` trasparenti e
+profondità 4, misurato in produzione:
+
+| | prima | dopo |
+|---|---|---|
+| SOAP | `ws/it` (6.967 chiamate, 446 ms) | `ws/ivr/CliIdentify` **1595 ms**, `ws/unitools/UploaderUnitools` **1869 ms**, `ws/verbatel/VerbatelAPI` 804 ms, `ws/fiduciari/WsUtility` 416 ms… |
+
+**Sono SEQUENZE e non segmenti singoli, e la distinzione è necessaria, non estetica**:
+`service` da solo è **significativo** in `/essigSXCC/service/ccfeireceiverequest` — 275
+chiamate, MAX 147 s. Un filtro per-segmento ripulirebbe i SOAP distruggendo quell'endpoint.
+C'è un'asserzione dedicata a proteggerlo.
+
+Applicate dalla più lunga alla più corta indipendentemente dall'ordine in cui il profilo le
+scrive: con la corta prima resterebbe un `webservice` orfano nel nome, e far dipendere il
+risultato dall'ordine di scrittura sarebbe una trappola silenziosa. Confronto **letterale**
+con `index()` e non `gsub()`: una sequenza è un pezzo di path, non una regex, e un `.` in un
+nome di segmento diventerebbe un metacarattere — un difetto che si manifesta solo su certi
+profili.
+
+### Perché profondità 4 e non 3, deciso su misura
+
+A 3 con le trasparenti attive i SOAP escono per **area**: `ws/ivr` a 936 ms. A 4 escono per
+**servizio**, e si vede che dentro quell'area **`CliIdentify` sta a 1595 ms** e ne trascina
+la media. Il costo sui REST è solo un'**etichetta più lunga** (`rest/caidigitale/v2.0`): il
+gruppo contiene le stesse chiamate, non si perde nulla. Valutata e **scartata** anche la
+variante con le versioni trasparenti (`v1`, `v2.0`): porterebbe i REST al livello di
+**metodo** — utilissimo, ma il tool si chiama `service_times`, non `operation_times`, e
+frammenterebbe un servizio con molti metodi in molte righe.
+
+### Un avviso automatico che la misura ha bocciato
+
+Volevo generalizzare l'avviso di degenerazione: «segnala un gruppo che nasconde troppa
+struttura». **Non è fattibile**, e il dato è netto — per ogni gruppo a profondità 3, quanti
+path distinti nasconde:
+
+| gruppo | path nascosti | è un problema? |
+|---|---|---|
+| `essigSXCC/service/app` | **938** | no — URL per risorsa |
+| `essigSXCC/resources/img` | **262** | no — immagini statiche |
+| `essigSXCC/ws/it` | **14** | **sì** |
+
+Il gruppo problematico nasconde **meno** struttura di due che vanno benissimo: la metrica non
+distingue un gruppo che cela *servizi* da uno che cela *risorse*. Un'euristica su quel
+segnale avrebbe gridato al lupo su `resources/img` a ogni query. L'avviso resta quindi a
+**un** gruppo, e la degenerazione parziale si affronta con la configurazione. **Un'opzione
+scartata su dati è più solida di una implementata su intuizione.**
+
+### Limiti residui, visibili e non silenziosi
+
+Tre aree hanno un `service` **annidato** e restano `ws/anagrafica/service`,
+`ws/sinistri/service`, `ws/serviziagenzia/service`; e 2 chiamate su ~7.000 seguono un path
+che non combacia con nessuna sequenza e restano `ws/it/unipol`. Entrambi compaiono
+nell'output, quindi si vedono.
+
+### Verificato in produzione PRIMA del commit
+
+Su indicazione dell'utente, e il metodo vale la nota. La verifica è stata fatta su una copia
+isolata in `/tmp` — non sull'albero deployato — eseguendo il `chatbot.sh` reale col profilo
+modificato. Ha richiesto due correzioni di *metodo*, non di codice: la prima invocazione
+leggeva il **solo file corrente** dell'access log, che alle 15:05 era appena ruotato e aveva
+680 righe invece di 333.296 (`dispatch.sh` include le rotazioni via
+`select_log_files_grouped`); la seconda moriva silenziosamente perché una copia in `/tmp`
+rompe il layout a **cartelle sorelle** e `infer.sh` non trovava `../neural-c`. Entrambe
+avrebbero prodotto conclusioni sbagliate se non le avessi diagnosticate. Copie temporanee
+rimosse dal server a verifica conclusa.
 
 ## VENVGATE-1 — Un gate che proteggeva da una dipendenza rimossa — **FATTO** (2026-08-21)
 
