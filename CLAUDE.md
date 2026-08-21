@@ -107,7 +107,9 @@ ppc64le dove PyTorch non è disponibile.
   `normalize-query.sh` + `query-to-features.sh` in Python. Output bit-identico alla
   pipeline bash (verificato 968/968). Opzionale: senza `.venv`, `build-dataset.sh` cade
   sul ramo bash (più lento, stesso risultato).
-- `.venv/bin/python3` autodetect in `build-dataset.sh`.
+- Interprete risolto da `lib/utils-python.sh` → `resolve_python()`, unico punto per tutto
+  il repo: `NLA_PYTHON` → `.venv` → `python3` di sistema (VENVGATE-1). Il `.venv` è un
+  override, non un requisito: `build_dataset.py` importa solo stdlib.
 
 ### Componenti principali
 
@@ -327,14 +329,22 @@ specifico:
 - `../neural-c` — framework neurale in C, cartella sorella richiesta. Unico motore di
   training/inferenza, su x86_64 e ppc64le (invocato via `neural-c.sh`, che seleziona il
   binario giusto per architettura — mai il binario direttamente).
-- **Python 3** — mai per il training (quello è `neural-c`), ma due usi distinti, con due
-  livelli di necessità diversi:
-  - `build-dataset.sh`: **opzionale**, solo velocità. Autodetect di `.venv/bin/python3`
-    (`lib/build_dataset.py`); senza, il ramo bash dà lo stesso risultato più lentamente.
-  - `vocab-gap.sh`/`gap-report.sh`: **richiesto** (GAPREP-1, 2026-08-21). Usano
-    `lib/dump_norm.py` per normalizzare il dataset allo stesso stadio delle feature —
-    l'equivalente in bash costa **54s misurati** su 1171 query e girerebbe a ogni
-    `train.sh`. Basta il `python3` di **sistema**: `build_dataset.py` importa solo
-    stdlib, il `.venv` non serve (contiene l'albero di PyTorch, rimosso il 2026-08-18).
-    Se manca, il report **si disattiva dichiarandolo** (`? gap NON misurato`, exit 2) e
-    `train.sh` continua: non produce mai un falso «nessun gap».
+- **Python 3** — mai per il training (quello è `neural-c`). Basta il `python3` di
+  **sistema**: tutti gli script Python del progetto importano solo **stdlib**. Il `.venv`
+  **non è un requisito**, è un override per-installazione (VENVGATE-1, 2026-08-21):
+  conteneva l'albero di PyTorch per il vecchio `lib/train.py`, rimosso il 2026-08-18.
+  - **Un solo punto di risoluzione**: `lib/utils-python.sh` → `resolve_python()`, con
+    precedenza `NLA_PYTHON` (override esplicito) → `.venv` → `python3` di sistema. Prima
+    tre script lo cercavano in tre modi diversi, e in produzione — dove `python3` c'è e
+    il `.venv` no — `build-dataset.sh` prendeva il ramo bash: **0,2 s contro ≥110 s**.
+  - `build-dataset.sh`: Python **opzionale**, solo velocità. Senza alcun interprete il
+    ramo bash dà lo stesso risultato (verificato bit-identico) molto più lentamente.
+  - `vocab-gap.sh`/`gap-report.sh`: **richiesto** (GAPREP-1). Usano `lib/dump_norm.py`
+    per normalizzare il dataset allo stesso stadio delle feature — l'equivalente bash
+    costa **54 s misurati** su 1171 query e girerebbe a ogni `train.sh`. Se manca, il
+    report **si disattiva dichiarandolo** (`? gap NON misurato`, exit 2) e `train.sh`
+    continua: non produce mai un falso «nessun gap».
+  - **Tre esiti, non due, in tutta la suite**: `0` misurato, `2` **non misurabile**,
+    altro = fallimento vero. `run-tests.sh` riporta il `2` come `SKIP` e non lo conta né
+    fra i PASS né fra i FAIL. Su una macchina senza `python3` la suite dà quindi
+    `184 PASS / 0 FAIL` con due SKIP espliciti, non sei FAIL che accusano il codice.

@@ -11,7 +11,6 @@ Aggiornato: 2026-08-21
 | FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
 | SVCGRAN-2 | **Una profondità sola non serve due famiglie di URL nello stesso profilo** (trovata 2026-08-21 **verificando SVCGRAN-1 in produzione**, cioè dal fix stesso). Con `SERVICE_PATH_DEPTH=3` su `liquido` i servizi REST si separano correttamente (`essigSXCC/rest/caidigitale`, `essigSXCC/rest/claims`, …), ma i **SOAP** collassano tutti in **una riga** `essigSXCC/ws/it` — perché vivono in `/essigSXCC/ws/it/unipol/sx/webservice/<area>/<Servizio>/soap11`, dove le componenti 3-6 sono un **package Java**, non un servizio. Misurato sull'access log del nodo 4: **14 servizi SOAP distinti** invisibili come tali, fra cui il singolo endpoint più trafficato di tutto il log (`WsUtility`, 5.789 chiamate) e `VerbatelAPI` (208), `AnagraficaSinistriService` (113), `CliIdentify` (74). Servirebbe profondità 7-8 per i SOAP, che però renderebbe i REST assurdamente fini (`rest/<svc>/<versione>/<metodo>`). Non è una regressione — prima erano invisibili **tutti** i servizi, ora 37 su ~50 — ma è una **degenerazione parziale che l'avviso non cattura**, perché scatta solo a un gruppo. Direzione: la **mappa di pattern per profilo** valutata e scartata quando si è scelta la profondità (regex → nome servizio, es. `/ws/.*/([A-Za-z]+)/soap11` → `SOAP $1`), oppure una seconda coordinata «prefisso → profondità aggiuntiva». **Non fatto**: è la stessa decisione di design di SVCGRAN-1, riaperta da un dato che allora non avevo | Media |
 | DEPLOYVER-1 | **`deploy.sh` contiene logica reale ma non è versionato** (trovata 2026-08-21 correggendo l'esclusione del lock). È gitignorato per progetto (`.gitignore:21`) perché contiene l'host dell'installazione (`HOST="root@lxprworkerlana01"`), e non esiste alcun template versionato (`git ls-files | grep deploy` → vuoto). Ma il file non è solo configurazione: contiene il **sentinel di identità** che impedisce a `rsync --delete` di cancellare una dest sbagliata (documentato nelle sue righe 21-40 come «un'invariante che il codice garantisce» invece di una disciplina dell'operatore), due liste di esclusione, e la logica di deploy delle due cartelle sorelle. Conseguenza **misurata**: l'esclusione di `.neural-c.lock` aggiunta oggi vive **solo su questa macchina**, non è rivedibile da nessuno e si perde se il file viene ricreato — e la stessa cosa vale per il sentinel, cioè per la protezione più importante dello script. Direzione: estrarre le coordinate (`HOST`, `DEST`) in un `deploy.local.conf` non versionato — stesso schema già usato per `system.local.conf` — e versionare lo script. **Non fatto**: cambia il modo in cui si deploya, quindi va concordato | Media |
-| VENVGATE-1 | **Il gate su `.venv` in `build-dataset.sh:42` è vestigiale** (trovata 2026-08-21 lavorando a GAPREP-1). Lo script pretende `.venv/bin/python3` e altrimenti cade sul ramo bash, **molto più lento** — ma `lib/build_dataset.py` importa **solo stdlib** (`re`, `sys`, `os`, `argparse`, `shlex`) e il `.venv` contiene l'albero di dipendenze di **PyTorch**, rimosso il 2026-08-18 con `lib/train.py` (verificato: `functorch`, `filelock`, `fsspec`, `jinja2` in `site-packages`). Il gate protegge quindi da una dipendenza che non esiste più. Conseguenza **misurata**: in produzione (`lxprworkerlana01`) c'è `/usr/bin/python3` 3.12.3 e **nessun** `.venv`, quindi ogni `build-dataset.sh` prende la strada lenta senza motivo. Incoerenza aggiuntiva introdotta da GAPREP-1: `vocab-gap.sh` controlla `command -v python3` (corretto), `build-dataset.sh` controlla `.venv` — due script che rilevano Python in due modi diversi. Fix: allineare il rilevamento su `python3` di sistema con `.venv` come override se presente. **Non fatto**: tocca il percorso di generazione del dataset, va verificato con la parità 1171/1171 prima di cambiarlo | Media |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
 
 ### FLEX-1 — classi di caratteri flesse, e FLEX-1b — la parola senza feature (2026-08-20)
@@ -199,6 +198,73 @@ riaddestrato e verificato su entrambi i profili nella stessa sessione in cui è 
 segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manuale
 (nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
 implementato su richiesta esplicita dell'utente ("implementiamo domani").
+
+## VENVGATE-1 — Un gate che proteggeva da una dipendenza rimossa — **FATTO** (2026-08-21)
+
+**Il gate.** `build-dataset.sh` sceglieva il backend con `[[ -x .venv/bin/python3 ]]`. Il
+venv esisteva per **PyTorch**, quando il training passava da `lib/train.py`; quel file è
+stato rimosso il 2026-08-18 e il motore è `neural-c` (C, nessuna dipendenza Python). Il gate
+è restato, e `lib/build_dataset.py` importa **solo stdlib** — il `python3` di sistema gli
+basta. Verificato: in `.venv/…/site-packages` ci sono ancora `functorch`, `filelock`,
+`fsspec`, `jinja2`.
+
+**Il costo, misurato.** In produzione esiste `/usr/bin/python3` 3.12.3 e **non** esiste il
+`.venv`. Ogni `build-dataset.sh` sul server prendeva quindi il ramo bash:
+
+| ramo | tempo |
+|---|---|
+| Python | **0,2 s** |
+| bash | **≥110 s** (54 s misurati per la sola normalizzazione di 1171 query, ×2 subprocess per riga) |
+
+Il gate rinunciava all'unico backend veloce proprio sulla macchina che ne ha più bisogno,
+per proteggere da una dipendenza che non esiste più.
+
+**Tre chiamanti, non uno — e il terzo era il peggiore.** La passata di principio 8 ha
+trovato che il criterio era scritto tre volte, in tre modi:
+
+| dove | criterio | esito senza `.venv` |
+|---|---|---|
+| `build-dataset.sh` | `-x .venv/bin/python3` | ramo bash, 500× più lento |
+| `tests/test-normalize-parity.sh` | idem, poi **`exit 1`** | `--parity` **FALLIVA** in produzione |
+| `vocab-gap.sh` | `command -v python3` | corretto |
+
+Il secondo è il più grave: su una macchina senza venv la suite riportava un **FAIL** senza
+che nulla fosse rotto, e il messaggio suggeriva `pip install -r requirements.txt`, che oggi
+non serve a niente. **E il quarto criterio l'ho aggiunto io lo stesso giorno con GAPREP-1**:
+il difetto non era solo storico, si stava replicando.
+
+**Il fix.** `lib/utils-python.sh` → `resolve_python()`, con precedenza `NLA_PYTHON` → `.venv`
+→ sistema, e tutti i chiamanti migrati. Il `.venv` resta **preferito** quando c'è, perché è
+un override per-installazione (chi lo crea di proposito vuole che venga usato, come
+`system.local.conf` vince su `system.conf`); ciò che cambia è che la sua **assenza non è più
+un errore**.
+
+`NLA_PYTHON` non è un aggancio per i test: pinna un interprete senza creare un venv, e se è
+impostato ma non eseguibile `resolve_python` **fallisce** invece di ricadere in silenzio —
+chi ha pinnato ha espresso una scelta, e scavalcarla nasconderebbe un errore di
+configurazione (ARCH-6).
+
+**La verifica che rende sicuro rimuovere il gate**: il dataset generato dal `python3` di
+**sistema** è **bit-identico** a quello committato (generato dal venv). Se i due interpreti
+divergessero, la produzione otterrebbe un dataset diverso dal locale e il modello sarebbe
+addestrato su input non riproducibili. Entrambi 3.12.3 — questa verifica dice che *questi
+due* concordano, non che l'output sia indipendente dalla versione.
+
+**Tre esiti invece di due, in tutta la suite.** Correggendo il `exit 1` è emersa la
+domanda generale: come si riporta un test che *non può* misurare? Ora `0` = misurato,
+`2` = **non misurabile**, altro = fallimento vero, e `run-tests.sh` stampa `SKIP` senza
+contarlo né fra i PASS né fra i FAIL. Su una macchina senza `python3` la suite dà
+**184 PASS / 0 FAIL con 2 SKIP espliciti** invece di sei FAIL che accusano il codice.
+
+Un dettaglio che vale la lezione: la prima versione di quella guardia in
+`test-vocab-gap.sh` usciva **0**, quindi `run-tests.sh` la contava fra i PASS — **un verde
+per un test non eseguito**, cioè esattamente il difetto corretto in GAPREP-1, reintrodotto
+dal test che lo protegge. Corretta in `exit 2`.
+
+Effetto collaterale utile: l'asserzione «senza python3» di `test-vocab-gap.sh` usava un
+`PATH` svuotato, che ha smesso di funzionare (il venv si trova per path **assoluto**) e
+infatti dava `exit 127` — verificava un guasto diverso da quello che credeva. Ora usa
+`NLA_PYTHON`, che è deterministico.
 
 ## SVCGRAN-1 — La granularità del "servizio" è una coordinata, non una costante — **FATTO** (2026-08-21)
 
