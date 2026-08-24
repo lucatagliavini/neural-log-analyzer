@@ -368,6 +368,96 @@ assert_eq "apostrofo DENTRO apici singoli: non è una citazione (limite noto)" \
 _run 'trova "errore nell'"'"'app" in prod'
 assert_contains "  e con le virgolette doppie funziona" "$NORM_QUERY" "<PATTERN>"
 
+echo "── APOSTR-1: le elisioni esercitate su TUTTI gli stadi ──────────────────"
+
+# Perché questa sezione esiste, e perché copre più di uno stadio.
+#
+# Fino al 2026-08-24 nessuna query con apostrofo esisteva da nessuna parte nel
+# repo: ZERO delle 1171 etichettate, e nessuna asserzione. La conseguenza non è
+# stata un modello mal addestrato — le feature sono INSENSIBILI all'apostrofo,
+# perché i pattern del vocabolario sono sottostringhe non ancorate (`ultim`, non
+# `\bultim\b`) e `'` è comunque un confine di parola per i 40 pattern che usano
+# `\b`. La conseguenza è stata che tre stadi della pipeline non erano mai stati
+# ESERCITATI su un'elisione, e due di essi erano rotti:
+#   - normalize-query.sh: «nell'ultima ora dell'app» → «nell<PATTERN>app»
+#   - param-extract.sh:   «cerca l'eccezione nell'app» → SEARCH_PATTERN mutilato
+# Il secondo è sopravvissuto alla correzione del primo perché i test guardavano
+# solo il filtro temporale: un parametro «coperto» non è coperto in tutte le sue
+# forme (la lezione di THR-1, su un'altra superficie).
+#
+# Quindi si asserisce stadio per stadio, non solo il risultato finale.
+
+# Stadio 1 — NORM_QUERY: l'elisione attraversa la normalizzazione intatta.
+for _q in "errori nell'ultima ora" \
+          "richieste nell'ultima mezzora" \
+          "l'errore dell'utente nell'app" \
+          "quant'è il tasso d'errore nell'ora" \
+          "c'è stato un problema stamattina" \
+          "mostrami l'andamento dell'ultima ora"; do
+    _run "$_q"
+    assert_eq "NORM_QUERY intatta: «${_q}»" "$NORM_QUERY" "$_q"
+done
+
+# Stadio 2 — il VETTORE: l'apostrofo non deve cambiare le feature. È la proprietà
+# su cui poggia la decisione di NON aggiungere esempi al dataset (produrrebbero
+# vettori identici, quindi zero informazione): asserirla la rende un'invariante
+# protetta invece di una misura fatta una volta. Se un domani si aggiungesse un
+# pattern con uno spazio interno, o una classe che include `'`, qui comparirebbe
+# un FAIL invece di una query che si comporta in modo inatteso.
+# nlp_resolve_paths() PRIMA di invocare query-to-features.sh, che sourcia
+# domain.conf e ha bisogno di TOOLS_CONF_FILE: senza, lo script esce con un errore
+# su stderr e stdout VUOTO — e un confronto fra due stringhe vuote passerebbe
+# senza misurare niente. Prima versione di questo helper faceva esattamente
+# questo: quattro asserzioni verdi per un confronto vacuo, trovate verificando che
+# gli helper producessero valori reali invece di fidarsi del PASS.
+_vec() {
+    ( source "$LIB_DIR/nlp-paths.sh"
+      nlp_resolve_paths "$PROFILE_DIR"
+      eval "$("$LIB_DIR/normalize-query.sh" "$1" 2>/dev/null)"
+      export NORM_QUERY
+      "$LIB_DIR/query-to-features.sh" "$NORM_QUERY" 2>/dev/null )
+}
+# Guardia contro il confronto vacuo: si asserisce PRIMA che il vettore esista e
+# abbia feature attive. Senza, un helper rotto renderebbe verdi tutte le
+# asserzioni sotto confrontando vuoto con vuoto — cioè un verde per una verifica
+# mai avvenuta, lo stesso difetto corretto in GAPREP-1 sul gap report.
+_vec_probe="$(_vec "errori nell'ultima ora")"
+assert_eq "il vettore è calcolabile (guardia anti-confronto-vacuo)" \
+    "$([[ "${#_vec_probe}" -gt 50 ]] && echo si || echo no)" "si"
+assert_eq "  e ha almeno una feature attiva" \
+    "$([[ "$(tr ' ' '\n' <<< "$_vec_probe" | grep -vc '^0*$')" -gt 0 ]] && echo si || echo no)" "si"
+
+for _q in "errori nell'ultima ora" \
+          "richieste nell'ultima mezzora" \
+          "errori dall'ip 10.1.2.3" \
+          "tempi dell'access log nell'ultima ora"; do
+    assert_eq "vettore identico con e senza apostrofo: «${_q}»" \
+        "$(_vec "$_q")" "$(_vec "${_q//\'/ }")"
+done
+
+# Stadio 3 — i PARAMETRI: l'espressione temporale dentro un'elisione va letta, e
+# nessun pattern di ricerca fantasma va estratto. Il dettaglio dei fantasmi sta in
+# tests/test-param-extract.sh; qui si tiene un presidio minimo sullo stadio, così
+# la sezione copre la pipeline per intero e non rimanda tutto altrove.
+_pe() { "$LIB_DIR/param-extract.sh" "$1" 2>/dev/null | grep "^$2=" | cut -d= -f2- | tr -d "'"; }
+assert_eq "TIME_FROM letto attraverso l'elisione" \
+    "$([[ -n "$(_pe "errori nell'ultima ora" TIME_FROM)" ]] && echo si || echo no)" "si"
+assert_eq "nessun SEARCH_PATTERN da due elisioni" \
+    "$(_pe "cerca l'eccezione nell'app dell'utente" SEARCH_PATTERN)" "__MISSING__"
+
+# Stadio 4 — il ROUTING: l'elisione non deve spostare il tool scelto. Si confronta
+# il vincitore con quello della forma senza apostrofo, non un valore assoluto: la
+# confidenza dipende dai pesi e cambierebbe a ogni retrain, il VINCITORE no.
+_top() {
+    ( eval "$("$LIB_DIR/normalize-query.sh" "$1" 2>/dev/null)"
+      export NORM_QUERY
+      "$LIB_DIR/infer.sh" "$NORM_QUERY" 2>/dev/null | head -1 | awk '{print $1}' )
+}
+for _q in "errori nell'ultima ora" "l'errore dell'utente nell'app"; do
+    assert_eq "routing invariato con e senza apostrofo: «${_q}»" \
+        "$(_top "$_q")" "$(_top "${_q//\'/ }")"
+done
+
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 printf "═══════════════════════════════════════════════════\n"

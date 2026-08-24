@@ -351,10 +351,37 @@ _quoted_spans=()
 while IFS= read -r _span; do
     [[ -n "$_span" ]] && _quoted_spans+=("$_span")
 done < <(echo "$1" | grep -oE '"[^"]*"' | sed -e 's/^"//' -e 's/"$//')
+# Le DOPPIE sopra si estraggono senza condizioni: in italiano non hanno altro uso.
+# Le SINGOLE passano da quoted_spans_of() (utils-quoted.sh), che applica la regola
+# dei delimitatori — una coppia di apici è una citazione solo se delimitata da spazi
+# o dagli estremi della frase.
+#
+# Qui viveva una `grep -oE "'[^']*'"` ingenua, e il difetto che produceva era
+# sistematico, non un caso limite (trovato 2026-08-24 su segnalazione dell'utente):
+# in italiano l'apostrofo è graficamente la virgoletta singola, quindi due elisioni
+# consecutive venivano lette come una citazione.
+#
+#   cerca l'eccezione nell'app dell'utente  →  SEARCH_PATTERN='eccezione nell'
+#   cerca nell'access log l'errore          →  SEARCH_PATTERN='access log l'
+#
+# Misurato su 5 formulazioni italiane naturali: 5 fantasmi su 5. La conseguenza era
+# una risposta sbagliata SILENZIOSA — il classificatore instradava correttamente su
+# search_all_logs (96,7%), il tool cercava nei log la stringa mutilata e rispondeva
+# «nessuna occorrenza» a una domanda che il bot aveva capito benissimo.
+#
+# Perché è sopravvissuto alla correzione di stamattina, che ha centralizzato questa
+# stessa regola: avevo deciso — correttamente — che SEARCH_PATTERN e NAMED_LOG_GLOB
+# devono leggere la query GREZZA, perché a loro lo span serve davvero. Da lì ho
+# concluso — erroneamente — che potessero tenere la propria regex. Sono due cose
+# diverse: leggere il testo grezzo ATTRAVERSO la regola condivisa, non aggirandola.
+# Il principio 8 per la terza volta nella stessa sessione.
+#
+# La precedenza resta invariata (doppie prima, singole solo se non ci sono doppie):
+# cambia il criterio con cui una coppia di apici conta come citazione, non l'ordine.
 if [[ ${#_quoted_spans[@]} -eq 0 ]]; then
     while IFS= read -r _span; do
         [[ -n "$_span" ]] && _quoted_spans+=("$_span")
-    done < <(echo "$1" | grep -oE "'[^']*'" | sed -e "s/^'//" -e "s/'$//")
+    done < <(quoted_spans_of "$1" | grep "^'" | sed -e "s/^'//" -e "s/'$//")
 fi
 
 # Escape hatch per log fuori da APP_LOG_NAMES: glob tra virgolette.

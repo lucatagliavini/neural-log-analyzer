@@ -467,6 +467,36 @@ assert_eq "un parametro FUORI dalle virgolette si legge ancora" "5000" \
 assert_eq "TIME_FROM fuori dalle virgolette si legge ancora" "$(date -d yesterday +%Y-%m-%d)T00:00" \
     "$(_extract 'cerca "x" ieri' TIME_FROM)"
 
+# APOSTROFO E SEARCH_PATTERN FANTASMA (trovato 2026-08-24 su segnalazione
+# dell'utente, che ha chiesto «alcune query si spaccano e danno risultati
+# inattesi?»). L'estrazione degli span usava `'[^']*'` senza delimitatori, quindi
+# due elisioni consecutive producevano un pattern di ricerca inesistente:
+#   «cerca l'eccezione nell'app dell'utente» → SEARCH_PATTERN='eccezione nell'
+# Il bot instradava correttamente su search_all_logs (96,7%) e poi cercava nei log
+# quella stringa mutilata, restituendo «nessuna occorrenza» a una domanda che aveva
+# capito — una risposta sbagliata SILENZIOSA. Misurato su 5 formulazioni italiane
+# naturali: 5 fantasmi su 5.
+#
+# Il valore atteso è `__MISSING__`, non vuoto, e la differenza è il punto: c'è un
+# verbo di ricerca ma NESSUNA stringa quotata, quindi param-extract.sh:426 emette il
+# sentinella e search_all_logs.sh:51 chiede all'utente di racchiudere la stringa fra
+# virgolette. L'esito passa da «cerco un frammento mutilato e non trovo nulla» a
+# «non ho capito cosa cercare, dimmelo così» — un fallimento che si dichiara.
+assert_eq "elisione doppia: nessun SEARCH_PATTERN fantasma" "__MISSING__" \
+    "$(_extract "cerca l'eccezione nell'app dell'utente" SEARCH_PATTERN)"
+assert_eq "elisione: 'cerca l'errore nell'app' → nessun pattern" "__MISSING__" \
+    "$(_extract "cerca l'errore nell'app" SEARCH_PATTERN)"
+assert_eq "elisione: 'trova l'eccezione dell'utente' → nessun pattern" "__MISSING__" \
+    "$(_extract "trova l'eccezione dell'utente" SEARCH_PATTERN)"
+assert_eq "elisione: 'cerca un'anomalia nell'ora' → nessun pattern" "__MISSING__" \
+    "$(_extract "cerca un'anomalia nell'ora" SEARCH_PATTERN)"
+assert_eq "elisione: 'cerca nell'access log l'errore' → nessun pattern" "__MISSING__" \
+    "$(_extract "cerca nell'access log l'errore" SEARCH_PATTERN)"
+# La citazione VERA fra apici deve continuare a funzionare: la regola si restringe,
+# non si spegne — il messaggio d'aiuto del bot documenta questa forma.
+assert_eq "citazione vera fra apici: SEARCH_PATTERN estratto" "connection refused" \
+    "$(_extract "cerca 'connection refused' nel nodo 4" SEARCH_PATTERN)"
+
 # NON-REGRESSIONE sull'apostrofo italiano: è lo stesso carattere della virgoletta
 # singola, e una regex ingenua su `'…'` mangerebbe l'espressione temporale
 # facendo DISATTIVARE il filtro in silenzio.
