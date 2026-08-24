@@ -49,6 +49,13 @@ readonly _RE_LAST_N_HOURS="ultim[aeio] [0-9]+ or[ae]"
 readonly _RE_LAST_N_MINS="ultim[aeio] [0-9]+ minut"
 # "ultima ora" (singolo, senza numero)
 readonly _RE_LAST_ONE_HOUR="ultim[aeio] (un[a']? )?ora\b"
+# "ultimi 7 giorni" / "ultima 3 giornate" — RANGE di N giorni di calendario,
+# distinto da _RE_N_DAYS_AGO ("N giorni fa" è UN singolo giorno nel passato) e da
+# _RE_LAST_DAY (senza numero, la giornata in corso). Deve stare PRIMA di
+# _RE_LAST_DAY nella cascata: quest'ultimo, senza numero, matcherebbe anche una
+# frase con numero se valutato per primo (regola "dal più specifico al più
+# generico", vedi il commento all'inizio della cascata in resolve_time_range).
+readonly _RE_LAST_N_DAYS="ultim[aeio] [0-9]+ giorn"
 # "ultima giornata" / "ultimo giorno" / "ultimi giorni"
 readonly _RE_LAST_DAY="ultim[aeio] giorn"
 # "2 giorni fa" / "3 giorni fa"
@@ -329,6 +336,41 @@ resolve_time_range() {
         [[ -n "$now_epoch" ]] && \
             time_from=$(_date -d "@$(( now_epoch - 3600 ))" +%Y-%m-%dT%H:%M 2>/dev/null)
         time_to="${now_date}T${now_hhmm}"
+
+    # ── "ultimi N giorni" ────────────────────────────────────────────────────
+    # RANGE di N giorni di CALENDARIO che finisce oggi (oggi incluso), NON un
+    # offset da ora: "ultimi 7 giorni" sono i 7 giorni interi che terminano oggi,
+    # non 7×24h da adesso. Scelta con l'utente (SRCH-5, 2026-08-24) per due
+    # ragioni misurabili: è coerente con "ieri"/"oggi", che sono giorni interi, e
+    # su un log copre rotazioni INTERE invece di tagliarle a metà giornata —
+    # quindi la risposta non cambia a seconda dell'ora in cui si pone la domanda.
+    #
+    # Deve stare PRIMA di _RE_LAST_DAY: quel pattern è senza numero, quindi più
+    # generico (regola dichiarata a inizio Fase 2). Oggi non collidono comunque —
+    # "ultim[aeio] giorn" non matcha "ultimi 7 giorni" per via del numero
+    # interposto — ma dipendere da quell'assenza di collisione significherebbe che
+    # una futura modifica alla regex più generica rompe questa in silenzio.
+    #
+    # date_filter resta VUOTO di proposito: la frase nomina più giorni, quindi più
+    # rotazioni, e la selezione dei file la guida il range via
+    # select_log_files_grouped — non un singolo giorno. Stessa ragione per cui
+    # "oggi" non lo imposta (vedi Fase 1).
+    #
+    # Il ramo NON usa $anchor_date: come gli offset di sopra produce entrambi gli
+    # estremi da sé. "ieri negli ultimi 3 giorni" non è una frase sensata, quindi
+    # non c'è composizione da preservare.
+    elif _m=$(_qmatch "$query" "$_RE_LAST_N_DAYS"); [[ -n "$_m" ]]; then
+        local d; d=$(_safe_int "$_m")
+        if [[ "$d" -gt 0 ]]; then
+            # N-1: "ultimi 7 giorni" con oggi incluso parte 6 giorni indietro.
+            local _first; _first=$(_date -d "$(( d - 1 )) days ago" +%Y-%m-%d 2>/dev/null)
+            if [[ -n "$_first" ]]; then
+                time_from="${_first}T00:00"
+                time_to="${now_date}T23:59"
+            fi
+        fi
+        # d==0 → nessun range: il chiamante resta sul default di sessione, come
+        # "ultime 0 ore" (input degenere già presidiato dai test).
 
     # ── "ultima giornata" / "ultimo giorno" ──────────────────────────────────
     # "la giornata in corso": da mezzanotte a ORA. Diverso da "oggi", che è il

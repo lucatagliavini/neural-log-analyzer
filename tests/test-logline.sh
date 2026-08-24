@@ -87,6 +87,42 @@ assert_eq "console.log con reset ANSI: riconosciuta come solo-ora, epoch=-1" \
     "1|10:03:37|0|-1|INFO" \
     "$(_parse "$_console_line")"
 
+# ─── La 7a grammatica: timestamp dentro un campo JSON (SRCH-5) ───────────────
+section "logline_parse: log JSON-lines, timestamp in un campo (SRCH-5)"
+
+# Righe REALI dal nodo 4 di produzione, ridotte ai campi utili. Le due forme
+# osservate: separatore spazio (KPI) e separatore "T" con suffisso di timezone
+# testuale (JF4U). Prima di SRCH-5 nessuna delle due era riconosciuta, quindi il
+# filtro temporale riga-per-riga di search_all_logs veniva SALTATO e il conteggio
+# includeva l'intera retention: 61 occorrenze riportate contro 4 corrette.
+_json_kpi='{"UpdateTime":"2026-08-17 10:00:00.352","DocUID":"FSI-20260824025009518-27C266A9","EventType":"MOVE_TO_QUEUE"}'
+_json_jf4u='{"appCode":"LIQ","userId":"UGA03874","time":"2026-08-17T10:00:00.514CEST","entita":"SIN"}'
+
+# Il livello resta VUOTO: un log JSON non ha una posizione convenzionale per
+# ERROR/WARN, e dedurlo dalla forma sarebbe un'assunzione sul singolo cliente.
+assert_eq "JSON con separatore spazio: riconosciuta, datata" \
+    "1|2026-08-17 10:00:00|1|" \
+    "$(_parse "$_json_kpi" | cut -d'|' -f1,2,3,5)"
+assert_eq "JSON con separatore T e suffisso CEST: riconosciuta, datata" \
+    "1|2026-08-17 10:00:00|1|" \
+    "$(_parse "$_json_jf4u" | cut -d'|' -f1,2,3,5)"
+
+# La frazione di secondo con suffisso non deve inquinare l'epoch: se ".514CEST"
+# entrasse nella cattura, parse_iso la troncherebbe per coercizione numerica e
+# l'epoch sarebbe plausibile ma sbagliato. Si confronta con l'epoch atteso
+# calcolato da date(1), cioè da una fonte indipendente da parse_iso.
+_json_exp_epoch=$(date -d "2026-08-17 10:00:00" +%s)
+assert_eq "JSON: epoch corretto, il suffisso di timezone non entra nella cattura" \
+    "$_json_exp_epoch" \
+    "$(_parse "$_json_jf4u" | cut -d'|' -f4)"
+
+# Non-regressione sull'ordine: una riga di ACCESS LOG che contiene un corpo JSON
+# con un campo data deve restare gestita dal ramo 1 (access), che viene prima —
+# il ramo JSON è ultimo proprio per non rubargliela.
+assert_eq "access log con corpo JSON: vince il ramo access, non quello JSON" \
+    "$(date -d '2026-08-17 10:00:00' +%s)" \
+    "$(_parse '10.0.0.1 [17/Aug/2026:10:00:00 +0200] "POST /api {\"time\":\"2020-01-01 00:00:00\"}" 200 1 0 - -' | cut -d'|' -f4)"
+
 # ─── Negativi: gli stessi due del gemello bash ───────────────────────────────
 section "logline_parse: righe non riconosciute → 0 con valori neutri (principio 5)"
 
@@ -108,8 +144,15 @@ printf '[2026-08-17T10:00:00.527+0200][1486515.012s][info][gc,start] GC(1) Pause
 printf '2026-08-17 10:00:00,303 INFO  [classe] messaggio\n'                          > "$_FIX/server.log"
 printf '[thread] USER 2026-08-17T10:00:00,443 INFO messaggio\n'                      > "$_FIX/custom_iso.log"
 printf '17-08-2026 10:00:00.071 INFO  HttpRestClient chiamata\n'                     > "$_FIX/custom_eu.log"
+# Le due forme JSON (SRCH-5). Entrambe nel loop: la parità va verificata su
+# ciascuna, perché prima del fix il gemello bash riconosceva la forma con la "T"
+# (via il ramo ISO non ancorato) e NON quella con lo spazio — una disparità che
+# rendeva il difetto invisibile, perché la selezione dei file sembrava corretta
+# mentre il filtro riga era saltato.
+printf '{"UpdateTime":"2026-08-17 10:00:00.352","DocUID":"FSI-1","EventType":"MOVE_TO_QUEUE"}\n' > "$_FIX/json_space.log"
+printf '{"appCode":"LIQ","userId":"UGA1","time":"2026-08-17T10:00:00.514CEST","entita":"SIN"}\n'  > "$_FIX/json_t.log"
 
-for _f in access gc server custom_iso custom_eu; do
+for _f in access gc server custom_iso custom_eu json_space json_t; do
     _bash_epoch="$(_logfiles_read_first_ts "$_FIX/$_f.log")"
     _awk_epoch="$(_parse "$(cat "$_FIX/$_f.log")" | cut -d'|' -f4)"
     assert_eq "$_f.log: bash e awk concordano sull'epoch" "$_bash_epoch" "$_awk_epoch"

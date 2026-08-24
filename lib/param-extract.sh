@@ -20,7 +20,60 @@ if [[ -n "${PROFILE_DIR:-}" && -f "$PROFILE_DIR/system.conf" ]]; then
     source "$PROFILE_DIR/system.conf"
 fi
 
-query="${1,,}"
+# La regione quotata è la stringa da CERCARE, non linguaggio naturale: nessun
+# estrattore di parametri deve leggerci dentro (SRCH-5, 2026-08-24). Mascherarla
+# QUI, in un punto solo, la sottrae a tutti e nove gli estrattori che leggono
+# $query — TIME_*, STATUS_CODE, THRESHOLD_MS, IP_FILTER, TAIL_N, LOG_ORDER,
+# LOG_LEVEL, NAMED_LOG, SYSLOG_KIND — invece di correggerne uno alla volta
+# (principio 2 e 8: il sintomo osservato era solo NAMED_LOG, ma la causa era
+# comune e tutti e sette gli altri leak sono stati poi misurati veri).
+#
+# Misurato prima del fix, sulla stessa forma di query:
+#   cerca "errore 500 interno"          → STATUS_CODE=500
+#   cerca "chiamata da 10.1.2.3 …"      → IP_FILTER=10.1.2.3
+#   cerca "errori di ieri"              → TIME_FROM=ieri  ← sposta la finestra
+#   cerca "riga di ERROR grave"         → LOG_LEVEL=ERROR
+#   cerca "api-gateway timeout"         → NAMED_LOG=api
+#
+# $1 GREZZO resta disponibile e va usato solo dove lo span serve davvero:
+# l'estrazione di SEARCH_PATTERN e NAMED_LOG_GLOB, in fondo al file.
+source "$SCRIPT_DIR/utils-quoted.sh"
+
+# ECCEZIONE SRCH-4, e non è un dettaglio: un log di SISTEMA fra virgolette è un
+# log che l'utente sta NOMINANDO, non una stringa da cercare — `errori nel
+# "server.log"` chiede il server log, non il testo «server.log». Mascherarlo lo
+# farebbe scomparire, e LOG_TYPE/SYSLOG_KIND perderebbero il nome.
+#
+# È la stessa regola del ramo (a-ter) di normalize-query.sh, sulla stessa fonte di
+# verità condivisa (`system_log_kind_of` in utils-logfiles.sh): là il nome resta
+# letterale dentro NORM_QUERY, qui resta letterale dentro $query. Due pipeline
+# indipendenti, una sola definizione di "cos'è un log di sistema".
+#
+# Trovata da una REGRESSIONE, non per previsione: il mascheramento indiscriminato
+# ha fatto fallire due asserzioni preesistenti su LOG_TYPE. Avevo previsto questa
+# sottigliezza per normalize-query.sh e l'avevo mancata qui — il caso tipico del
+# principio 8, dove la stessa assunzione vive in due punti e se ne corregge uno.
+_pe_unquote_system_logs() {
+    local text="$1" _quo _span
+    for _quo in '"' "'"; do
+        while IFS= read -r _span; do
+            [[ -z "$_span" ]] && continue
+            if [[ -n "$(system_log_kind_of "${_span%.log}" 2>/dev/null)" ]]; then
+                # Parameter expansion e non sed: il contenuto è testo arbitrario
+                # dell'utente e non va reinterpretato come regex.
+                text="${text//${_quo}${_span}${_quo}/${_span}}"
+            fi
+        done < <(grep -oE "${_quo}[^${_quo}]*${_quo}" <<< "$text" \
+                     | sed -e "s/^${_quo}//" -e "s/${_quo}\$//")
+    done
+    printf '%s' "$text"
+}
+
+query="$(mask_quoted "$(_pe_unquote_system_logs "${1,,}")")"
+# Variante a case ORIGINALE, mascherata: serve al fallback <token>.log di
+# NAMED_LOG, che non può usare $query (i nomi di file reali contengono
+# maiuscole) ma non deve nemmeno leggere dentro le virgolette.
+query_orig_masked="$(mask_quoted "$(_pe_unquote_system_logs "$1")")"
 
 # Finestra temporale — delegata a utils-time.sh
 eval "$(resolve_time_range "$query")"
@@ -217,13 +270,18 @@ done
 # inbound_mq_messages, controllo_pagamenti. La risoluzione del path la fa `find` in
 # dispatch.sh, che sa già cosa c'è sul disco.
 #
-# Si usa il case ORIGINALE ($1, non $query lowercase): i nomi reali contengono
+# Si usa il case ORIGINALE (non $query lowercase): i nomi reali contengono
 # maiuscole (ccJBatch, JF4U_TRACKING, concurrentDataChangeExceptionLog) e finiscono
 # in `find -name`, che è case-sensitive.
 #
+# Ma la variante MASCHERATA, non $1 grezzo (SRCH-5): un nome di log CITATO dentro
+# la stringa da cercare — `cerca "vedi database.log per dettagli"` — non è un log
+# che l'utente ha nominato, e trattarlo come tale produceva l'avviso spurio di
+# chatbot.sh:500 su un log che nessuno aveva chiesto.
+#
 # Esclusi i log di infrastruttura (basename da system.conf): hanno tool dedicati.
 if [[ -z "$NAMED_LOG" ]]; then
-    _fb=$(grep -oE "[A-Za-z0-9_.-]+\.log\b" <<< "$1" | head -1)
+    _fb=$(grep -oE "[A-Za-z0-9_.-]+\.log\b" <<< "$query_orig_masked" | head -1)
     if [[ -n "$_fb" ]]; then
         _fb_base="${_fb%.log}"
         _fb_ok=1

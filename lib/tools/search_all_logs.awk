@@ -16,8 +16,17 @@
 # solo scandendo il file per intero si sa qual è il timestamp "corrente" nel
 # punto in cui si trova la riga di stack trace.
 #
-# Output: "hits|first_ts|last_ts|partial" su stdout. partial=1 quando
-# first_ts/last_ts sono solo-ora (nessun match datato nel file), 0 altrimenti.
+# Output: "hits|first_ts|last_ts|partial|unfiltered" su stdout.
+#   partial=1    first_ts/last_ts sono solo-ora (nessun match datato nel file)
+#   unfiltered=N delle `hits`, quante sono state INCLUSE senza che il filtro
+#                temporale potesse valutarle (nessun timestamp, o senza data).
+#                Vale 0 quando non è stato chiesto alcun filtro: non c'è nulla da
+#                dichiarare. Sono due assi DISTINTI e non vanno confusi —
+#                `partial` dice che il min/max è un orario, `unfiltered` dice che
+#                il conteggio comprende righe che la finestra non ha filtrato.
+#                Aggiunto con SRCH-5 (2026-08-24): senza, un'inclusione
+#                conservativa (principio 5) era indistinguibile da un risultato
+#                filtrato, e il numero sbagliato veniva presentato come giusto.
 #
 # Il riconoscimento del timestamp è delegato a logline_parse()
 # (utils-logline.awk): il formato è una proprietà del file (5 grammatiche,
@@ -44,6 +53,10 @@ BEGIN {
     IGNORECASE = 1
     do_filter = (tf != "" || tt != "")
     hits = 0
+    # Occorrenze incluse ma non filtrabili per data (vedi header). Esplicito e
+    # non implicito-zero: è un campo del contratto di output, non una variabile
+    # di comodo.
+    unfiltered = 0
     # Due min/max SEPARATI (datato / solo-ora): mai mescolati, perché il
     # confronto è per stringa e "10:03:37" ordina sempre prima di qualsiasi
     # "2026-...". In END si emette il datato se esiste almeno un match
@@ -85,6 +98,19 @@ FNR == NR && !single_pass {
     if (do_filter && eff_ts != "" && eff_has_date) {
         if (tf != "" && eff_ts < tf) next
         if (tt != "" && eff_ts > tt) next
+    } else if (do_filter) {
+        # La riga viene INCLUSA (principio 5) ma il filtro non ha potuto
+        # valutarla: nessun timestamp, o un timestamp senza data. Contarla in
+        # silenzio è ciò che ha prodotto l'errore di 15,25× misurato in
+        # produzione con SRCH-5 (61 occorrenze riportate contro 4 corrette su una
+        # query filtrata per oggi). Il conteggio risale al chiamante, che lo
+        # dichiara in tabella: l'inclusione resta conservativa, ma non è più
+        # indistinguibile da un risultato filtrato.
+        #
+        # Un CONTATORE e non un flag per-file: un log può essere MISTO — righe
+        # datate e righe senza timestamp nello stesso file — e in quel caso un
+        # flag direbbe "tutto sospetto" o "niente sospetto", entrambi falsi.
+        unfiltered++
     }
 
     hits++
@@ -130,9 +156,9 @@ END {
     # il primo/ultimo evento cronologico: limite del log (console.log non
     # scrive la data), non del tool.
     if (first_ts_dated != "")
-        printf "%d|%s|%s|0\n", hits, first_ts_dated, last_ts_dated
+        printf "%d|%s|%s|0|%d\n", hits, first_ts_dated, last_ts_dated, unfiltered
     else if (first_ts_time != "")
-        printf "%d|%s|%s|1\n", hits, first_ts_time, last_ts_time
+        printf "%d|%s|%s|1|%d\n", hits, first_ts_time, last_ts_time, unfiltered
     else
-        printf "%d|%s|%s|0\n", hits, "", ""
+        printf "%d|%s|%s|0|%d\n", hits, "", "", unfiltered
 }

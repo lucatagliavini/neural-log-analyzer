@@ -292,6 +292,82 @@ assert_contains "glob quotato resta <LOGFILE>" "$NORM_QUERY" "<LOGFILE>"
 _run 'cerca "NullPointerException" in tutti i log'
 assert_contains "stringa non-log resta <PATTERN>" "$NORM_QUERY" "<PATTERN>"
 
+# ─── SRCH-5: le entità NON si rilevano dentro la regione quotata ──────────────
+echo "── SRCH-5: la stringa cercata non decide dove si cerca ──────────────────"
+
+# Il difetto misurato in produzione il 2026-08-24: con `--node 4` sulla riga di
+# comando E "nel nodo 4" nella query, il bot ha cercato sul NODO 07 — perché
+# "nodo 7" stava dentro la stringa da cercare. La stringa CERCATA decideva DOVE
+# si cercava.
+_run 'cerca "chiamata al nodo 7" nel nodo 4'
+assert_eq "il nodo dentro le virgolette non sovrascrive quello chiesto" \
+    "$DETECTED_NODE" "4"
+
+_run 'cerca "utente su ContactManager" nel nodo 4'
+assert_eq "l'app dentro le virgolette non imposta DETECTED_APP" \
+    "$DETECTED_APP" ""
+assert_eq "  e il nodo fuori dalle virgolette resta letto" "$DETECTED_NODE" "4"
+
+_run 'cerca "errore in prod" in coll'
+assert_eq "l'ambiente dentro le virgolette non vince su quello chiesto" \
+    "$DETECTED_ENV" "coll"
+
+# Le entità FUORI dalle virgolette devono continuare a essere rilevate: il
+# mascheramento protegge, non deve rendere il bot sordo.
+_run 'cerca "NullPointerException" su ClaimCenter in prod nodo 3'
+assert_eq "app fuori dalle virgolette: rilevata" "$DETECTED_APP" "claimcenter"
+assert_eq "env fuori dalle virgolette: rilevato" "$DETECTED_ENV" "prod"
+assert_eq "nodo fuori dalle virgolette: rilevato" "$DETECTED_NODE" "3"
+
+# NORM_QUERY resta la forma attesa: il mascheramento è un passo INTERMEDIO e il
+# risultato finale non cambia — è ciò che garantisce che il dataset e quindi il
+# modello non vadano toccati (nessun retrain).
+_run 'cerca "chiamata al nodo 7" nel nodo 4'
+assert_contains "NORM_QUERY contiene ancora <PATTERN>" "$NORM_QUERY" "<PATTERN>"
+assert_contains "NORM_QUERY contiene ancora <NODE>"    "$NORM_QUERY" "<NODE>"
+
+echo "── SRCH-5: l'apostrofo italiano non è una citazione ─────────────────────"
+
+# In italiano l'apostrofo è graficamente lo stesso carattere della virgoletta
+# singola. Il ramo (a-bis) usava `'[^']*'` senza delimitatori, quindi due
+# apostrofi di elisione venivano letti come una citazione:
+#   «errori nell'ultima ora dell'app» → «errori nell<PATTERN>app»
+# L'espressione temporale spariva dal vettore di feature. Misurato sul
+# classificatore: confidenza 66,2% → 56,8%, e search_all_logs compariva al 13,3%
+# perché <PATTERN> È il segnale "c'è una stringa da cercare".
+# Mai emerso perché ZERO delle 1171 query etichettate contiene un apostrofo.
+# NB: "app" NON è un alias applicativo (APP_SHORT_ALIASES ha solo cc e cm), quindi
+# resta testo comune: la query attraversa la normalizzazione INVARIATA, ed è
+# esattamente questo il punto.
+_run "errori nell'ultima ora dell'app"
+assert_eq "due apostrofi di elisione NON diventano <PATTERN>" \
+    "$NORM_QUERY" "errori nell'ultima ora dell'app"
+_run "errori nell'ultima ora"
+assert_eq "un apostrofo singolo resta intatto (non-regressione)" \
+    "$NORM_QUERY" "errori nell'ultima ora"
+_run "l'errore dell'utente nell'app di ieri"
+assert_eq "tre apostrofi: nessuno diventa <PATTERN>" \
+    "$NORM_QUERY" "l'errore dell'utente nell'app di ieri"
+
+# Una citazione VERA con apici singoli deve continuare a diventare <PATTERN>: la
+# correzione RESTRINGE la regola, non la disattiva. Il bot documenta gli apici
+# singoli come forma valida nel proprio messaggio d'aiuto, quindi devono funzionare.
+_run "trova 'connection refused' in prod"
+assert_contains "citazione vera con apici singoli → <PATTERN>" "$NORM_QUERY" "<PATTERN>"
+
+# LIMITE DICHIARATO, non difetto: una citazione fra apici singoli non può
+# contenere un apostrofo, perché nessuna regola locale distingue
+# `'errore nell'app'` (citazione con elisione dentro) da due elisioni di seguito —
+# è la stessa ambiguità che ha reso possibile il difetto, vista dall'altro lato.
+# Vale lo stesso vincolo del quoting di shell, e il rimedio è identico: usare le
+# virgolette doppie. Asserito perché il comportamento sia scelto e verificato,
+# non scoperto da un utente.
+_run "trova 'errore nell'app' in prod"
+assert_eq "apostrofo DENTRO apici singoli: non è una citazione (limite noto)" \
+    "$NORM_QUERY" "trova 'errore nell'app' in <ENV>"
+_run 'trova "errore nell'"'"'app" in prod'
+assert_contains "  e con le virgolette doppie funziona" "$NORM_QUERY" "<PATTERN>"
+
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
 printf "═══════════════════════════════════════════════════\n"

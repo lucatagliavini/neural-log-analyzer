@@ -488,7 +488,10 @@ _AWKT="$ROOT_DIR/lib/tools/search_all_logs.awk"
 _TIME_AWK="$ROOT_DIR/lib/utils-time.awk"
 _LOGLINE_AWK="$ROOT_DIR/lib/utils-logline.awk"
 _TF="2026-08-05 16:00:00"; _TT="2026-08-05 16:59:59"
-_EXPECT="3|2026-08-05 16:30:00|2026-08-05 16:30:00|0"
+# 5° campo = unfiltered (SRCH-5). Qui un filtro È attivo (_TF/_TT sopra) e il log
+# ha timestamp riconoscibili su tutte le righe: quindi 0 è un'asserzione con un
+# contenuto, non un riempitivo — dice che nulla è sfuggito al filtro.
+_EXPECT="3|2026-08-05 16:30:00|2026-08-05 16:30:00|0|0"
 
 _r_gated=$(gawk -v pat="searchHub" -v tf="$_TF" -v tt="$_TT" -v gated=1 -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWKT" "$_FIX7/t.log")
 _r_2pass=$(gawk -v pat="searchHub" -v tf="$_TF" -v tt="$_TT" -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWKT" "$_FIX7/t.log" "$_FIX7/t.log")
@@ -521,7 +524,7 @@ EOF
 
 _r_time=$(gawk -v pat="searchHub" -v gated=1 -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWKT" "$_FIX8/console.log")
 assert_true "file solo-ora: min/max sull'orario, partial=1 ($_r_time)" \
-    "$([[ "$_r_time" == "3|01:00:00|23:51:02|1" ]] && echo 1 || echo 0)"
+    "$([[ "$_r_time" == "3|01:00:00|23:51:02|1|0" ]] && echo 1 || echo 0)"
 
 # File MISTO (righe datate + righe solo-ora, es. una riga di continuazione senza
 # timestamp proprio che eredita comunque "solo ora" da un file diverso da quello
@@ -538,9 +541,117 @@ EOF
 
 _r_mixed=$(gawk -v pat="searchHub" -v gated=1 -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWKT" "$_FIX8/mixed.log")
 assert_true "file misto: il datato vince e non si mescola col solo-ora ($_r_mixed)" \
-    "$([[ "$_r_mixed" == "4|2026-08-18 09:15:00|2026-08-18 14:30:29|0" ]] && echo 1 || echo 0)"
+    "$([[ "$_r_mixed" == "4|2026-08-18 09:15:00|2026-08-18 14:30:29|0|0" ]] && echo 1 || echo 0)"
 
 rm -rf "$_FIX8"
+
+# ─── SRCH-5: occorrenze incluse ma NON filtrabili per data ────────────────────
+section "SRCH-5: filtro temporale su log JSON e dichiarazione del non filtrabile"
+
+# Il difetto: una riga il cui timestamp non è riconoscibile viene INCLUSA
+# (principio 5) ma il filtro non la valuta — e prima veniva contata in silenzio.
+# Misurato in produzione il 2026-08-24: 61 occorrenze riportate contro 4
+# corrette su una query filtrata per oggi, cioè 15,25×.
+_FIX9="$(mktemp -d)"
+_AWKT="$ROOT_DIR/lib/tools/search_all_logs.awk"
+_TIME_AWK="$ROOT_DIR/lib/utils-time.awk"
+_LOGLINE_AWK="$ROOT_DIR/lib/utils-logline.awk"
+
+# (a) Log JSON su due giorni: ora che la grammatica lo riconosce (SRCH-5), il
+#     filtro deve ESCLUDERE la riga fuori finestra. È la riproduzione minima del
+#     difetto da 15,25×: prima entrambe le righe venivano contate.
+cat > "$_FIX9/kpi.log" <<'EOF'
+{"UpdateTime":"2026-08-15 10:00:00.352","DocUID":"VECCHIA","EventType":"MOVE_TO_QUEUE"}
+{"UpdateTime":"2026-08-24 11:00:00.352","DocUID":"OGGI","EventType":"MOVE_TO_QUEUE"}
+EOF
+_r_json=$(gawk -v pat="MOVE_TO_QUEUE" -v tf="2026-08-24 00:00:00" -v tt="2026-08-24 23:59:59" \
+    -v gated=1 -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWKT" "$_FIX9/kpi.log")
+assert_true "JSON: la riga fuori finestra è esclusa, unfiltered=0 ($_r_json)" \
+    "$([[ "$_r_json" == "1|2026-08-24 11:00:00|2026-08-24 11:00:00|0|0" ]] && echo 1 || echo 0)"
+
+# (b) Log SENZA alcun timestamp riconoscibile + filtro attivo: le righe restano
+#     incluse (principio 5) ma vanno DICHIARATE.
+cat > "$_FIX9/nots.log" <<'EOF'
+riga senza timestamp con MOVE_TO_QUEUE dentro
+altra riga con MOVE_TO_QUEUE
+EOF
+_r_nots=$(gawk -v pat="MOVE_TO_QUEUE" -v tf="2026-08-24 00:00:00" -v tt="2026-08-24 23:59:59" \
+    -v gated=1 -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWKT" "$_FIX9/nots.log")
+assert_true "senza timestamp + filtro: incluse (2) e dichiarate (unfiltered=2) ($_r_nots)" \
+    "$([[ "$_r_nots" == "2|||0|2" ]] && echo 1 || echo 0)"
+
+# (c) Lo STESSO file senza filtro: unfiltered=0. Non c'è nulla da dichiarare se
+#     non è stata chiesta una finestra — altrimenti la nota sarebbe rumore su
+#     ogni ricerca non filtrata.
+_r_nofilter=$(gawk -v pat="MOVE_TO_QUEUE" -v gated=1 \
+    -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWKT" "$_FIX9/nots.log")
+assert_true "senza filtro: unfiltered=0, niente da dichiarare ($_r_nofilter)" \
+    "$([[ "$_r_nofilter" == "2|||0|0" ]] && echo 1 || echo 0)"
+
+# (d) File MISTO. Attenzione, e la distinzione NON è accademica: "senza data" non
+#     significa "non filtrabile". Una riga priva di timestamp EREDITA quello
+#     dell'ultima riga datata vista (il meccanismo che tiene insieme una stack
+#     trace con la sua eccezione, bug reale del 2026-08-05), quindi se una riga
+#     datata la precede la riga È filtrabile e NON va dichiarata.
+#     Non filtrabile è solo la riga che non ha nulla da cui ereditare: qui la
+#     prima del file. Le due asserzioni sotto verificano entrambi gli ordini —
+#     senza la seconda, il test misurerebbe l'eredità credendo di misurare il
+#     contatore.
+cat > "$_FIX9/misto_pre.log" <<'EOF'
+riga senza timestamp con MOVE_TO_QUEUE, nulla da cui ereditare
+2026-08-24 11:00:00,123 INFO  [c] MOVE_TO_QUEUE datata e in finestra
+EOF
+_r_pre=$(gawk -v pat="MOVE_TO_QUEUE" -v tf="2026-08-24 00:00:00" -v tt="2026-08-24 23:59:59" \
+    -v gated=1 -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWKT" "$_FIX9/misto_pre.log")
+assert_true "misto, non datata PRIMA: unfiltered=1 (nulla da ereditare) ($_r_pre)" \
+    "$([[ "$_r_pre" == "2|2026-08-24 11:00:00|2026-08-24 11:00:00|0|1" ]] && echo 1 || echo 0)"
+
+cat > "$_FIX9/misto_post.log" <<'EOF'
+2026-08-24 11:00:00,123 INFO  [c] MOVE_TO_QUEUE datata e in finestra
+	at qualcosa.MOVE_TO_QUEUE(File.java:1)
+EOF
+_r_post=$(gawk -v pat="MOVE_TO_QUEUE" -v tf="2026-08-24 00:00:00" -v tt="2026-08-24 23:59:59" \
+    -v gated=1 -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWKT" "$_FIX9/misto_post.log")
+assert_true "misto, continuazione DOPO: unfiltered=0 (eredita, quindi filtrabile) ($_r_post)" \
+    "$([[ "$_r_post" == "2|2026-08-24 11:00:00|2026-08-24 11:00:00|0|0" ]] && echo 1 || echo 0)"
+
+rm -rf "$_FIX9"
+
+# (e) Resa a schermo: marcatore "!" e nota. Senza questi il contatore esisterebbe
+#     nel contratto e non raggiungerebbe l'utente — cioè il difetto resterebbe
+#     silenzioso, che è esattamente ciò che si sta correggendo.
+_FIX10="$(mktemp -d)"
+_node10_dir="$_FIX10/prod/lxprjbliq04"
+mkdir -p "$_node10_dir/ClaimCenter/Guidewire"
+printf 'riga senza timestamp con searchHub dentro\n' \
+    > "$_node10_dir/ClaimCenter/Guidewire/senzats.log"
+
+export LOG_BASE_DIR="$_FIX10"
+export DETECTED_NODE="04" ACTIVE_NODE="04"
+export LOG_SEARCH_ROOT="$_node10_dir"
+export SEARCH_PATTERN="searchHub"
+export TIME_FROM="2026-08-24T00:00" TIME_TO="2026-08-24T23:59"
+
+_out10=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>/dev/null | _strip_ansi)
+unset TIME_FROM TIME_TO
+rm -rf "$_FIX10"
+
+# Radice "NON filtrat" per non dipendere dalla concordanza, che è verificata a
+# parte dalle due asserzioni sotto.
+assert_true "output: la nota '!' dichiara le occorrenze non filtrate" \
+    "$([[ "$_out10" == *"NON filtrat"*"per data"* ]] && echo 1 || echo 0)"
+# Concordanza al singolare: con UNA sola occorrenza la nota deve essere in
+# italiano corretto ("1 occorrenza NON filtrata"), non "1 occorrenze NON filtrate".
+assert_true "output: la nota nomina il numero e concorda al singolare" \
+    "$([[ "$_out10" == *"! 1 occorrenza NON filtrata"* ]] && echo 1 || echo 0)"
+assert_true "output: al singolare anche il resto della frase concorda" \
+    "$([[ "$_out10" == *"è inclusa per prudenza e può cadere"* ]] && echo 1 || echo 0)"
+assert_true "output: la riga porta il marcatore '!'" \
+    "$(grep -qE 'senzats\.log.* 1 *!' <<< "$_out10" && echo 1 || echo 0)"
+# La nota "!" e la nota "*" dicono cose diverse e non devono essere confuse: qui
+# non c'è alcun timestamp, quindi la nota del solo-orario NON deve comparire.
+assert_true "output: la nota '*' (solo orario) non compare quando non c'entra" \
+    "$([[ "$_out10" != *"solo orario"* ]] && echo 1 || echo 0)"
 
 # ─── Metriche di performance: contratto BOT_PERF_FILE ─────────────────────────
 section "Metriche di performance (BOT_PERF_FILE)"

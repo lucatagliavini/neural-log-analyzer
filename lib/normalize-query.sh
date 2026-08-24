@@ -46,6 +46,41 @@ DETECTED_APP=""
 DETECTED_ENV=""
 DETECTED_NODE=""
 
+# ─── SRCH-5: la regione quotata si SOTTRAE al rilevamento entità ──────────────
+#
+# La parte fra virgolette è la stringa che l'utente vuole CERCARE, cioè l'unico
+# pezzo della frase che non è linguaggio naturale. Le sezioni 1-3 qui sotto
+# leggevano anche là dentro, con questo esito misurato in produzione il
+# 2026-08-24:
+#
+#   cerca "chiamata al nodo 7" nel nodo 4   → DETECTED_NODE=7, e il bot ha
+#                                             cercato sul nodo 07 nonostante
+#                                             `--node 4` sulla riga di comando
+#   cerca "utente su ContactManager"        → DETECTED_APP=contactmanager
+#
+# cioè la stringa CERCATA decideva DOVE si cercava.
+#
+# Perché mascherare-e-ripristinare invece di spostare le sezioni: il blocco che
+# trasforma la regione quotata in <LOGFILE>/<PATTERN> (sezione a, a-ter, a-bis
+# sotto) ha quattro sotto-rami in ordine deliberato, e uno di essi — SRCH-4 —
+# RIMUOVE le virgolette lasciando il nome di log letterale. Spostarlo prima delle
+# sezioni 1-3 esporrebbe quel nome letterale esattamente alle sezioni da cui lo
+# stiamo proteggendo: sposterebbe il difetto, non lo chiuderebbe. Così invece quel
+# blocco continua a vedere ciò che vedeva prima, ed è anche la ragione per cui
+# NORM_QUERY resta identico su tutte le query del dataset — verificato sulle 36
+# con virgolette, quindi nessun retrain.
+#
+# La sezione 4 (APP_SHORT_ALIASES) gira già DOPO quel blocco: era la prova, già
+# presente nel file, che l'ordine corretto è questo.
+#
+# La normalizzazione IP resta prima: un IP dentro le virgolette è comunque un IP
+# per forma, e <IP> non è un'entità di sessione — non decide dove si cerca.
+source "$(dirname "${BASH_SOURCE[0]}")/utils-quoted.sh"
+mapfile -t _nq_spans < <(quoted_spans_of "$norm_query")
+if [[ "${#_nq_spans[@]}" -gt 0 ]]; then
+    norm_query="$(mask_quoted "$norm_query")"
+fi
+
 # ─── 0. Normalizzazione IP → <IP> ─────────────────────────────────────────────
 # Un indirizzo IPv4 letterale diventa <IP>, come un nome di log diventa <LOGFILE>
 # e una stringa quotata <PATTERN>: riconoscimento per FORMA, non per elenco.
@@ -155,6 +190,18 @@ if [[ -z "$DETECTED_NODE" ]]; then
     done
 fi
 
+# ─── SRCH-5: ripristino della regione quotata ─────────────────────────────────
+# Le entità sono state rilevate (sezioni 1-3) senza poter leggere dentro le
+# virgolette. Da qui in avanti il contenuto quotato serve DAVVERO — la sezione 3.5
+# deve distinguere un glob, un nome di log di sistema e una stringa di ricerca —
+# quindi si rimette esattamente com'era.
+#
+# Ripristino in ORDINE e con espansione di parametro (vedi utils-quoted.sh): il
+# testo è dell'utente e non va reinterpretato né come regex né come rimpiazzo sed.
+if [[ "${#_nq_spans[@]}" -gt 0 ]]; then
+    norm_query="$(unmask_quoted "$norm_query" "${_nq_spans[@]}")"
+fi
+
 # ─── 3.5 Normalizzazione LOGFILE ──────────────────────────────────────────────
 # Sostituisce i nomi di file di log con <LOGFILE>, così il classificatore impara
 # la *forma* "c'è un nome di logfile qui" e non l'elenco dei nomi. Un nome nel
@@ -234,10 +281,36 @@ fi
 #    il contenuto letterale (es. "NullPointerException") non è nel vocabolario.
 #    Deve girare DOPO la (a): glob-like vince sempre, quindi
 #    'cerca "*errore*.log"' diventa <LOGFILE> e non anche <PATTERN>.
+#
+#    APOSTROFO (corretto 2026-08-24, SRCH-5): il ramo con gli apici singoli usava
+#    `'[^']*'` senza delimitatori, e in italiano l'apostrofo è graficamente lo
+#    stesso carattere della virgoletta singola. Esito misurato su una frase
+#    ordinaria:
+#      «errori nell'ultima ora dell'app» → «errori nell<PATTERN>app»
+#    cioè l'espressione temporale spariva dal vettore di feature. Misurato sul
+#    classificatore: la confidenza scendeva da 66,2% a 56,8% e `search_all_logs`
+#    compariva al 13,3% — perché <PATTERN> è per costruzione il segnale «qui c'è
+#    una stringa da cercare», che in quella frase nessuno aveva chiesto.
+#
+#    Sopravvissuto a lungo perché ZERO delle 1171 query etichettate contiene un
+#    apostrofo: il dataset non rappresentava la forma più naturale dell'italiano,
+#    quindi nessun test poteva inciampare nel difetto.
+#
+#    La regola corretta vive in utils-quoted.sh (una coppia di apici è una
+#    citazione solo se DELIMITATA da spazi o dagli estremi): questo ramo era un
+#    chiamante non migrato, il caso letterale del principio 8. Si usa `mask_quoted`
+#    per individuare gli span e poi si sostituisce il segnaposto, così esiste una
+#    sola definizione di "regione quotata" in tutto il progetto.
 if echo "$norm_query" | grep -qE '"[^"]*"'; then
     norm_query=$(echo "$norm_query" | sed -E 's/"[^"]*"/<PATTERN>/g')
-elif echo "$norm_query" | grep -qE "'[^']*'"; then
-    norm_query=$(echo "$norm_query" | sed -E "s/'[^']*'/<PATTERN>/g")
+else
+    # mask_quoted marca gli span con la sentinella applicando la regola dei
+    # delimitatori; qui la sentinella diventa <PATTERN>. Se non ci sono span
+    # (apostrofi di elisione) la stringa torna identica e nulla cambia.
+    _nq_masked="$(mask_quoted "$norm_query")"
+    if [[ "$_nq_masked" != "$norm_query" ]]; then
+        norm_query="${_nq_masked//"$_Q_SENTINEL"/<PATTERN>}"
+    fi
 fi
 
 # b) Qualsiasi nome di logfile: "<token>.log" → <LOGFILE>.

@@ -245,6 +245,18 @@ assert_span "adesso → 30 min"             "errori adesso"               30
 assert_range "ultima giornata → 00:00-ora" "errori nell'ultima giornata" "${TODAY}T00:00" "NOW"
 assert_range "ultimo giorno → 00:00-ora"   "errori nell'ultimo giorno"   "${TODAY}T00:00" "NOW"
 
+# "ultimi N giorni" = RANGE di N giorni di calendario che FINISCE oggi (oggi
+# incluso): da (oggi-(N-1)) 00:00 a oggi 23:59. Semantica scelta con l'utente
+# (SRCH-5, 2026-08-24): coerente con "ieri"/"oggi" (giorni di calendario interi)
+# e utile su un log, dove copre rotazioni intere e non mezze giornate. Diverso da
+# "ultima giornata" (00:00→ORA di oggi) e da "N giorni fa" (UN giorno nel passato).
+_d6=$(date -d "6 days ago" +%Y-%m-%d)   # ultimi 7 giorni → 7 giorni interi (oggi + 6 indietro)
+_d2b=$(date -d "2 days ago" +%Y-%m-%d)  # ultimi 3 giorni
+assert_range "ultimi 7 giorni → 7 gg calendario" "errori negli ultimi 7 giorni" "${_d6}T00:00" "${TODAY}T23:59"
+assert_range "ultimi 3 giorni → 3 gg calendario" "errori negli ultimi 3 giorni" "${_d2b}T00:00" "${TODAY}T23:59"
+# "ultimo giorno" (senza numero) NON deve cadere sul ramo nuovo: resta 00:00→ORA.
+assert_range "ultimo giorno resta invariato"     "errori nell'ultimo giorno"    "${TODAY}T00:00" "NOW"
+
 # ─── 6. PRECEDENZA nella cascata ──────────────────────────────────────────────
 # La sezione più importante del file. utils-time.sh:126-128 dichiara la regola:
 # "ordinati dal più specifico al più generico per evitare che un pattern breve
@@ -305,6 +317,7 @@ assert_var "query senza tempo → TIME_TO vuoto"   "errori nel cc.log"      TIME
 assert_var "query vuota → TIME_FROM vuoto"       ""                        TIME_FROM ""
 assert_var "'ultime 0 ore' → nessun range"       "errori ultime 0 ore"    TIME_FROM ""
 assert_var "'0 giorni fa' → nessun range"        "errori 0 giorni fa"     TIME_FROM ""
+assert_var "'ultimi 0 giorni' → nessun range"    "errori ultimi 0 giorni" TIME_FROM ""
 # "primavera" contiene "prima" ma non è un'espressione temporale risolvibile:
 # stesso falso positivo già presidiato per LOG_ORDER in test-param-extract.sh.
 assert_var "'primavera' non è un range"          "errori di primavera"    TIME_FROM ""

@@ -248,6 +248,48 @@ def _word_sub(norm, literal, replacement):
     return re.sub(pat, r'\1' + replacement + r'\2', norm, flags=re.IGNORECASE)
 
 
+# SRCH-5 — isolamento della regione quotata. Replica di lib/utils-quoted.sh, che
+# è il gemello bash: le due implementazioni devono restare in parità (verificata
+# da tests/run-tests.sh --parity su tutte le query etichettate).
+#
+# Sentinella: un singolo byte SOH, come in bash. Senza CIFRE e senza LETTERE di
+# proposito — una sentinella con indice numerico fabbricherebbe un falso
+# parametro, e una con lettere potrebbe essere letta come nome di app o ambiente.
+_Q_SENTINEL = '\x01'
+# Alternanza in UNA scansione: `re.finditer` procede da sinistra a destra su match
+# non sovrapposti, quindi l'ordine è POSIZIONALE. Requisito, non eleganza: il
+# ripristino accoppia la prima sentinella al primo span, e raggruppare per tipo di
+# virgoletta scambierebbe gli span su una query che usa entrambi i tipi.
+#
+# Le doppie non hanno condizioni: in italiano non hanno altro uso. Le SINGOLE sì,
+# perché l'apostrofo è graficamente lo stesso carattere — su
+# «errori nell'ultima ora dell'app» una regex `'[^']*'` mangerebbe l'espressione
+# temporale e il filtro si disattiverebbe in silenzio. Quindi una coppia di apici
+# conta come citazione solo se DELIMITATA da spazi o dagli estremi della stringa.
+_Q_SPAN_RE = re.compile(r'"[^"]*"' r"|(?:^|\s)'[^']*'(?:\s|$)")
+
+
+def _quoted_spans(text):
+    """Span quotati, virgolette incluse, in ordine posizionale."""
+    return [m.group(0).strip() for m in _Q_SPAN_RE.finditer(text)]
+
+
+def _mask_quoted(text):
+    """Sostituisce ogni span quotato con la sentinella."""
+    text = re.sub(r'"[^"]*"', _Q_SENTINEL, text)
+    # \1 e \2 preservano i delimitatori: senza, due span adiacenti si
+    # incollerebbero e una parola confinante perderebbe il proprio spazio.
+    text = re.sub(r"(^|\s)'[^']*'(\s|$)", r'\1' + _Q_SENTINEL + r'\2', text)
+    return text
+
+
+def _unmask_quoted(text, spans):
+    """Inverso di _mask_quoted: ripristina in ordine, uno span per sentinella."""
+    for span in spans:
+        text = text.replace(_Q_SENTINEL, span, 1)
+    return text
+
+
 def normalize_query(query, cfg):
     norm = query.lower()
 
@@ -257,6 +299,17 @@ def normalize_query(query, cfg):
     #    I confini \b coincidono fra sed -E e re: il punto non è un word char, quindi
     #    le due implementazioni delimitano gli stessi span.
     norm = re.sub(r'\b([0-9]{1,3}\.){3}[0-9]{1,3}\b', '<IP>', norm)
+
+    # SRCH-5 — la regione quotata si SOTTRAE al rilevamento entità (sezioni 1-3).
+    # Replica di normalize-query.sh: la stringa fra virgolette è ciò che l'utente
+    # vuole CERCARE, e leggerci dentro faceva sì che decidesse DOVE si cerca —
+    # misurato in produzione, `cerca "chiamata al nodo 7" nel nodo 4` cercava sul
+    # nodo 07. Si ripristina prima della sezione 3.5, che del contenuto quotato ha
+    # davvero bisogno (glob / log di sistema / pattern).
+    # L'IP resta normalizzato prima: <IP> è una forma, non un'entità di sessione.
+    _nq_spans = _quoted_spans(norm)
+    if _nq_spans:
+        norm = _mask_quoted(norm)
 
     # 1. APP (longest-match)
     detected_app = ''
@@ -310,6 +363,12 @@ def normalize_query(query, cfg):
                 norm = re.sub(pat, '<NODE>', norm, flags=re.IGNORECASE)
                 break
 
+    # SRCH-5 — ripristino della regione quotata, prima della 3.5 che ne ha bisogno.
+    # Stesso punto del gemello bash: le entità sono già state rilevate senza poter
+    # leggere dentro le virgolette, e da qui in avanti il contenuto serve davvero.
+    if _nq_spans:
+        norm = _unmask_quoted(norm, _nq_spans)
+
     # 3.5 LOGFILE — replica normalize-query.sh sezione 3.5.
     # Sta fra NODE e APP_SHORT_ALIASES: dopo la sezione 1 perché un nome app completo
     # vince sempre, prima della 4 perché `\bcc\b` matcha dentro "cc.log" (il "." è
@@ -349,10 +408,22 @@ def normalize_query(query, cfg):
 
     # a-bis) Qualsiasi stringa quotata RESTANTE (non glob-like) → <PATTERN>.
     #    Simmetrico a <LOGFILE>; deve girare DOPO la (a), stessa priorità.
+    #
+    #    APOSTROFO (corretto 2026-08-24, SRCH-5): il ramo con gli apici singoli
+    #    usava `'[^']*'` senza delimitatori, e in italiano l'apostrofo è lo stesso
+    #    carattere della virgoletta singola. «errori nell'ultima ora dell'app»
+    #    diventava «errori nell<PATTERN>app»: l'espressione temporale spariva dal
+    #    vettore. Misurato: confidenza 66,2% → 56,8% e search_all_logs spurio al
+    #    13,3%. Sopravvissuto perché ZERO delle 1171 query etichettate contiene un
+    #    apostrofo — il dataset non rappresentava la forma naturale dell'italiano.
+    #    La regola vive in _mask_quoted (gemello di lib/utils-quoted.sh): questo
+    #    ramo era un chiamante non migrato.
     if re.search(r'"[^"]*"', norm):
         norm = re.sub(r'"[^"]*"', '<PATTERN>', norm)
-    elif re.search(r"'[^']*'", norm):
-        norm = re.sub(r"'[^']*'", '<PATTERN>', norm)
+    else:
+        _masked = _mask_quoted(norm)
+        if _masked != norm:
+            norm = _masked.replace(_Q_SENTINEL, '<PATTERN>')
 
     # b) Qualsiasi "<token>.log" → <LOGFILE>, non solo i nomi noti: sul nodo di
     #    produzione ci sono 28 log distinti e APP_LOG_NAMES ne elenca 16, quindi una

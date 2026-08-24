@@ -150,5 +150,45 @@ function logline_parse(    line, a) {
         return 1
     }
 
+    # 7) Timestamp dentro un CAMPO JSON (log JSON-lines):
+    #      {"UpdateTime":"2026-08-24 03:08:01.352","DocUID":"…"}   (spazio)
+    #      {"appCode":"LIQ",…,"time":"2026-08-24T07:12:12.514CEST",…}  (T + tz)
+    #
+    #    Aggiunto per SRCH-5 (2026-08-24) dopo aver misurato in produzione un
+    #    errore di 15,25× su una query filtrata per data: 61 occorrenze riportate
+    #    contro 4 corrette. Senza questo ramo il filtro riga di
+    #    search_all_logs.awk non si applica (richiede _ll_has_date) e le righe
+    #    passano tutte, quindi il conteggio includeva l'intera retention.
+    #
+    #    ULTIMO, e la ragione è verificata ramo per ramo, non presunta: nessuno
+    #    dei 6 sopra matcha una riga JSON — 1 e 2 richiedono la parentesi quadra,
+    #    3, 5 e 6 sono ancorati a `^` e la riga apre con `{`, 4 richiede un LEVEL
+    #    dopo il timestamp che una riga JSON non ha. Non c'è quindi
+    #    ombreggiamento possibile; e stare per ultimo PROTEGGE il caso inverso —
+    #    una riga di access log che contenga un corpo JSON resta gestita dal
+    #    ramo 1, che viene prima.
+    #
+    #    La cattura tiene data e ora SEPARATE e le ricompone con "T" per
+    #    parse_iso(): così la forma con lo spazio e quella con la "T" convergono
+    #    su un solo punto di conversione, e la frazione di secondo con eventuale
+    #    suffisso di timezone (".514CEST") resta FUORI dalla cattura invece di
+    #    essere troncata per coercizione numerica dentro parse_iso.
+    if (match(line, /"[^"]*":"([0-9]{4}-[0-9]{2}-[0-9]{2})[ T]([0-9]{2}:[0-9]{2}:[0-9]{2})/, a)) {
+        _ll_epoch = parse_iso(a[1] "T" a[2])
+        if (_ll_epoch > 0) {
+            _ll_has_date = 1
+            _ll_ts = a[1] " " a[2]
+            # Nessun livello: un log JSON non ha una posizione convenzionale per
+            # ERROR/WARN — il livello, se esiste, è un campo fra gli altri e
+            # dedurlo dalla forma sarebbe un'assunzione sul singolo cliente.
+            # _ll_msg è la riga INTERA, non il resto dopo il timestamp: il campo
+            # può stare in mezzo all'oggetto (in JF4U è il terzo), quindi
+            # troncare a RSTART+RLENGTH mangerebbe l'inizio del JSON. L'oggetto
+            # per intero È il messaggio.
+            _ll_msg = line
+            return 1
+        }
+    }
+
     return 0
 }

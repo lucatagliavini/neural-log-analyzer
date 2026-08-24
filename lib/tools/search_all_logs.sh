@@ -243,7 +243,7 @@ for (( i=0; i<total_files; i++ )); do
         pth="${all_paths[$i]}"
         nod="${all_nodes[$i]}"
         apl="${all_apps[$i]:-}"
-        hits=0 first_ts="" last_ts="" partial=0
+        hits=0 first_ts="" last_ts="" partial=0 unfiltered=0
 
         # Due passate gawk sullo STESSO file (search_all_logs.awk: FNR==NR):
         # la prima testa solo il pattern, la seconda — eseguita solo se
@@ -293,10 +293,14 @@ for (( i=0; i<total_files; i++ )); do
             else
                 _result=$(gawk -v pat="$sp" -v tf="$tf_cmp" -v tt="$tt_cmp" -f "$_TIME_AWK" -f "$_LOGLINE_AWK" -f "$_AWK_TOOL" "$pth" "$pth" 2>/dev/null)
             fi
-            IFS='|' read -r hits first_ts last_ts partial <<< "$_result"
+            IFS='|' read -r hits first_ts last_ts partial unfiltered <<< "$_result"
         fi
 
-        printf "%s|%s|%s|%s|%s|%s|%s\n" "$lbl" "${hits:-0}" "${first_ts:-}" "${last_ts:-}" "${nod:-}" "${apl:-}" "${partial:-0}" \
+        # `unfiltered` in CODA di proposito: così `hits` resta in posizione 2 e la
+        # somma parziale del progresso (`awk -F'|' '{s+=$2}'`, sopra) non va
+        # rinumerata. Aggiungere un campo in mezzo avrebbe richiesto di toccare
+        # anche quel punto, che non ha niente a che vedere con questa modifica.
+        printf "%s|%s|%s|%s|%s|%s|%s|%s\n" "$lbl" "${hits:-0}" "${first_ts:-}" "${last_ts:-}" "${nod:-}" "${apl:-}" "${partial:-0}" "${unfiltered:-0}" \
             > "$tmp_dir/$(printf '%05d' "$i")"
     ) &
     _running=$(( _running + 1 ))
@@ -317,15 +321,15 @@ progress_clear
 _t_search_ms=$(( $(date +%s%3N 2>/dev/null || echo 0) - _t_search_start ))
 
 # ── Raccoglie e analizza risultati ────────────────────────────────────────────
-res_labels=() res_hits=() res_ts=() res_last=() res_nodes=() res_apps=() res_partial=()
-max_hits=0 max_lbl=8 total_hits=0 matched_files=0
+res_labels=() res_hits=() res_ts=() res_last=() res_nodes=() res_apps=() res_partial=() res_unfilt=()
+max_hits=0 max_lbl=8 total_hits=0 matched_files=0 total_unfiltered=0
 
 for (( i=0; i<total_files; i++ )); do
     _f="$tmp_dir/$(printf '%05d' "$i")"
     if [[ -f "$_f" ]]; then
-        IFS='|' read -r rl rh rt rlast rn ra rp < "$_f"
+        IFS='|' read -r rl rh rt rlast rn ra rp ru < "$_f"
     else
-        rl="${all_labels[$i]}" rh=0 rt="" rlast="" rn="${all_nodes[$i]:-}" ra="${all_apps[$i]:-}" rp=0
+        rl="${all_labels[$i]}" rh=0 rt="" rlast="" rn="${all_nodes[$i]:-}" ra="${all_apps[$i]:-}" rp=0 ru=0
     fi
     res_labels+=("${rl:-?}")
     res_hits+=("${rh:-0}")
@@ -334,9 +338,11 @@ for (( i=0; i<total_files; i++ )); do
     res_nodes+=("${rn:-}")
     res_apps+=("${ra:-}")
     res_partial+=("${rp:-0}")
+    res_unfilt+=("${ru:-0}")
     [[ "${rh:-0}" -gt "$max_hits" ]] && max_hits="${rh:-0}"
     [[ "${#rl}"   -gt "$max_lbl"  ]] && max_lbl="${#rl}"
     total_hits=$(( total_hits + ${rh:-0} ))
+    total_unfiltered=$(( total_unfiltered + ${ru:-0} ))
     [[ "${rh:-0}" -gt 0 ]] && matched_files=$(( matched_files + 1 ))
 done
 
@@ -423,12 +429,16 @@ _node_hdr_str=""
 [[ "$_node_col_w" -gt 0 ]] && _node_hdr_str=$(printf "${_D}%-${_node_col_w}s${_X}" "NODO")
 _app_hdr_str=""
 [[ "$_app_col_w" -gt 0 ]] && _app_hdr_str=$(printf "${_D}%-${_app_col_w}s${_X}" "APP")
-printf "  %s%s${_D}%-${max_lbl}s  %-12s  %6s  │  %-19s  │  %-19s${_X}\n" \
-    "$_node_hdr_str" "$_app_hdr_str" "LOG" "" "MATCH" "PRIMO MATCH" "ULTIMO MATCH"
+# Il %1s dopo MATCH riserva la colonna del marcatore "!" (vedi le righe dati):
+# la stessa larghezza deve esistere qui, altrimenti l'header si disallinea dalle
+# righe di una colonna.
+printf "  %s%s${_D}%-${max_lbl}s  %-12s  %6s%1s  │  %-19s  │  %-19s${_X}\n" \
+    "$_node_hdr_str" "$_app_hdr_str" "LOG" "" "MATCH" "" "PRIMO MATCH" "ULTIMO MATCH"
 # Larghezza separatore = colonna nodo (0 se nodo singolo) + colonna app (0 se
 # una sola app nei match)
-#   + max_lbl + 2 + 12 + 2 + 6 + (2+│+2) + 19 + (2+│+2) + 19 = max_lbl + 70
-_sep_w=$(( max_lbl + 70 + _node_col_w + _app_col_w ))
+#   + max_lbl + 2 + 12 + 2 + 6 + 1 + (2+│+2) + 19 + (2+│+2) + 19 = max_lbl + 71
+# Il "+ 1" è la colonna del marcatore "!" (SRCH-5), riservata anche quando vuota.
+_sep_w=$(( max_lbl + 71 + _node_col_w + _app_col_w ))
 printf "  ${_D}%s${_X}\n" "$(printf '─%.0s' $(seq 1 "$_sep_w"))"
 
 for (( i=0; i<total_files; i++ )); do
@@ -441,6 +451,7 @@ for (( i=0; i<total_files; i++ )); do
     _n="${res_nodes[$i]:-}"
     _a="${res_apps[$i]:-}"
     _p="${res_partial[$i]:-0}"
+    _u="${res_unfilt[$i]:-0}"
     [[ "$_p" -eq 1 ]] && _any_partial=1
 
     # Alternanza colore per gruppo nodo: solo in modalità multi-nodo, altrimenti
@@ -520,8 +531,18 @@ for (( i=0; i<total_files; i++ )); do
     # altrove è vuoto (colore di default del terminale), come prima.
     _l_fg=""
     [[ "$_row_dim" -eq 1 && -n "${C_ROW_ALT_FG:-}" ]] && _l_fg="${C_ROW_ALT_FG}"
-    printf "  ${_RL}${node_col}${app_col}${_l_fg}%-${max_lbl}s${_RR}  ${bc}%s${_RR}%s  %6d" \
-        "$_l" "$bar" "$bar_pad" "$_h"
+    # Marcatore "!" per le occorrenze che il filtro temporale non ha potuto
+    # valutare (SRCH-5). Occupa una colonna di larghezza FISSA anche quando è
+    # assente (spazio): un marcatore a larghezza variabile sposterebbe il
+    # separatore │ di una colonna solo sulle righe marcate — lo stesso genere di
+    # disallineamento header/righe già corretto due volte su questa tabella
+    # (2026-08-05). Testuale e non solo colore, per la stessa ragione del "*":
+    # nei temi senza ANSI il colore non esiste e la nota deve poter puntare a
+    # qualcosa di visibile.
+    _u_mark=" "
+    [[ "$_u" -gt 0 ]] && _u_mark="!"
+    printf "  ${_RL}${node_col}${app_col}${_l_fg}%-${max_lbl}s${_RR}  ${bc}%s${_RR}%s  %6d${C_PARTIAL}%1s${_RR}" \
+        "$_l" "$bar" "$bar_pad" "$_h" "$_u_mark"
 
     # Timestamp parziale (solo-ora, nessuna data nel file — Intervento 3):
     # ruolo tema C_PARTIAL + marcatore testuale "*", quest'ultimo perché il
@@ -555,6 +576,31 @@ printf "\n"
 # non del tool.
 if [[ "$_any_partial" -eq 1 ]]; then
     printf "  ${C_PARTIAL}* PRIMO/ULTIMO MATCH solo orario: il file non registra la data.${_X}\n"
+fi
+
+# Nota "!" — occorrenze incluse ma NON filtrate per data (SRCH-5).
+#
+# Tenuta DISTINTA dalla nota "*" sopra perché dice una cosa diversa: "*" riguarda
+# la precisione del min/max mostrato, "!" riguarda la validità del CONTEGGIO
+# rispetto alla finestra richiesta. Confonderle farebbe leggere un problema di
+# visualizzazione dove c'è un problema di misura.
+#
+# Compare solo se è stato chiesto un filtro: senza finestra non c'è nulla da
+# dichiarare, e la nota sarebbe rumore su ogni ricerca non filtrata.
+if [[ "$total_unfiltered" -gt 0 ]]; then
+    # Concordanza singolare/plurale: "1 occorrenze NON filtrate" è sgrammaticato, e
+    # questa nota esiste per essere letta con attenzione — un errore di lingua le
+    # toglie autorità proprio nel momento in cui avverte che un numero non è
+    # affidabile.
+    _u_noun="occorrenze" _u_adj="filtrate" _u_incl="sono incluse" _u_can="possono"
+    if [[ "$total_unfiltered" -eq 1 ]]; then
+        _u_noun="occorrenza" _u_adj="filtrata" _u_incl="è inclusa" _u_can="può"
+    fi
+    printf "  ${C_PARTIAL}! %d %s NON %s per data: il log non espone un timestamp${_X}\n" \
+        "$total_unfiltered" "$_u_noun" "$_u_adj"
+    printf "  ${C_PARTIAL}  riconoscibile, quindi %s per prudenza e %s cadere fuori dalla${_X}\n" \
+        "$_u_incl" "$_u_can"
+    printf "  ${C_PARTIAL}  finestra richiesta.${_X}\n"
 fi
 
 if [[ -z "${DETECTED_NODE:-}" && -n "$best_node" ]]; then

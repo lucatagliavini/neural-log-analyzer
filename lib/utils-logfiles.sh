@@ -47,6 +47,13 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/utils-log.sh"
 
+# Timestamp dentro un campo JSON, usato dal ramo omonimo di
+# _logfiles_read_first_ts(). Vive in una variabile e non inline come gli altri
+# cinque pattern per una ragione di quoting: dentro `[[ =~ ]]` un pattern con le
+# virgolette doppie va sfuggito carattere per carattere e diventa illeggibile,
+# mentre `=~ $var` riceve il valore senza reinterpretazione.
+readonly _LOGF_RE_JSON_TS='"[^"]*":"([0-9]{4}-[0-9]{2}-[0-9]{2})[ T]([0-9]{2}):([0-9]{2})'
+
 _logfiles_read_first_ts() {
     local f="$1"
     local line=""
@@ -58,10 +65,11 @@ _logfiles_read_first_ts() {
     else
         line=$(head -1 "$f" 2>/dev/null)
     fi
-    # Prova i tre formati timestamp noti:
-    # access log:  [DD/Mon/YYYY:HH:MM:SS
-    # gc.log:      [YYYY-MM-DDTHH:MM:SS
-    # server.log:  YYYY-MM-DD HH:MM:SS,mmm
+    # Prova le grammatiche note, dalla più specifica alla più generica. Sono il
+    # gemello bash della tabella di logline_parse() (utils-logline.awk): l'ORDINE
+    # è un contratto (LOGF-9) e ogni ramo motiva la propria posizione.
+    # Elenco volutamente NON duplicato qui: stava scritto "i tre formati noti"
+    # quando i rami erano già cinque, cioè un commento che informava male.
     local ts=""
     if [[ "$line" =~ \[([0-9]{2}/[A-Za-z]{3}/[0-9]{4}):([0-9]{2}):([0-9]{2}) ]]; then
         # Undertow: [29/Jul/2026:06:00:07
@@ -79,6 +87,33 @@ _logfiles_read_first_ts() {
         ts=$(date -d "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}:${BASH_REMATCH[3]}:00" +%s 2>/dev/null || echo "")
     elif [[ "$line" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2})\ ([0-9]{2}):([0-9]{2}) ]]; then
         # Server log (JBoss): 2026-07-29 08:01:23,456
+        ts=$(date -d "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}:${BASH_REMATCH[3]}:00" +%s 2>/dev/null || echo "")
+    elif [[ "$line" =~ $_LOGF_RE_JSON_TS ]]; then
+        # Timestamp dentro un CAMPO JSON (log JSON-lines):
+        #   {"UpdateTime":"2026-08-24 03:08:01.352","DocUID":"…"}      (spazio)
+        #   {"appCode":"LIQ",…,"time":"2026-08-24T07:12:12.514CEST",…} (T + tz)
+        #
+        # Gemello del ramo 7 di logline_parse() (utils-logline.awk): le due liste
+        # vanno in parità, verificata dal loop in tests/test-logline.sh.
+        #
+        # Aggiunto per SRCH-5 (2026-08-24). La forma con lo SPAZIO non era
+        # riconosciuta da nessun ramo: il ramo server sopra è ancorato a `^` e la
+        # riga apre con `{`, quello ISO sotto richiede la "T". Risultato,
+        # misurato sul nodo 4 di produzione: ts_start=0 su
+        # prod1nssd-KPI_METADATI_TRACKING.log, quindi il walk di
+        # select_log_files_grouped non si fermava mai su quel gruppo e leggeva
+        # TUTTE le 11 rotazioni su disco per una query su oggi.
+        #
+        # Va PRIMA del ramo ISO non ancorato di sotto, che è più generico: la
+        # forma con la "T" (JF4U) era già catturata da quello, con lo stesso
+        # valore — quindi il posizionamento non cambia il risultato, ma evita
+        # che i due gemelli restino strutturalmente asimmetrici (awk copre
+        # entrambe le forme in un ramo, bash ne coprirebbe una sola). È
+        # l'asimmetria che il principio 8 indica come sorgente di derive.
+        #
+        # Cattura solo HH:MM, come gli altri quattro rami: qui serve la
+        # selezione dei FILE, non del singolo evento, e la precisione al minuto
+        # è la convenzione dell'intera funzione.
         ts=$(date -d "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}:${BASH_REMATCH[3]}:00" +%s 2>/dev/null || echo "")
     elif [[ "$line" =~ ([0-9]{4}-[0-9]{2}-[0-9]{2})T([0-9]{2}):([0-9]{2}) ]]; then
         # Log applicativo custom (es. Guidewire nel profilo liquido):

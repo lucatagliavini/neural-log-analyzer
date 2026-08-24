@@ -418,6 +418,63 @@ assert_eq "[SKIP] robusto su '%'" "[SKIP] Log 100%_x non trovato" \
 _raw=$(grep -c 'echo "\[SKIP\]' "$ROOT_DIR/lib/dispatch.sh" || true)
 assert_eq "nessun [SKIP] non colorato in dispatch.sh" "0" "$_raw"
 
+# ─── SRCH-5: la regione quotata non alimenta gli estrattori ───────────────────
+section "SRCH-5: nessun parametro estratto da DENTRO le virgolette"
+
+# La parte fra virgolette è la stringa da CERCARE: è l'unico pezzo della query che
+# non è linguaggio naturale, quindi nessun estrattore deve leggerci dentro.
+# Misurato in produzione il 2026-08-24: `cerca "api-gateway timeout"` produceva
+# NAMED_LOG='api' e un avviso che accusava l'utente di aver nominato un log che
+# non aveva nominato.
+assert_eq "NAMED_LOG non viene dal pattern quotato ('api-gateway')" "" \
+    "$(_extract 'cerca "api-gateway timeout" nel nodo 4' NAMED_LOG)"
+assert_eq "NAMED_LOG non viene dal pattern quotato ('cc-...')" "" \
+    "$(_extract 'cerca "cc-1786662052345-375622044" nel nodo 4' NAMED_LOG)"
+# Fallback <token>.log: un nome di log CITATO dentro la stringa cercata non è un
+# log nominato dall'utente.
+assert_eq "NAMED_LOG non viene da un .log dentro le virgolette" "" \
+    "$(_extract 'cerca "vedi database.log per dettagli" nel nodo 4' NAMED_LOG)"
+
+# Gli altri estrattori: dedotti dall'esplorazione del codice e NON misurati in
+# produzione, quindi coperti qui perché non restino un'ipotesi.
+assert_eq "STATUS_CODE non viene dal pattern quotato" "" \
+    "$(_extract 'cerca "errore 500 interno" nel nodo 4' STATUS_CODE)"
+assert_eq "IP_FILTER non viene dal pattern quotato" "" \
+    "$(_extract 'cerca "chiamata da 10.1.2.3 rifiutata" nel nodo 4' IP_FILTER)"
+assert_eq "TIME_FROM non viene dal pattern quotato" "" \
+    "$(_extract 'cerca "errori di ieri" nel nodo 4' TIME_FROM)"
+# Su LEVEL_EXPLICIT e non su LOG_LEVEL: quest'ultimo ha "ERROR" come DEFAULT
+# (param-extract.sh:188) e non è mai vuoto, quindi asserirlo vuoto misurerebbe
+# un'altra cosa. Il valore che porta informazione è "l'utente ha chiesto un
+# livello?", e la risposta deve essere no: quell'ERROR sta dentro la stringa
+# cercata.
+assert_eq "LEVEL_EXPLICIT non viene dal pattern quotato" "0" \
+    "$(_extract 'cerca "riga di ERROR grave" nel nodo 4' LEVEL_EXPLICIT)"
+assert_eq "LEVEL_EXPLICIT resta 1 se il livello è FUORI dalle virgolette" "1" \
+    "$(_extract 'cerca "x" solo warning' LEVEL_EXPLICIT)"
+
+# Il pattern stesso deve restare INTATTO: il mascheramento protegge gli
+# estrattori, non deve mutilare ciò che si cerca.
+assert_eq "SEARCH_PATTERN resta intatto" "chiamata al nodo 7" \
+    "$(_extract 'cerca "chiamata al nodo 7" nel nodo 4' SEARCH_PATTERN)"
+assert_eq "SEARCH_PATTERN intatto anche con virgolette singole" "claim 1-8101-2026-0473954" \
+    "$(_extract "trova 'claim 1-8101-2026-0473954' nel nodo 5" SEARCH_PATTERN)"
+
+# I parametri FUORI dalle virgolette devono continuare a funzionare: il
+# mascheramento non deve rendere il bot sordo alla parte in linguaggio naturale.
+assert_eq "un parametro FUORI dalle virgolette si legge ancora" "5000" \
+    "$(_extract 'cerca "x" sopra 5 secondi' THRESHOLD_MS)"
+assert_eq "TIME_FROM fuori dalle virgolette si legge ancora" "$(date -d yesterday +%Y-%m-%d)T00:00" \
+    "$(_extract 'cerca "x" ieri' TIME_FROM)"
+
+# NON-REGRESSIONE sull'apostrofo italiano: è lo stesso carattere della virgoletta
+# singola, e una regex ingenua su `'…'` mangerebbe l'espressione temporale
+# facendo DISATTIVARE il filtro in silenzio.
+assert_eq "apostrofo: \"nell'ultima ora\" resta un'espressione temporale" "1" \
+    "$([[ -n "$(_extract "errori nell'ultima ora" TIME_FROM)" ]] && echo 1 || echo 0)"
+assert_eq "apostrofo doppio: \"nell'ultima ora dell'app\" resta temporale" "1" \
+    "$([[ -n "$(_extract "errori nell'ultima ora dell'app" TIME_FROM)" ]] && echo 1 || echo 0)"
+
 # ─── Riepilogo ────────────────────────────────────────────────────────────────
 echo ""
 printf "═══════════════════════════════════════════════════\n"
