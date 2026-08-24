@@ -198,6 +198,73 @@ segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manual
 (nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
 implementato su richiesta esplicita dell'utente ("implementiamo domani").
 
+## LVLCNT-1 — «ERRORI» contiene «ERROR» — **FATTO** (2026-08-24)
+
+Trovato dallo **sweep dei 16 tool in produzione**, confrontando i totali di
+`filter_errors` con una verità `grep` indipendente: il tool dichiarava **46 WARN** su un
+`server.log` che nella finestra richiesta ne conteneva **2**.
+
+### Due strati, e in entrambi l'innesco è l'italiano
+
+1. **Il selettore era una sottostringa.** `/ERROR|WARN/` matcha in qualsiasi punto della
+   riga, e il plurale italiano di «errore» è **«ERRORI»**, che *contiene* «ERROR». Le righe
+   `INFO [stdout] [(1) ERRORI AGENZIA - Perdite pecuniarie - …]` entravano nel filtro.
+   Misurate: **44 righe INFO catturate, tutte per quella parola**.
+2. **La classificazione era binaria.** `if (level == "ERROR") nerror++; else nwarn++`:
+   quelle 44 righe, di livello INFO, finivano nei WARN.
+
+E il numero era **metà** del difetto: la riga veniva anche **stampata** in un report
+intitolato «Righe ERROR/WARN dal server.log», etichettata `INFO`.
+
+### Lo stesso conteggio era scritto tre volte, e due copie erano corrette
+
+`tail_log.awk` e `tail_named_log.awk` — duplicate **byte per byte** fra loro — usavano
+`else if (_ll_level == "WARN")`, quindi un livello estraneo non veniva conteggiato. La copia
+sbagliata era la terza, quella che nessuno aveva riletto. **Non un difetto di ragionamento ma
+di divergenza fra copie**, quindi il rimedio è non averne copie.
+
+Centralizzato in `logline_count_level()` dentro `lib/utils-logline.awk` — il modulo che già
+possiede `_ll_level`, e che tutti e tre i tool caricano (via `common_f` in `dispatch.sh` per
+`filter_errors`, con `-f` espliciti per i due tail). Spostata anche `count_level(line)`, la
+funzione identica nei due tail.
+
+Il conteggio è **esplicito per livello e senza `else` finale**: un livello che non conosciamo
+(`DEBUG`, `TRACE`, o la stringa vuota di una riga non riconosciuta) non viene attribuito a
+nessun contatore. **Attribuirlo per esclusione era il difetto.**
+
+Il selettore è ora ancorato alla posizione del livello, la stessa forma che
+`parse_server_log()` usa per riconoscere la riga: pre-filtro e parser **concordano** invece di
+divergere. Verificato sui log reali che non scarti nulla di necessario — i frame di stack trace
+sono record JBoss completi col proprio livello ERROR (32 su 32 ben formate), quindi l'ancora li
+conserva e il raggruppamento sotto l'eccezione continua a funzionare.
+
+### Verifica
+
+`tests/test-level-count.sh`, 10 asserzioni su una fixture con la trappola italiana, più una
+guardia anti-confronto-vacuo e un probe diretto sulla funzione condivisa. **Fail-before: 4
+FAIL, con riproduzione esatta** — «1 ERROR, 4 WARN», cioè i 2 WARN veri più le 2 righe INFO
+italiane della fixture; le 6 asserzioni di non-regressione passavano già.
+
+**In produzione, dove il difetto era stato trovato**: `3 ERROR, 2 WARN (3 distinti)` dove prima
+era `3 ERROR, 46 WARN (4 distinti)`. I 2 coincidono con la verità misurata, il gruppo INFO è
+scomparso, e gli ERROR restano 3 perché quel conteggio era già corretto. I due tool `tail`,
+che hanno perso la funzione locale, verificati sui log veri: `— 5 INFO —`.
+
+188 PASS / 0 FAIL su entrambi i profili; modello e vocabolario intatti.
+
+### Due sospetti dello sweep che erano MIEI errori di misura
+
+Vale registrarli perché il metodo conta quanto il fix:
+
+- `slow_requests` riportava **619.637 ms** per una richiesta, e sembrava un errore di parsing.
+  È **reale**: verificato sul **campo 9** dell'access log (il tempo di risposta), con 16
+  richieste oltre il minuto e il MAX sulla stessa URL che il tool riporta. La mia prima
+  verifica usava `$NF`, che in quel formato è l'ultimo token dello **user agent** — un campo a
+  lunghezza variabile.
+- `filter_errors` diceva **3 ERROR** dove io contavo 32 righe. Ha ragione il tool: le 32 righe
+  sono in gran parte **frame di stack trace**, che `stderr` emette ciascuno col livello ERROR.
+  Il tool conta **eventi** raggruppando i frame sotto l'eccezione, che è la cosa giusta.
+
 ## DEPLOYVER-1 — `deploy.sh` resta non versionato, per scelta — **CHIUSA** (2026-08-24)
 
 Chiusa su decisione esplicita dell'utente: `deploy.sh` è un **file di lavoro** e non deve
