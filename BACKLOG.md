@@ -8,7 +8,7 @@ Aggiornato: 2026-08-24
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
-| APOSTR-1 | **Il dataset non contiene un solo apostrofo** — misurato il 2026-08-24 chiudendo SRCH-5/D4: su **1171 query etichettate, zero** contengono `'`, mentre in italiano l'elisione è la forma naturale («errori nell'ultima ora», «l'app», «dall'ip»). Non è un difetto di codice ma una **lacuna di rappresentatività**: è la ragione per cui D4 — il ramo che leggeva due apostrofi come una citazione e cancellava l'espressione temporale dal vettore — è sopravvissuto senza che alcun test lo sfiorasse. Il difetto è corretto, la lacuna resta: il classificatore non è mai stato *addestrato* su query con elisione, quindi non si sa come si comporti al di là dei due casi verificati a mano (66,2% su `errori nell'ultima ora dell'app`, identico alla forma senza apostrofi). **Da fare**: aggiungere esempi con elisione a `queries_labeled.txt` e misurare il delta di confidenza sulle classi vicine. Richiede `build-dataset.sh` + `train.sh`, quindi **un retrain e un checksum nuovo** in `test-train-regression.sh` — per questo non è stato fatto insieme al fix | Media |
+| VOCFMT-1 | **Il caricatore del vocabolario tronca gli spazi e non regge `(^\| )`, in silenzio** (trovato 2026-08-24 validando le asserzioni di APOSTR-1 con una mutazione deliberata). Un pattern scritto ` ultim` — con uno spazio iniziale, per richiedere un confine — viene **trimmato** e ridiventa `ultim`, cioè si comporta esattamente come il pattern che si voleva restringere. Un pattern `(^\| )ultim` non funziona da ancora: `[[ $q =~ $p ]]` cerca **in qualsiasi posizione**, quindi il `^` dentro l'alternanza non ancora nulla e la feature scatta comunque. La forma che funziona è `[[:space:]]ultim`, verificata (feature 2 → 0 sulla forma con apostrofo). **Il difetto non è la scelta di sintassi ma il SILENZIO**: entrambe le forme sbagliate producono un pattern che matcha più del previsto senza alcun errore, e l'effetto è un peso applicato a query che non dovrebbero riceverlo — invisibile finché qualcuno non misura quella singola feature. **Da fare**: una guardia in `build-dataset.sh`/`train.sh` che rifiuti un pattern con spazi ai bordi o con `^`/`$` dentro un gruppo, oppure una nota nell'intestazione di `nlp/unigrams.txt` che dichiari la forma corretta. Priorità Media e non Alta perché nessun pattern attuale usa quelle forme (verificato: 0 unigrammi con spazio interno) — è una trappola per il prossimo che ne aggiunge uno | Media |
 | SRCHQ-1 | **La regola sugli apici singoli è ora in un punto solo, ma resta un'euristica** — `lib/utils-quoted.sh` (SRCH-5/D3-D4) tratta una coppia di apici come citazione **solo se delimitata da spazi**, perché in italiano `'` è anche l'apostrofo. Conseguenza dichiarata e coperta da test: una citazione fra apici singoli **non può contenere un apostrofo** (`trova 'errore nell'app'` non è riconosciuta come citazione; con le virgolette doppie sì). È lo stesso vincolo del quoting di shell e il messaggio d'aiuto del bot documenta entrambe le forme, quindi l'utente ha già la via d'uscita. **Non c'è nulla da correggere adesso**: la voce esiste perché se un giorno arrivasse una segnalazione su una ricerca fra apici che «non funziona», la causa è questa e sta scritta, invece di essere ridiagnosticata da zero | Promemoria |
 | FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
 | DEPLOYVER-1 | **`deploy.sh` contiene logica reale ma non è versionato** (trovata 2026-08-21 correggendo l'esclusione del lock). È gitignorato per progetto (`.gitignore:21`) perché contiene l'host dell'installazione (`HOST="root@lxprworkerlana01"`), e non esiste alcun template versionato (`git ls-files | grep deploy` → vuoto). Ma il file non è solo configurazione: contiene il **sentinel di identità** che impedisce a `rsync --delete` di cancellare una dest sbagliata (documentato nelle sue righe 21-40 come «un'invariante che il codice garantisce» invece di una disciplina dell'operatore), due liste di esclusione, e la logica di deploy delle due cartelle sorelle. Conseguenza **misurata**: l'esclusione di `.neural-c.lock` aggiunta oggi vive **solo su questa macchina**, non è rivedibile da nessuno e si perde se il file viene ricreato — e la stessa cosa vale per il sentinel, cioè per la protezione più importante dello script. Direzione: estrarre le coordinate (`HOST`, `DEST`) in un `deploy.local.conf` non versionato — stesso schema già usato per `system.local.conf` — e versionare lo script. **Non fatto**: cambia il modo in cui si deploya, quindi va concordato | Media |
@@ -199,6 +199,100 @@ riaddestrato e verificato su entrambi i profili nella stessa sessione in cui è 
 segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manuale
 (nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
 implementato su richiesta esplicita dell'utente ("implementiamo domani").
+
+## APOSTR-1 — L'apostrofo: una lacuna di TEST, non di training — **FATTO** (2026-08-24)
+
+Aperta poche ore prima con una premessa **sbagliata**, e riformulata su richiesta
+dell'utente, che non aveva creduto alla mia archiviazione come «non-problema» e ha
+chiesto: *«alcune query si spaccano e danno risultati inattesi?»* — la risposta era **sì**.
+
+### La premessa sbagliata, e la misura che l'ha corretta
+
+Avevo scritto che «il classificatore non è mai stato *addestrato* su query con elisione,
+quindi non si sa come si comporti», proponendo di aggiungere esempi al dataset con un
+retrain. **Misurato: i vettori sono identici.** I pattern del vocabolario sono sottostringhe
+**non ancorate** (`ultim`, non `\bultim\b`), e per i 40 pattern che usano `\b` l'apostrofo è
+comunque un confine di parola. Su 12 query con elisione confrontate con la rispettiva forma
+senza apostrofo: **0 divergenze**. Zero unigrammi contengono uno spazio interno, e i 10
+bigrammi hanno i due lati valutati separatamente — quindi nulla può essere spezzato da
+un'elisione.
+
+Conseguenza: aggiungere esempi con apostrofo al dataset produrrebbe righe con vettori
+**bit-identici** a quelle già presenti. Righe duplicate, non informazione. **Il retrain non
+comprerebbe nulla.**
+
+### Ma la lacuna era reale, su un altro asse
+
+Zero query con apostrofo nel dataset significava anche **zero query con apostrofo in tutto
+il repo**: nessuna asserzione, in nessun test, esercitava un'elisione. Non un problema di
+*addestramento* ma di *copertura*, ed è la ragione per cui due stadi della pipeline erano
+rotti e nessuno lo sapeva:
+
+| stadio | l'apostrofo conta? | stato |
+|--------|--------------------|-------|
+| `normalize-query.sh` → `NORM_QUERY` | **sì** | era rotto — SRCH-5/D4, corretto |
+| `query-to-features.sh` → vettore | no (misurato) | corretto per costruzione |
+| `param-extract.sh` → parametri | **sì** | **era rotto — vedi sotto** |
+| routing | derivato dai tre sopra | ok |
+
+### Il sesto difetto: SEARCH_PATTERN fantasma
+
+`param-extract.sh` estraeva gli span con una `grep -oE "'[^']*'"` **ingenua**, quindi due
+elisioni consecutive diventavano una citazione:
+
+    cerca l'eccezione nell'app dell'utente  →  SEARCH_PATTERN='eccezione nell'
+    cerca nell'access log l'errore          →  SEARCH_PATTERN='access log l'
+
+Misurato su 5 formulazioni italiane naturali: **5 fantasmi su 5**, quindi sistematico e non
+un caso limite. E la conseguenza era una **risposta sbagliata silenziosa**: il classificatore
+instradava correttamente su `search_all_logs` (96,7%), il tool cercava nei log la stringa
+mutilata e rispondeva «nessuna occorrenza» a una domanda che il bot aveva capito benissimo.
+Il caso peggiore, perché sembra funzionare.
+
+Dopo il fix il valore è `__MISSING__`, e `search_all_logs.sh:51` chiede all'utente di
+racchiudere la stringa fra virgolette: da «cerco un frammento e non trovo nulla» a «non ho
+capito cosa cercare, dimmelo così» — un fallimento che si dichiara.
+
+**Perché è sopravvissuto alla correzione di poche ore prima**, che aveva centralizzato questa
+stessa regola: avevo deciso — correttamente — che `SEARCH_PATTERN` e `NAMED_LOG_GLOB` devono
+leggere la query **grezza**, perché a loro lo span serve davvero. Da lì ho concluso —
+erroneamente — che potessero tenere la **propria regex**. Sono due cose diverse: leggere il
+testo grezzo *attraverso* la regola condivisa, non aggirandola. **Il principio 8 per la terza
+volta nella stessa sessione**, e le prime due non hanno impedito la terza.
+
+**Perché i test non l'avevano preso**: le asserzioni sull'apostrofo che avevo scritto
+verificavano che il **filtro temporale** non si disattivasse. Passavano, ed erano vere. Non
+guardavano `SEARCH_PATTERN`, perché stavo pensando all'apostrofo come minaccia al *tempo*. Un
+parametro «coperto» non è coperto in tutte le sue forme — la lezione di THR-1 su un'altra
+superficie.
+
+### Il rimedio: copertura sui quattro stadi
+
+Non esempi nel dataset ma **asserzioni lungo tutta la pipeline** (`test-normalize-query.sh`,
+sezione APOSTR-1): `NORM_QUERY` intatta su 6 elisioni, vettore identico con e senza apostrofo
+su 4, i parametri, e il routing confrontato col vincitore della forma senza apostrofo — non
+con una confidenza assoluta, che cambierebbe a ogni retrain. Più 10 asserzioni sui fantasmi
+in `test-param-extract.sh`. **Nessun retrain, checksum invariato.**
+
+Passata di principio 8 su tutto il codice a caccia di altre regex ingenue sugli apici: due
+falsi positivi certi (`dispatch.sh:558` opera su un'espressione costruita dal codice,
+`build_dataset.py:65` parsa `VAR='valore'` da un file di configurazione) e il ramo glob
+verificato **non** innescabile da un'elisione. Nessun altro chiamante da migrare.
+
+### E una guardia contro il verde per nulla
+
+Le quattro asserzioni sul vettore, nella prima stesura, erano **vacue**: l'helper non
+chiamava `nlp_resolve_paths()`, quindi `query-to-features.sh` usciva con stdout vuoto e il
+test confrontava `""` con `""`. Trovate verificando che gli helper producessero valori reali
+invece di fidarsi del PASS. Aggiunta una guardia esplicita che asserisce che il vettore
+esista e abbia feature attive **prima** dei confronti — lo stesso difetto di GAPREP-1, dove
+un `|| true` faceva dichiarare «nessun gap» per una misura mai avvenuta.
+
+Le asserzioni sono poi state **validate con una mutazione deliberata**: `[[:space:]]ultim` al
+posto di `ultim` porta la feature da 2 a 0 sulla forma con apostrofo e produce **3 FAIL
+mirati** — esattamente le tre query che contengono `ultim`, con la quarta correttamente
+verde. I due tentativi di mutazione precedenti erano stati vanificati dal formato del
+vocabolario, e da lì è nata **VOCFMT-1**.
 
 ## TOKEN-1 — Token GitHub in chiaro: rimosso e revocato — **FATTO** (2026-08-24)
 
