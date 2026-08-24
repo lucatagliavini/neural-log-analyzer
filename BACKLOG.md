@@ -324,10 +324,31 @@ comprerebbe nulla.**
 
 ### Ma la lacuna era reale, su un altro asse
 
-Zero query con apostrofo nel dataset significava anche **zero query con apostrofo in tutto
-il repo**: nessuna asserzione, in nessun test, esercitava un'elisione. Non un problema di
-*addestramento* ma di *copertura*, ed è la ragione per cui due stadi della pipeline erano
-rotti e nessuno lo sapeva:
+**Correzione del 2026-08-24, sera** — questo paragrafo diceva «zero query con apostrofo nel
+dataset», ed **era una misura sul campo sbagliato**: il file è `LABEL <TAB> QUERY` e avevo
+letto il campo 1, cioè le label, che non contengono apostrofi. Rimisurato sul campo 2:
+
+| apostrofi nella query | quante |
+|-----------------------|--------|
+| 0 | 1006 |
+| **1** | **163** — innocue: un apostrofo solo non può essere letto come coppia di apici |
+| **2** | **2** — e sono citazioni vere (`'*-api.log'`, `'*-database.log'`), non elisioni |
+
+La causa vera è quindi **più precisa**, non più debole: il dataset copre abbondantemente
+l'elisione **singola**, e ciò che ha rappresentazione **zero** è **due elisioni nella stessa
+query** — che è esattamente l'innesco sia di D4 (`nell'ultima ora dell'app`) sia del
+`SEARCH_PATTERN` fantasma. Un apostrofo solo non ha mai potuto attivare il difetto, ed è per
+questo che 163 query lo attraversavano senza incidenti.
+
+Spiega anche perché `queries.txt` è rimasto bit-identico dopo il fix: le due query con due
+apostrofi sono citazioni legittime, gestite allo stesso modo prima e dopo.
+
+Resta valida la conclusione — lacuna di **copertura**, non di *addestramento* — e restano
+validi il fix e i test, che coprono proprio la forma a due elisioni. Cambia la spiegazione,
+non il rimedio.
+
+Non un problema di *addestramento* ma di *copertura*, ed è la ragione per cui due stadi della
+pipeline erano rotti e nessuno lo sapeva:
 
 | stadio | l'apostrofo conta? | stato |
 |--------|--------------------|-------|
@@ -579,7 +600,8 @@ confidenza da **66,2% a 56,8%**, e `search_all_logs` compariva al **13,3%** — 
 `<PATTERN>` è per costruzione il segnale «qui c'è una stringa da cercare», che quella frase
 non conteneva. Il vincitore teneva, ma su una query con margine minore girerebbe.
 
-Sopravvissuto perché **zero delle 1171 query etichettate contiene un apostrofo**: il dataset
+Sopravvissuto perché nessuna query etichettata contiene **due elisioni** — che è l'innesco
+(163 ne contengono una sola, innocua; vedi la correzione nella voce APOSTR-1): il dataset
 non rappresenta la forma più naturale dell'italiano, quindi nessun test poteva inciamparvi.
 È anche la ragione per cui correggerlo non ha richiesto retrain.
 
