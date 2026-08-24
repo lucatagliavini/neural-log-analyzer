@@ -96,3 +96,42 @@ progress_clear() {
     [[ "${BOT_PROGRESS:-on}" == "off" ]] && return
     printf "\r\033[K" >&2
 }
+
+# ─── SEARCH_PARALLEL_JOBS: worker di search_all_logs, DERIVATO dalla macchina ──
+#
+# Vive qui accanto a GZ_CAT perché è lo stesso genere di valore: un default che
+# dipende dalla MACCHINA su cui gira l'installazione, non dal cliente né dal
+# framework. Stava invece in profiles/*/system.conf, con il numero 4 scritto a mano
+# in tre punti — i due profili più il fallback del tool — pur girando `liquido` e
+# `usnext` sullo stesso server. Non è una coordinata di profilo (NLP-1) e non è una
+# capacità: è una proprietà dell'installazione, quindi si DERIVA, come
+# MODEL_TOPOLOGY si deriva da NUM_FEATURES invece di essere riscritta a mano.
+#
+# La formula viene da una misura, non da un'intuizione (SALPERF-1, 2026-08-24).
+# Multi-nodo su 13 nodi di produzione, 665 file, 6 GB, fase di ricerca:
+#
+#    4 worker   555 s      (il valore precedente)
+#    8 worker   291 s      1,9×
+#   16 worker   161 s      3,4×   <- punto di saturazione
+#   32 worker   135 s      3,6×   (raddoppia i core per il 16% in più)
+#
+# Su una finestra STATICA le quattro varianti danno un risultato IDENTICO
+# (72.940 occorrenze in 59 log, verificato anche ripetendo la stessa variante):
+# il parallelismo non cambia la risposta, quindi alzarlo è sicuro.
+#
+# `nproc/2` con tetto a 16: in produzione (64 core) dà 16, cioè l'ottimo misurato;
+# su una macchina di sviluppo a 8 core dà 4, cioè esattamente il valore di prima —
+# **nessun cambio dove già andava bene, il cambio dove era sbagliato**. Il tetto
+# esiste perché oltre 16 il guadagno non paga i core, e la metà perché la macchina
+# non è dedicata al bot: 16 su 64 lascia il 75% libero.
+#
+# Resta sovrascrivibile dall'ambiente (`SEARCH_PARALLEL_JOBS=32 ./chatbot.sh …`),
+# che è come sono state fatte le misure qui sopra.
+if [[ -z "${SEARCH_PARALLEL_JOBS:-}" ]]; then
+    _slj_cores=$(nproc 2>/dev/null || echo 8)
+    SEARCH_PARALLEL_JOBS=$(( _slj_cores / 2 ))
+    (( SEARCH_PARALLEL_JOBS > 16 )) && SEARCH_PARALLEL_JOBS=16
+    (( SEARCH_PARALLEL_JOBS < 1 ))  && SEARCH_PARALLEL_JOBS=1
+    unset _slj_cores
+fi
+export SEARCH_PARALLEL_JOBS

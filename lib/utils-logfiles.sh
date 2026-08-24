@@ -224,7 +224,11 @@ select_log_files_grouped() {
     local -a group_order=()
     local f logical
     for f in "${candidates[@]}"; do
-        logical=$(logfile_logical_name "$f")
+        # `_into` e non `$(logfile_logical_name …)`: questo ciclo gira su TUTTI i file
+        # candidati della directory — non solo su quelli poi selezionati — e su un
+        # multi-nodo sono ~4600. La subshell della sostituzione di comando valeva il
+        # 96% del costo per chiamata (SALPERF-1): 0,566 ms contro 0,019.
+        logfile_logical_name_into "$f"; logical="$_LOGF_LOGICAL"
         [[ -n "$name_filter" && "$logical" != "$wanted" ]] && continue
         if [[ -z "${group_files[$logical]:-}" ]]; then
             group_order+=("$logical")
@@ -319,17 +323,54 @@ select_log_files() {
 #   prod1nsse-cc.log-2026-07-26-17850.gz    -> prod1nsse-cc
 #   prod1nsse-cc.log.3.gz                   -> prod1nsse-cc
 #   undertow_access_log.2026-07-14.log      -> undertow_access_log
-logfile_logical_name() {
+# logfile_logical_name_into NOME — scrive il nome logico in _LOGF_LOGICAL.
+#
+# È la forma da usare nei CICLI: nessun sottoprocesso e nessuna subshell.
+# `logfile_logical_name` sotto è il vecchio contratto (stampa il risultato) e resta
+# per le chiamate singole, dove la comodità vale più del fork.
+#
+# Perché due punti d'ingresso e non due implementazioni: la logica sta qui una volta
+# sola (principio 2). Oggi si contavano tre copie divergenti dello stesso conteggio
+# di livelli in tre tool (LVLCNT-1) — non se ne aggiunge una quarta per la velocità.
+#
+# SALPERF-1 (2026-08-24). La versione precedente usava due `sed` — due sottoprocessi
+# per chiamata — e i chiamanti la invocavano in `$( )`, aggiungendo una subshell.
+# Misurato in produzione, su 12704 nomi di file reali:
+#
+#   due sed + subshell          4,729 ms/chiamata   (implementazione precedente)
+#   bash puro + subshell        0,566 ms/chiamata   ( 8,4×)
+#   bash puro + variabile       0,019 ms/chiamata   (249×)
+#
+# La subshell del CHIAMANTE valeva il 96% del costo residuo: togliere i `sed` senza
+# togliere il `$( )` avrebbe lasciato sul tavolo la parte più grossa. Su un multi-nodo
+# con 4600 file candidati la fase di selezione passa da ~22 s a ~0,1 s.
+#
+# Equivalenza verificata contro un GOLDEN MASTER dei 12704 nomi distinti realmente
+# presenti su produzione (liquido + usnext): **0 divergenze**. Le forme distinte sono
+# in tests/test-logfile-name-perf.sh, incluso `${gw.cc.serverid}-messaging.log` — un
+# placeholder di proprietà non espanso, il genere di input che una riscrittura
+# plausibile romperebbe.
+logfile_logical_name_into() {
     local base="${1##*/}"
     base="${base%.gz}"
-    # -DATE-EPOCH oppure .N appesi dopo .log
-    base=$(sed -E 's/\.log([-.].*)?$/.log/' <<< "$base")
-    # Rotazione giornaliera: la data precede .log invece di seguirlo
-    # (undertow_access_log.2026-07-14.log) — bug reale in produzione,
-    # 19 rotazioni giornaliere producevano 19 nomi logici distinti invece di 1
-    # (2026-08-07). Schema già dichiarato nell'header del file ma non gestito qui.
-    base=$(sed -E 's/\.[0-9]{4}-[0-9]{2}-[0-9]{2}\.log$/.log/' <<< "$base")
-    echo "${base%.log}"
+    # Equivale a `sed -E 's/\.log([-.].*)?$/.log/'`: taglia tutto ciò che segue un
+    # `.log` quando è introdotto da `-` o `.` (rotazioni `-DATE-EPOCH` e `.N`).
+    # `%%` rimuove il suffisso PIÙ LUNGO, che corrisponde al `.log[-.]` più a
+    # SINISTRA — la stessa semantica leftmost di sed, non un'approssimazione.
+    [[ "$base" == *.log[-.]* ]] && base="${base%%.log[-.]*}.log"
+    # Equivale a `sed -E 's/\.[0-9]{4}-[0-9]{2}-[0-9]{2}\.log$/.log/'`: rotazione
+    # giornaliera in cui la data PRECEDE `.log` (undertow_access_log.2026-07-14.log)
+    # — bug reale in produzione, 19 rotazioni producevano 19 nomi logici invece di 1
+    # (2026-08-07). Le classi `[0-9]` ripetute a mano perché il globbing di bash non
+    # ha i quantificatori `{4}` della ERE.
+    [[ "$base" == *.[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].log ]] && \
+        base="${base%.[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].log}.log"
+    _LOGF_LOGICAL="${base%.log}"
+}
+
+logfile_logical_name() {
+    logfile_logical_name_into "$1"
+    printf '%s' "$_LOGF_LOGICAL"
 }
 
 # Nome logico + strip opzionale del prefisso host, per la sola presentazione

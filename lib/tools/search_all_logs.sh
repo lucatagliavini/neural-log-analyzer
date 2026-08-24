@@ -56,7 +56,14 @@ if [[ "$sp" == "__MISSING__" ]]; then
     exit 0
 fi
 
-jobs="${SEARCH_PARALLEL_JOBS:-4}"
+# Nessun fallback numerico qui: il default è derivato dalla macchina in
+# utils-log.sh (sourciato via utils-logfiles.sh, sopra) e vale `nproc/2` con tetto
+# a 16. Un `:-4` scritto qui sarebbe stato la TERZA copia della stessa costante —
+# insieme ai due profili — e la copia che vince quando le altre non vengono
+# sourciate, cioè quella che rende il valore imprevedibile (SALPERF-1).
+# Il `:-1` residuo non è un default ma una rete: se la variabile fosse vuota il
+# pool non partirebbe affatto.
+jobs="${SEARCH_PARALLEL_JOBS:-1}"
 tmp_dir=$(mktemp -d)
 _AWK_TOOL="$(dirname "${BASH_SOURCE[0]}")/search_all_logs.awk"
 # Il riconoscimento del timestamp è delegato a logline_parse() (utils-logline.awk,
