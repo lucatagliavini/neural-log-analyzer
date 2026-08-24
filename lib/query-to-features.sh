@@ -37,13 +37,23 @@ query="${query,,}"  # lowercase uniforme anche in caso di fallback
 # La rete di sicurezza è tests/test-normalize-parity.sh, che confronta i 108 valori
 # di feature fra questo script e vectorize() in Python su tutte le query.
 
+# I pattern arrivano GIÀ PULITI dal riempimento delle colonne: la normalizzazione vive
+# in nlp/tools.conf, applicata una volta per file al momento del `mapfile` (VOCFMT-1).
+# Qui NON si tocca più il pattern.
+#
+# Prima questo ciclo faceva `${pattern// /}`, che cancellava ogni spazio — non solo il
+# riempimento — rendendo impossibile scrivere un pattern con uno spazio voluto, in
+# silenzio e in due direzioni opposte (vincolo che sparisce, oppure feature morta che
+# non matcha mai). Le due versioni intermedie che correggevano il difetto QUI, dentro
+# il ciclo, costavano **1,8×** per query: normalizzare 119 pattern a ogni query invece
+# di una volta per file è il posto sbagliato, e il commento sopra sui fork spiega
+# perché su questo script il costo conta.
+
 # ─── UNIGRAM ─────────────────────────────────────────────────────────────────
 features=()
 for entry in "${UNIGRAMS[@]}"; do
     pattern="${entry%%::*}"
     weight="${entry##*::}"
-    pattern="${pattern// /}"
-    weight="${weight// /}"
     if [[ "$query" =~ $pattern ]]; then
         features+=("$weight")
     else
@@ -56,14 +66,11 @@ done
 #          "patA :: patB :: N"     — peso esplicito N
 for bigram in "${BIGRAMS[@]}"; do
     patA="${bigram%%::*}"
-    patA="${patA// /}"
     last="${bigram##*::}"
-    last="${last// /}"
     if [[ "$last" =~ ^[0-9]+$ ]]; then
         weight="$last"
         rest="${bigram#*::}"
         patB="${rest%%::*}"
-        patB="${patB// /}"
     else
         weight="1"
         patB="$last"

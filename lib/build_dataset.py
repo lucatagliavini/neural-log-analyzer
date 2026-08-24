@@ -199,9 +199,21 @@ def load_unigrams(path):
             parts = line.split('::')
             if len(parts) < 2:
                 continue
-            # Replica query-to-features.sh: `pattern="${pattern// /}"` — tutti gli spazi rimossi.
-            # Così "ora |ore |ora$" diventa "ora|ore|ora$" e matcha anche a fine stringa.
-            pattern = parts[0].strip().replace(' ', '')
+            # Replica query-to-features.sh: TRIM ai bordi, non rimozione di tutti gli
+            # spazi (VOCFMT-1, 2026-08-24). Prima entrambi facevano
+            # `replace(' ', '')` / `${pattern// /}` per togliere il riempimento delle
+            # colonne, ma così cancellavano anche gli spazi VOLUTI: `(^| )ultim`
+            # diventava `(^|)ultim`, con un ramo vuoto che matcha in ogni posizione
+            # (vincolo sparito), e `ultima ora` diventava `ultimaora`, che non può
+            # matchare nulla — una feature morta, sempre 0, ancora contata in
+            # NUM_FEATURES. Entrambi i modi silenziosi.
+            #
+            # Il commento precedente qui dichiarava che la forma `ora |ore |ora$`
+            # sfruttava lo strip come separatore visivo: verificato che NESSUN pattern
+            # attuale ha spazi interni dopo il trim, in nessuno dei due file, quindi
+            # nulla dipendeva da quel comportamento. Per uno spazio VERO nel pattern si
+            # usa `[[:space:]]`, che sopravvive al trim.
+            pattern = parts[0].strip()
             try:
                 weight = int(parts[-1].strip())
             except ValueError:
@@ -220,18 +232,19 @@ def load_bigrams(path):
             parts = [p.strip() for p in line.split('::')]
             if len(parts) < 2:
                 continue
-            # Stesso strip-spazi di query-to-features.sh
-            patA = parts[0].replace(' ', '')
+            # Solo trim, come il gemello bash (VOCFMT-1): il `.strip()` è già stato
+            # applicato a ogni campo alla riga sopra, quindi qui non serve altro.
+            patA = parts[0]
             if len(parts) >= 3:
                 try:
                     weight = int(parts[-1])
-                    patB = parts[1].replace(' ', '')
+                    patB = parts[1]
                 except ValueError:
                     weight = 1
-                    patB = parts[1].replace(' ', '')
+                    patB = parts[1]
             else:
                 weight = 1
-                patB = parts[1].replace(' ', '')
+                patB = parts[1]
             entries.append((patA, patB, weight))
     return entries
 

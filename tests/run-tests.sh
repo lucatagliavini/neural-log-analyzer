@@ -513,7 +513,8 @@ run_unit_tests() {
               test-logdisc-4.sh test-access-format.sh test-profile-config.sh \
               test-train-regression.sh test-logline.sh test-logname-display.sh \
               test-help-sources.sh test-utils-time.sh test-repl-state.sh \
-              test-vocab-gap.sh test-python-resolve.sh test-normalize-query.sh; do
+              test-vocab-gap.sh test-python-resolve.sh test-normalize-query.sh \
+              test-vocab-format.sh; do
         # Tre esiti, non due (VENVGATE-1): 0 PASS, 2 NON ESEGUIBILE, altro FAIL.
         # Un harness che non può misurare — perché manca qualcosa nell'ambiente,
         # non perché il codice è rotto — non va contato fra i PASS (sarebbe un
