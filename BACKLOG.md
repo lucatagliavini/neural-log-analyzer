@@ -8,7 +8,6 @@ Aggiornato: 2026-08-24
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
-| VOCFMT-1 | **Il caricatore del vocabolario tronca gli spazi e non regge `(^\| )`, in silenzio** (trovato 2026-08-24 validando le asserzioni di APOSTR-1 con una mutazione deliberata). Un pattern scritto ` ultim` — con uno spazio iniziale, per richiedere un confine — viene **trimmato** e ridiventa `ultim`, cioè si comporta esattamente come il pattern che si voleva restringere. Un pattern `(^\| )ultim` non funziona da ancora: `[[ $q =~ $p ]]` cerca **in qualsiasi posizione**, quindi il `^` dentro l'alternanza non ancora nulla e la feature scatta comunque. La forma che funziona è `[[:space:]]ultim`, verificata (feature 2 → 0 sulla forma con apostrofo). **Il difetto non è la scelta di sintassi ma il SILENZIO**: entrambe le forme sbagliate producono un pattern che matcha più del previsto senza alcun errore, e l'effetto è un peso applicato a query che non dovrebbero riceverlo — invisibile finché qualcuno non misura quella singola feature. **Da fare**: una guardia in `build-dataset.sh`/`train.sh` che rifiuti un pattern con spazi ai bordi o con `^`/`$` dentro un gruppo, oppure una nota nell'intestazione di `nlp/unigrams.txt` che dichiari la forma corretta. Priorità Media e non Alta perché nessun pattern attuale usa quelle forme (verificato: 0 unigrammi con spazio interno) — è una trappola per il prossimo che ne aggiunge uno | Media |
 | SRCHQ-1 | **La regola sugli apici singoli è ora in un punto solo, ma resta un'euristica** — `lib/utils-quoted.sh` (SRCH-5/D3-D4) tratta una coppia di apici come citazione **solo se delimitata da spazi**, perché in italiano `'` è anche l'apostrofo. Conseguenza dichiarata e coperta da test: una citazione fra apici singoli **non può contenere un apostrofo** (`trova 'errore nell'app'` non è riconosciuta come citazione; con le virgolette doppie sì). È lo stesso vincolo del quoting di shell e il messaggio d'aiuto del bot documenta entrambe le forme, quindi l'utente ha già la via d'uscita. **Non c'è nulla da correggere adesso**: la voce esiste perché se un giorno arrivasse una segnalazione su una ricerca fra apici che «non funziona», la causa è questa e sta scritta, invece di essere ridiagnosticata da zero | Promemoria |
 | FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
 | DEPLOYVER-1 | **`deploy.sh` contiene logica reale ma non è versionato** (trovata 2026-08-21 correggendo l'esclusione del lock). È gitignorato per progetto (`.gitignore:21`) perché contiene l'host dell'installazione (`HOST="root@lxprworkerlana01"`), e non esiste alcun template versionato (`git ls-files | grep deploy` → vuoto). Ma il file non è solo configurazione: contiene il **sentinel di identità** che impedisce a `rsync --delete` di cancellare una dest sbagliata (documentato nelle sue righe 21-40 come «un'invariante che il codice garantisce» invece di una disciplina dell'operatore), due liste di esclusione, e la logica di deploy delle due cartelle sorelle. Conseguenza **misurata**: l'esclusione di `.neural-c.lock` aggiunta oggi vive **solo su questa macchina**, non è rivedibile da nessuno e si perde se il file viene ricreato — e la stessa cosa vale per il sentinel, cioè per la protezione più importante dello script. Direzione: estrarre le coordinate (`HOST`, `DEST`) in un `deploy.local.conf` non versionato — stesso schema già usato per `system.local.conf` — e versionare lo script. **Non fatto**: cambia il modo in cui si deploya, quindi va concordato | Media |
@@ -199,6 +198,81 @@ riaddestrato e verificato su entrambi i profili nella stessa sessione in cui è 
 segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manuale
 (nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
 implementato su richiesta esplicita dell'utente ("implementiamo domani").
+
+## VOCFMT-1 — Il vocabolario non poteva esprimere uno spazio — **FATTO** (2026-08-24)
+
+Aperta e chiusa nella stessa sessione, su richiesta dell'utente («mi sembra grave e facile da
+risolvere»). **Aveva ragione sulla gravità e io l'avevo classificata Media**: la voce, come
+l'avevo scritta, sbagliava il meccanismo in due punti su tre.
+
+### Che cosa avevo scritto di sbagliato
+
+1. *«Il caricatore tronca gli spazi ai bordi, in silenzio»* — **falso come difetto**: il
+   troncamento è **necessario**, perché il vocabolario allinea i pattern in colonne e ogni riga
+   porta spazi di riempimento. Una guardia che lo rifiutasse avrebbe bocciato l'intero file
+   (verificato: **tutte** le righe hanno spazi finali).
+2. *«`(^| )ultim` non funziona da ancora perché `[[ =~ ]]` cerca in qualsiasi posizione»* —
+   **falso**: misurato in isolamento, `(^| )ultim` in bash ERE si comporta correttamente, non
+   matcha `nell'ultima` e matcha `nell ultima`. La semantica della regex non era il problema.
+3. Il **fatto osservato** era vero: messo nel vocabolario, `(^| )ultim` non vincolava nulla.
+
+### Il meccanismo vero
+
+`query-to-features.sh` faceva `${pattern// /}` — sostituzione **globale**, non un trim. Quindi
+cancellava anche gli spazi *voluti*, in due direzioni opposte ed entrambe silenziose:
+
+| scritto | caricato | effetto |
+|---------|----------|---------|
+| `(^| )ultim` | `(^|)ultim` | un ramo **vuoto** nell'alternanza matcha la stringa vuota in qualsiasi posizione: il vincolo di confine **sparisce**, il pattern equivale a `ultim` nudo |
+| `ultima ora` | `ultimaora` | non può matchare **nulla**: feature **morta**, sempre 0, e continua a contare in `NUM_FEATURES` |
+
+La seconda è la ragione per cui l'utente aveva ragione a chiamarla grave: è un **input
+permanentemente a zero** nel modello, senza alcun errore, e chi ha scritto il pattern crede
+che funzioni. Un peso dichiarato nel vocabolario che non può mai essere applicato.
+
+### Il fix, e perché è finito altrove rispetto a dove l'avevo messo
+
+La normalizzazione è stata **spostata al punto di carico** (`nlp/tools.conf`), dove agisce una
+volta per file e toglie solo gli spazi **adiacenti a `::`** — che sono il riempimento e
+nient'altro. Il ciclo caldo di `query-to-features.sh` non tocca più il pattern.
+
+Le due versioni intermedie correggevano il difetto **dentro** il ciclo — prima con una
+funzione a nameref, poi inline — e **misuravano 1,8× più lento** (7,2 → 13,1 e 6,4 → 12,2 ms
+per query). Non per i fork, che non c'erano, ma perché normalizzare 119 pattern a ogni query
+è il posto sbagliato: con ~250 espansioni annidate per query il costo è reale, e il commento
+di `query-to-features.sh` dichiara quel costo come una proprietà ingegnerizzata
+(112 ms → 5 ms eliminando i fork). Averlo misurato invece di presumerlo ha cambiato la forma
+del fix.
+
+Nella versione finale una sola `sed` per file fa i tre lavori che prima erano due `grep`:
+scarta i commenti, scarta le righe vuote, normalizza il riempimento. **Un processo per file
+invece di due**, quindi il fix costa **meno** dello stato di partenza: misurato **5,5 ms
+contro 6,7–8,9 ms** per query.
+
+### Una dipendenza che ho quasi rotto
+
+Il commento in `build_dataset.py` dichiarava che la forma `ora |ore |ora$` sfruttava lo strip
+globale come **separatore visivo**. Se un pattern la usasse, il passaggio a trim ne cambierebbe
+la semantica. La mia prima misura — «0 unigrammi con spazio interno» — cercava `[a-z] [a-z]` e
+**non** avrebbe catturato `ora |ore`, che è lettera-spazio-**pipe**. Rimisurato correttamente
+(trim del campo, poi ricerca di spazi residui): **zero pattern** in entrambi i file. Nulla
+dipendeva da quel comportamento, e il commento è stato aggiornato perché non prometta più una
+capacità rimossa.
+
+### Verifica
+
+`tests/test-vocab-format.sh`, 10 asserzioni su un **profilo temporaneo** con un vocabolario di
+tre pattern — non quello reale, che cambierebbe `NUM_FEATURES` e richiederebbe un retrain.
+Copre le due forme corrette **e** lo scopo originale (riempimento rimosso, peso numerico
+pulito), più una guardia anti-confronto-vacuo in testa.
+
+Validate con una reversione del fix: **3 FAIL mirati** — esattamente le asserzioni sui
+comportamenti nuovi — mentre le 7 sullo scopo originale restano verdi, cioè la prova di non
+aver rotto ciò che funzionava.
+
+Vettore di feature **invariato** sul vocabolario reale (md5 `123be090d436`), `NUM_FEATURES`
+119, dataset rigenerato bit-identico col backend Python, pesi `bef9198b…`, parità 1171/1171.
+**Nessun retrain.**
 
 ## APOSTR-1 — L'apostrofo: una lacuna di TEST, non di training — **FATTO** (2026-08-24)
 
