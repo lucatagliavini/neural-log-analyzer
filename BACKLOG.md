@@ -8,6 +8,7 @@ Aggiornato: 2026-08-24
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
+| RETENT-1 | **«Ieri» non è una finestra affidabile, e il tool non lo dice** (misurato 2026-08-24 durante SALPERF-1). Il gruppo `prod1nssd-cc.log` — la principale fonte di errori applicativi — conserva **11 rotazioni** con una rotazione ogni ~ora, cioè una retention di circa **11 ore**. Conseguenza misurata dal vivo: la stessa query su «ieri» ha dato **72.940 occorrenze in 59 log alle 16:00** e **56.676 in 56 log alle 17:15**, perché nel frattempo le rotazioni del 23 agosto erano state **cancellate**. Non è un difetto del bot — i file non ci sono più — ma il bot **non lo dichiara**: risponde «56 log» come se fossero tutti quelli esistiti, ed è lo stesso schema di LVLCNT-1 e del quinto campo di SRCH-5, cioè un dato incompleto presentato come completo. Ha anche una conseguenza di metodo già pagata: «ieri» sembra la finestra ovvia per una prova ripetibile e **non lo è**, e per un attimo ho letto il calo come una regressione del mio codice. **Direzione**: quando la finestra richiesta inizia prima del file più vecchio disponibile per un gruppo, dirlo — «i dati prima di HH:MM non sono più sul disco». L'informazione c'è già (il primo timestamp del file più vecchio è quello che `select_log_files_grouped` legge per il walk), quindi è un avviso, non una raccolta dati nuova | **Alta** |
 | SRCHQ-1 | **La regola sugli apici singoli è ora in un punto solo, ma resta un'euristica** — `lib/utils-quoted.sh` (SRCH-5/D3-D4) tratta una coppia di apici come citazione **solo se delimitata da spazi**, perché in italiano `'` è anche l'apostrofo. Conseguenza dichiarata e coperta da test: una citazione fra apici singoli **non può contenere un apostrofo** (`trova 'errore nell'app'` non è riconosciuta come citazione; con le virgolette doppie sì). È lo stesso vincolo del quoting di shell e il messaggio d'aiuto del bot documenta entrambe le forme, quindi l'utente ha già la via d'uscita. **Non c'è nulla da correggere adesso**: la voce esiste perché se un giorno arrivasse una segnalazione su una ricerca fra apici che «non funziona», la causa è questa e sta scritta, invece di essere ridiagnosticata da zero | Promemoria |
 | FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
@@ -197,6 +198,155 @@ riaddestrato e verificato su entrambi i profili nella stessa sessione in cui è 
 segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manuale
 (nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
 implementato su richiesta esplicita dell'utente ("implementiamo domani").
+
+## SALPERF-1 — Il multi-nodo usava il 6% della macchina — **FATTO** (2026-08-24)
+
+`search_all_logs` **multi-nodo** era l'unico percorso con logica propria mai eseguito in
+produzione (SRCH-5 aveva coperto il nodo singolo). Provato su richiesta dell'utente, che
+riferiva «mi sembrava comunque molto lenta»: **aveva ragione**.
+
+**Baseline misurata**: 665 file, 6 GB, 13 nodi → **587 s (9:48)**, usando il **6,4% di 64
+core**. Due cause **indipendenti**.
+
+### Il terreno, che nessuna misura precedente aveva stabilito
+
+Ogni directory di nodo è un **mount NFSv4 read-only montato dal nodo stesso** — 13 server
+NFS distinti. Ma l'NFS **non** è il collo di bottiglia: legge a **200-423 MB/s**, e
+decomprimere un `.gz` da 11 MB costa **7 ms**. `pigz -dc` batte `gunzip -c` **3,8×** (54 ms
+contro 204), quindi quella scelta paga. Il costo è **CPU**.
+
+### Correttezza verificata PRIMA di ottimizzare
+
+Su una finestra **statica** (ieri) le varianti a 4/16/32 worker danno un risultato
+**identico** — **72.940 occorrenze in 59 log** — e la ripetizione della stessa variante
+mostra una varianza fra esecuzioni dell'1,4%. Senza questa verifica la variazione osservata
+sul multi-nodo di oggi (66.014 contro 67.253) sarebbe stata **indistinguibile da un difetto
+di concorrenza**: era crescita del log.
+
+### Causa 1 — 4 worker su 64 core, scritti a mano in tre punti
+
+Il valore era `4` in `profiles/liquido/system.conf`, `profiles/usnext/system.conf` e nel
+fallback del tool — **tre copie**, per due profili che girano sullo **stesso server**.
+
+| worker | fase di ricerca | |
+|--------|-----------------|--|
+| 4 | 555 s | il valore precedente |
+| 8 | 291 s | 1,9× |
+| **16** | **161 s** | **3,4× — saturazione** |
+| 32 | 135 s | 3,6% in più raddoppiando i core |
+
+Il numero di worker **non è una coordinata di profilo** (NLP-1) né una capacità: è una
+proprietà della **macchina dell'installazione**. Quindi si **deriva**, come `MODEL_TOPOLOGY`
+da `NUM_FEATURES`: `nproc/2` con tetto 16, in `lib/utils-log.sh` accanto a `GZ_CAT` — lo
+stesso genere di default. In produzione dà **16**, su una macchina a 8 core dà **4**, cioè
+esattamente il valore di prima: **nessun cambio dove andava bene**.
+
+**Il vecchio default non era sbagliato: era tarato su un carico diverso.** Il commento
+documentava un benchmark del 2026-08-06 (120 file, nodo a 16 core) che trovava il **17%** da
+4 a 24 worker e concludeva «I/O-bound». È corretto *per quel carico* — singolo nodo, pochi
+file, quasi tutti **senza** match, dove domina il pre-gate da 11 ms e non c'è nulla da
+distribuire. Il multi-nodo ha il **26% di file con match**, dove domina la passata `gawk` da
+**16,7 s** su 98 MB. Un default tarato su un carico va **rimisurato quando il carico cambia
+natura**, e la distinzione ha sostituito la vecchia conclusione nei due profili.
+
+### Causa 2 — un `sed` per file, su file che non vengono nemmeno selezionati
+
+`logfile_logical_name()` era chiamata su **ogni file candidato** di ogni directory (~4600 in
+un multi-nodo), con **due `sed`** dentro **e** una subshell nel chiamante:
+
+| implementazione | ms/chiamata | |
+|-----------------|-------------|--|
+| due `sed` + subshell | **4,729** | precedente |
+| bash puro + subshell | 0,566 | 8,4× |
+| bash puro + variabile | **0,019** | **249×** |
+
+**La subshell del chiamante valeva il 96% del costo residuo**: togliere i `sed` senza
+togliere il `$( )` avrebbe lasciato sul tavolo la parte più grossa. Da qui
+`logfile_logical_name_into()` (scrive in una variabile, per i cicli) più il vecchio contratto
+come wrapper per le chiamate singole — **una logica, due punti d'ingresso**, non due
+implementazioni. Fase di selezione: **~22 s → ~0,1 s**.
+
+Equivalenza verificata con un **golden master dei 12.704 nomi di file distinti** realmente
+presenti in produzione: **zero divergenze**. `tests/test-logfile-name-perf.sh` è un test di
+**caratterizzazione** — passa sia prima sia dopo, perché il comportamento non deve cambiare,
+solo il costo — e include `${gw.cc.serverid}-messaging.log`, un placeholder di proprietà non
+espanso che una riscrittura plausibile romperebbe.
+
+### Tre ipotesi falsificate, e due ottimizzazioni scartate su misura
+
+Sui 25 s della selezione mi sono sbagliato **tre volte di seguito**: non era `date -d`
+(1,1 ms), non era il numero di file letti (**54 per nodo e non 353** — il walk si ferma in 16
+gruppi su 17), non era `discover_log_dirs` (12 ms). Era una funzione che non avevo sospettato.
+
+E due ottimizzazioni **scartate perché misurate**, non implementate per intuizione:
+- **`gsub` ANSI condizionata: peggiora** (2641 ms contro 2555) — `index()` costa quanto la
+  `gsub` su una riga senza ESC;
+- **guardie prima delle grammatiche: 6% netto**, non i 3,2× che il pavimento teorico
+  suggeriva (skippare G1 vale 241 ms ma la guardia ne costa 93).
+
+Scartata anche la **memoizzazione della grammatica vincente**, che darebbe quasi tutto il
+margine: violerebbe l'ordine-contratto di LOGF-9, perché su una riga che due grammatiche
+matchano entrambe cambierebbe la risposta.
+
+### Esito misurato in produzione
+
+| | wall | select | search |
+|---|---|---|---|
+| **prima** (4 worker) | **587 s** — 9:48 | 25,7 s | 555 s |
+| **dopo** (16 worker derivati) | **186 s** — 3:06 | 12,5 s | 171 s |
+| controprova: codice nuovo, 4 worker forzati | 629 s | 12,2 s | 614 s |
+
+**3,15× sul totale**, con la macchina che passa dal 6% al 25% di utilizzo. La controprova
+isola i contributi: a parità di worker il tempo resta ~600 s, quindi il guadagno grosso è il
+parallelismo, mentre la selezione scende da 25,7 a 12,3 s in entrambe.
+
+**Una previsione smentita di 100×, e vale più del guadagno.** Avevo previsto la selezione a
+**~0,1 s** dopo aver eliminato i `sed`: è **12,3 s**. Il dimezzamento è reale, ma il resto non
+era in `logfile_logical_name`. Le micro-misure isolavano *una* funzione; il tempo reale include
+ciò che le sta attorno — `_logfiles_sort_key` ancora in `$( )`, `_logfiles_read_first_ts` coi
+suoi `head`, l'ordinamento per gruppo. **Ottimizzare la funzione più costosa non dimezza il
+totale se quella funzione era il 50% e non il 95%.**
+
+189 PASS / 0 FAIL su entrambi i profili, parità 1171/1171, pesi `bef9198b…` invariati.
+
+### Un falso allarme di regressione, e come è stato escluso
+
+Dopo il deploy la finestra «ieri» — scelta *proprio* perché statica — dava **56.676 occorrenze
+in 56 log** contro le **72.940 in 59** misurate prima delle modifiche. Su dati immutabili
+sarebbe una regressione di correttezza in un motore condiviso da tutti i tool.
+
+**Non lo era: i dati erano cambiati.** Il gruppo `cc.log` — principale fonte di
+`NullPointerException` — conserva **11 rotazioni** e la più vecchia era già del 24 agosto: le
+rotazioni del 23 **erano state cancellate** fra le due misure. Con una rotazione ogni ora la
+retention è di circa **11 ore**.
+
+Tre elementi indipendenti convergono: il golden master prova `logfile_logical_name`
+byte-identica su 12.704 nomi; le rotazioni del 23 non esistono su nessuno dei nodi controllati;
+il calo (~16.000 occorrenze, 3 file) è coerente con la sparizione della fonte principale.
+Il conteggio esatto da `grep` indipendente **non** è stato ottenuto: la scansione era troppo
+lenta e caricava la produzione per una conferma già disponibile per altre due vie, quindi è
+stata interrotta.
+
+**La verifica di correttezza del parallelismo resta valida perché fu fatta nella finestra
+giusta**: le quattro esecuzioni a 4/16/32/4 worker che davano 72.940 identiche erano tutte
+dentro la stessa mezz'ora, quando i file c'erano.
+
+### Residui misurati e non fatti
+
+- **`_logfiles_sort_key` è ancora chiamata in `$( )`** una volta per file di ogni gruppo:
+  ~0,5 ms × ~4600 file ≈ **2,3 s**. Stessa cura di `logfile_logical_name_into`, guadagno più
+  piccolo.
+- **`_logfiles_read_first_ts`**: 5 ms per file, di cui `date -d` 1,1 ms. Sui ~54 file percorsi
+  per nodo sono ~0,3 s per nodo.
+- Insieme spiegano buona parte dei 12,3 s residui della selezione.
+
+## RETENT-1 — «ieri» non è una finestra affidabile, e il tool non lo dice — **APERTA**
+
+Vedi la tabella delle voci aperte in testa. Nata da SALPERF-1: la retention di `cc.log` è
+~11 ore, quindi una domanda su «ieri» posta alle 18 riceve una risposta diversa dalla stessa
+domanda posta alle 14 — e il tool risponde «56 log» senza dire che i file di ieri non ci sono
+più. È lo stesso schema di LVLCNT-1 e del quinto campo di SRCH-5: **un dato incompleto
+presentato come completo**.
 
 ## LVLCNT-1 — «ERRORI» contiene «ERROR» — **FATTO** (2026-08-24)
 
