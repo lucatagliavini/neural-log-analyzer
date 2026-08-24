@@ -10,7 +10,6 @@ Aggiornato: 2026-08-24
 |----|-------------|----------|
 | SRCHQ-1 | **La regola sugli apici singoli è ora in un punto solo, ma resta un'euristica** — `lib/utils-quoted.sh` (SRCH-5/D3-D4) tratta una coppia di apici come citazione **solo se delimitata da spazi**, perché in italiano `'` è anche l'apostrofo. Conseguenza dichiarata e coperta da test: una citazione fra apici singoli **non può contenere un apostrofo** (`trova 'errore nell'app'` non è riconosciuta come citazione; con le virgolette doppie sì). È lo stesso vincolo del quoting di shell e il messaggio d'aiuto del bot documenta entrambe le forme, quindi l'utente ha già la via d'uscita. **Non c'è nulla da correggere adesso**: la voce esiste perché se un giorno arrivasse una segnalazione su una ricerca fra apici che «non funziona», la causa è questa e sta scritta, invece di essere ridiagnosticata da zero | Promemoria |
 | FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
-| DEPLOYVER-1 | **`deploy.sh` contiene logica reale ma non è versionato** (trovata 2026-08-21 correggendo l'esclusione del lock). È gitignorato per progetto (`.gitignore:21`) perché contiene l'host dell'installazione (`HOST="root@lxprworkerlana01"`), e non esiste alcun template versionato (`git ls-files | grep deploy` → vuoto). Ma il file non è solo configurazione: contiene il **sentinel di identità** che impedisce a `rsync --delete` di cancellare una dest sbagliata (documentato nelle sue righe 21-40 come «un'invariante che il codice garantisce» invece di una disciplina dell'operatore), due liste di esclusione, e la logica di deploy delle due cartelle sorelle. Conseguenza **misurata**: l'esclusione di `.neural-c.lock` aggiunta oggi vive **solo su questa macchina**, non è rivedibile da nessuno e si perde se il file viene ricreato — e la stessa cosa vale per il sentinel, cioè per la protezione più importante dello script. Direzione: estrarre le coordinate (`HOST`, `DEST`) in un `deploy.local.conf` non versionato — stesso schema già usato per `system.local.conf` — e versionare lo script. **Non fatto**: cambia il modo in cui si deploya, quindi va concordato | Media |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
 
 ### FLEX-1 — classi di caratteri flesse, e FLEX-1b — la parola senza feature (2026-08-20)
@@ -198,6 +197,34 @@ riaddestrato e verificato su entrambi i profili nella stessa sessione in cui è 
 segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manuale
 (nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
 implementato su richiesta esplicita dell'utente ("implementiamo domani").
+
+## DEPLOYVER-1 — `deploy.sh` resta non versionato, per scelta — **CHIUSA** (2026-08-24)
+
+Chiusa su decisione esplicita dell'utente: `deploy.sh` è un **file di lavoro** e non deve
+entrare nel repo. La direzione che la voce proponeva — estrarre `HOST`/`DEST` in un
+`deploy.local.conf` e versionare lo script — è **respinta**, non rimandata.
+
+Resta vero il fatto che l'aveva aperta: lo script contiene logica reale, non solo coordinate,
+e quella logica **non è rivedibile da nessuno** e si perde se il file viene ricreato. La
+mitigazione a costo zero, e la ragione per cui questa voce non sparisce ma si chiude
+**documentando**, è trascrivere qui l'invariante più importante — il **sentinel di identità** —
+così è ricostruibile dal repo anche senza il file:
+
+> **`rsync --delete` + sentinel `.lana-bot-root`.** `--delete` cancella ricorsivamente la
+> directory che gli viene passata: un `--dest` sbagliato, un `DEST` vuoto o un typo diventano
+> una cancellazione in produzione, e `--dry-run` non protegge chi lancia il comando senza.
+> Perciò `--delete` **aborta** se nella dest non esiste il marcatore `.lana-bot-root`, scritto
+> una volta con `--init`. Il marcatore identifica la **directory**, non il contenuto: funziona
+> anche su una dest legittima ma vuota (primo deploy). Senza `--delete` il deploy è **additivo**
+> (i file rimossi in locale restano nella dest) — ed è il default, perché un residuo è rumore
+> mentre una cancellazione sbagliata è un incidente. È un'invariante che il **codice
+> garantisce**, non una disciplina dell'operatore: stesso principio del controllo di topologia
+> di `train.sh` (ARCH-4).
+
+Corollario, già registrato il 2026-08-21 e ora **accettato come costo noto**: l'esclusione di
+`.neural-c.lock` dal deploy vive solo sulla macchina di sviluppo e va riapplicata a mano se il
+file viene ricreato. Con lo script non versionato per scelta, questo è il prezzo — reso
+esplicito qui perché chi ricrea il file sappia cosa manca.
 
 ## VOCFMT-1 — Il vocabolario non poteva esprimere uno spazio — **FATTO** (2026-08-24)
 
