@@ -27,8 +27,11 @@ function norm_key(msg,    k) {
 
 function flush_exception(    dk, full_msg, f) {
     if (!in_exc) return
-    if (exc_level == "ERROR") nerror++
-    else nwarn++
+    # logline_count_level() invece di `if ERROR … else nwarn++` (LVLCNT-1): la
+    # classificazione binaria attribuiva ai WARN qualsiasi livello diverso da ERROR,
+    # e con il selettore per sottostringa di sotto ci finivano righe INFO. Ora la
+    # regola è una sola, condivisa con tail_log e tail_named_log.
+    logline_count_level(exc_level)
     count++
 
     full_msg = exc_msg
@@ -44,7 +47,24 @@ function flush_exception(    dk, full_msg, f) {
     delete exc_frame
 }
 
-/ERROR|WARN/ {
+# Selettore ANCORATO alla posizione del livello, non una sottostringa (LVLCNT-1).
+#
+# Qui c'era `/ERROR|WARN/`, che matcha in qualsiasi punto della riga — e in italiano
+# il plurale di «errore» è «ERRORI», che CONTIENE «ERROR». Misurato sul nodo 4 di
+# produzione: 44 righe `INFO [stdout] [(1) ERRORI AGENZIA - …]` entravano nel filtro,
+# venivano contate come WARN (vedi flush_exception) e STAMPATE in un report
+# intitolato «Righe ERROR/WARN dal server.log». Il totale dichiarava 46 WARN dove
+# nella finestra ce n'erano 2.
+#
+# La forma ancorata `^data ora LIVELLO ` non può confondere un contenuto con un
+# livello, ed è la stessa che parse_server_log() (utils-jboss.awk) usa per
+# riconoscere la riga: il pre-filtro e il parser ora concordano invece di divergere.
+#
+# Verificato sui log reali che nessuna riga necessaria venga scartata: i frame di
+# stack trace sono record JBoss completi col proprio livello ERROR (32 righe su 32
+# ben formate), quindi l'ancora li conserva tutti — è il raggruppamento sotto
+# l'eccezione a dipendere da loro, e continua a funzionare.
+/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:,]+ +(ERROR|WARN) / {
     if (!parse_server_log()) next
     if ((time_from != "" || time_to != "") && !in_range(parse_server(_ts_date, _ts_time))) next
     level = _level

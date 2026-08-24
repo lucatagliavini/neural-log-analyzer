@@ -34,14 +34,11 @@ function print_colored(line,    color) {
         print line
 }
 
-function count_level(line) {
-    $0 = line
-    if (logline_parse()) {
-        if      (_ll_level == "ERROR") nerror++
-        else if (_ll_level == "WARN")  nwarn++
-        else if (_ll_level == "INFO")  ninfo++
-    }
-}
+# count_level() vive in lib/utils-logline.awk, caricato prima di questo file
+# (LVLCNT-1, 2026-08-24): questa funzione era duplicata BYTE PER BYTE qui e in
+# tail_log.awk, e una terza variante in filter_errors.awk classificava per
+# esclusione — dichiarando 46 WARN su un log che ne aveva 2. Tre copie, una
+# divergente: il rimedio è non averne copie.
 
 {
     if (head_mode) {

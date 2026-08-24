@@ -35,14 +35,11 @@ function print_colored(line) {
 # logline_parse() analizza $0: per una riga bufferizzata va assegnata a $0
 # prima della chiamata (sicuro qui — il chiamante non usa più i campi
 # correnti dopo, vedi la nota in tail_named_log.awk).
-function count_level(line) {
-    $0 = line
-    if (logline_parse()) {
-        if      (_ll_level == "ERROR") nerror++
-        else if (_ll_level == "WARN")  nwarn++
-        else if (_ll_level == "INFO")  ninfo++
-    }
-}
+# count_level() vive in lib/utils-logline.awk, caricato prima di questo file
+# (LVLCNT-1, 2026-08-24): questa funzione era duplicata BYTE PER BYTE qui e in
+# tail_named_log.awk, e una terza variante in filter_errors.awk classificava per
+# esclusione — dichiarando 46 WARN su un log che ne aveva 2. Tre copie, una
+# divergente: il rimedio è non averne copie.
 
 {
     if (time_from != "" || time_to != "") {

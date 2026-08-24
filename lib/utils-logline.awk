@@ -192,3 +192,49 @@ function logline_parse(    line, a) {
 
     return 0
 }
+
+# ─── Conteggio dei livelli ────────────────────────────────────────────────────
+#
+# logline_count_level(LVL) — incrementa nerror/nwarn/ninfo secondo il livello.
+# count_level(LINE)        — parsa la riga e conta, per i tool che ricevono una
+#                            riga bufferizzata invece del record corrente.
+#
+# Vivono qui, e non in tre copie nei tool, per un difetto misurato in produzione
+# (LVLCNT-1, sweep del 2026-08-24): lo stesso conteggio era scritto TRE volte e due
+# copie erano corrette. `tail_log.awk` e `tail_named_log.awk` avevano
+#
+#     if (lvl == "ERROR") nerror++; else if (lvl == "WARN") nwarn++; else if …
+#
+# cioè un livello estraneo non veniva conteggiato; `filter_errors.awk` aveva
+#
+#     if (lvl == "ERROR") nerror++; else nwarn++
+#
+# una classificazione BINARIA, che faceva finire nei WARN qualsiasi altro livello.
+# La copia sbagliata era quella che nessuno aveva riletto — e il difetto non è di
+# ragionamento ma di divergenza fra copie, quindi il rimedio è non averne copie.
+#
+# Il conteggio è ESPLICITO per livello e senza `else` finale: un livello che non
+# conosciamo (DEBUG, TRACE, o una stringa vuota da una riga non riconosciuta) non
+# viene attribuito a nessun contatore. Attribuirlo per esclusione è esattamente il
+# difetto: `filter_errors` dichiarava 46 WARN su un log che ne aveva 2, perché 44
+# righe INFO italiane contenenti la parola «ERRORI» finivano nel ramo `else`.
+#
+# Incrementa direttamente nerror/nwarn/ninfo, che in AWK sono globali condivise fra
+# tutti i file caricati con -f: così i tool continuano a stamparle come prima e la
+# migrazione non tocca il loro output.
+function logline_count_level(lvl) {
+    if      (lvl == "ERROR") nerror++
+    else if (lvl == "WARN")  nwarn++
+    else if (lvl == "INFO")  ninfo++
+    # Nessun ramo `else`: vedi sopra — è deliberato, non un caso non gestito.
+}
+
+# count_level(LINE) — per i tool che accumulano righe in un buffer e le contano a
+# posteriori (tail_log, tail_named_log): imposta $0 e delega a logline_parse().
+#
+# Sostituisce $0, quindi va chiamata solo dove il record corrente non serve più —
+# è il comportamento che avevano già le due copie identiche da cui nasce.
+function count_level(line) {
+    $0 = line
+    if (logline_parse()) logline_count_level(_ll_level)
+}
