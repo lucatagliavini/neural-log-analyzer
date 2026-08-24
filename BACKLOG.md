@@ -1,6 +1,6 @@
 # Backlog — neural-log-analyzer
 
-Aggiornato: 2026-08-21
+Aggiornato: 2026-08-24
 
 ---
 
@@ -8,7 +8,8 @@ Aggiornato: 2026-08-21
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
-| SRCH-5 | **`search_all_logs` non è mai stato provato in produzione — PRIMO PUNTO della prossima sessione** (concordato con l'utente il 2026-08-21). È l'**unico dei 16 tool** escluso dallo sweep del 2026-08-21, per durata: ricorre su **tutti** i log del nodo, di **tutte** le app, quindi ha la superficie più ampia di tutti — ed è anche quello con più logica propria alle spalle (LOGDISC-2: ricorsione sotto il nodo, colonna APP, pool di processi paralleli). Lo sweep sugli altri 15 ha prodotto **tre difetti**, uno grave (THR-1, 12× sulla stessa domanda): la probabilità che il tool con la superficie maggiore sia l'unico pulito è bassa. **Da coprire**: che trovi le occorrenze in log di app diverse dichiarandone la provenienza (la politica cross-app del principio 6), che il pattern quotato funzioni (SRCH-2/QUOTE-1), che i `.gz` siano letti, che il tempo di risposta sia accettabile su un nodo reale, e che la finestra temporale filtri davvero. **Due trappole di metodo da non ripetere**, entrambe costate tempo il 2026-08-21: leggere il solo file corrente di un log invece del gruppo di rotazioni (alle 15:05 l'access log aveva 680 righe invece di 333.296 — usare `select_log_files_grouped`, o eseguire via `chatbot.sh`), e provare da una copia in `/tmp`, che rompe il layout a cartelle sorelle e fa fallire `infer.sh` su `../neural-c` senza messaggio | **Alta** |
+| APOSTR-1 | **Il dataset non contiene un solo apostrofo** — misurato il 2026-08-24 chiudendo SRCH-5/D4: su **1171 query etichettate, zero** contengono `'`, mentre in italiano l'elisione è la forma naturale («errori nell'ultima ora», «l'app», «dall'ip»). Non è un difetto di codice ma una **lacuna di rappresentatività**: è la ragione per cui D4 — il ramo che leggeva due apostrofi come una citazione e cancellava l'espressione temporale dal vettore — è sopravvissuto senza che alcun test lo sfiorasse. Il difetto è corretto, la lacuna resta: il classificatore non è mai stato *addestrato* su query con elisione, quindi non si sa come si comporti al di là dei due casi verificati a mano (66,2% su `errori nell'ultima ora dell'app`, identico alla forma senza apostrofi). **Da fare**: aggiungere esempi con elisione a `queries_labeled.txt` e misurare il delta di confidenza sulle classi vicine. Richiede `build-dataset.sh` + `train.sh`, quindi **un retrain e un checksum nuovo** in `test-train-regression.sh` — per questo non è stato fatto insieme al fix | Media |
+| SRCHQ-1 | **La regola sugli apici singoli è ora in un punto solo, ma resta un'euristica** — `lib/utils-quoted.sh` (SRCH-5/D3-D4) tratta una coppia di apici come citazione **solo se delimitata da spazi**, perché in italiano `'` è anche l'apostrofo. Conseguenza dichiarata e coperta da test: una citazione fra apici singoli **non può contenere un apostrofo** (`trova 'errore nell'app'` non è riconosciuta come citazione; con le virgolette doppie sì). È lo stesso vincolo del quoting di shell e il messaggio d'aiuto del bot documenta entrambe le forme, quindi l'utente ha già la via d'uscita. **Non c'è nulla da correggere adesso**: la voce esiste perché se un giorno arrivasse una segnalazione su una ricerca fra apici che «non funziona», la causa è questa e sta scritta, invece di essere ridiagnosticata da zero | Promemoria |
 | FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
 | DEPLOYVER-1 | **`deploy.sh` contiene logica reale ma non è versionato** (trovata 2026-08-21 correggendo l'esclusione del lock). È gitignorato per progetto (`.gitignore:21`) perché contiene l'host dell'installazione (`HOST="root@lxprworkerlana01"`), e non esiste alcun template versionato (`git ls-files | grep deploy` → vuoto). Ma il file non è solo configurazione: contiene il **sentinel di identità** che impedisce a `rsync --delete` di cancellare una dest sbagliata (documentato nelle sue righe 21-40 come «un'invariante che il codice garantisce» invece di una disciplina dell'operatore), due liste di esclusione, e la logica di deploy delle due cartelle sorelle. Conseguenza **misurata**: l'esclusione di `.neural-c.lock` aggiunta oggi vive **solo su questa macchina**, non è rivedibile da nessuno e si perde se il file viene ricreato — e la stessa cosa vale per il sentinel, cioè per la protezione più importante dello script. Direzione: estrarre le coordinate (`HOST`, `DEST`) in un `deploy.local.conf` non versionato — stesso schema già usato per `system.local.conf` — e versionare lo script. **Non fatto**: cambia il modo in cui si deploya, quindi va concordato | Media |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
@@ -198,6 +199,236 @@ riaddestrato e verificato su entrambi i profili nella stessa sessione in cui è 
 segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manuale
 (nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
 implementato su richiesta esplicita dell'utente ("implementiamo domani").
+
+## TOKEN-1 — Token GitHub in chiaro: rimosso e revocato — **FATTO** (2026-08-24)
+
+Segnalato il 2026-08-20 e il 2026-08-21 **solo nei pendenti dei session log**, e per due
+volte slittato. Chiuso su richiesta dell'utente. La prima lezione è quella: il backlog è la
+fonte di verità, e una voce che non è qui non viene ripresa — per questo la voce è stata
+creata *prima* di essere chiusa, invece di risolvere il problema in silenzio.
+
+### Che cosa era esposto, misurato prima di agire
+
+`.git/config` conteneva `https://lucatagliavini:<TOKEN>@github.com/…` con permessi **`644`**,
+cioè leggibile da **qualsiasi utente della macchina**, dal 3 agosto: 21 giorni. Storia git,
+server di produzione, `bash_history` e la trascrizione di chat salvata: **tutti puliti**.
+Restavano 9 trascrizioni `~/.claude/projects/*.jsonl` (directory `700`).
+
+### Quattro cose che l'accertamento ha cambiato rispetto alla descrizione del problema
+
+**1. L'allarme peggiore era un falso allarme.** `git grep` ha trovato `ghp_` in un file
+**versionato** (`docs/sessions/2026-08-17-01.md:331`) — che con un `origin` su GitHub
+significherebbe un segreto **pubblicato**. Era la prosa che descriveva il difetto, con
+un'ellissi: **zero caratteri** dopo il prefisso. Agire sull'allarme avrebbe voluto dire
+riscrivere la storia git per nulla.
+
+**2. Il token era ridondante, non necessario.** `gh auth setup-git` risultava **già
+configurato** prima di eseguirlo: git era già istruito a chiedere le credenziali a `gh`, che
+le tiene in un file **`600`**. Ma un URL con `user:token@` fa sì che git usi quelle
+credenziali e **non consulti mai** il credential helper. Il segreto stava scavalcando un
+meccanismo già presente e meglio protetto, quindi il fix consisteva nel **togliere**.
+
+**3. Lo stesso token era condiviso con un secondo repository.** `neural-bash` — il
+predecessore da cui questo è stato separato via `git subtree split` — aveva lo stesso segreto
+nell'URL, verificato **per hash** e non per ispezione. La revoca, così com'era, avrebbe rotto
+i push di quel repo senza una causa apparente. Bonificato anche quello.
+
+**4. SSH è escluso dall'ambiente, non da una preferenza.** `github.com:22` va in timeout e
+**anche `ssh.github.com:443`**: il firewall li blocca entrambi. Con SSH fuori gioco il
+criterio diventa «quale segreto è protetto meglio», e `gh` vince per i permessi del file.
+
+### Ordine di esecuzione, e perché conta
+
+La **scrittura** è stata provata (`git push --dry-run`, exit 0) con l'URL privo di
+credenziali **prima** di rimuovere il token: altrimenti si distruggerebbe l'unica copia del
+segreto senza aver dimostrato che l'alternativa funziona. Stessa sequenza sui due repo.
+
+### Esito, verificato dopo la revoca
+
+- Nessun repository nella home ha credenziali in un URL (ricontrollato)
+- I due `.git/config` da `644` a **`600`**
+- `gh` ancora autenticato, scope `repo` intatto; `fetch` e `push --dry-run` **exit 0 su
+  entrambi** i repository
+- Token **revocato dall'utente** su GitHub: è il solo passo che rende il segreto inutile a
+  chi lo ha già letto, e va distinto dal rimuoverlo dal disco — averli confusi è il motivo
+  per cui una voce di sicurezza può *sembrare* chiusa restando aperta
+- Le 9 trascrizioni sono state **lasciate come sono** su scelta dell'utente: a revoca
+  avvenuta quelle stringhe sono inerti, e la directory è `700`
+
+**Nota che evita un errore in futuro**: la credenziale di `gh` è un token **OAuth** (`gho_`)
+che vive sotto *Authorized OAuth Apps*, pagina diversa dai Personal access token — revocare
+un PAT non può rompere `gh`.
+
+## SRCH-5 — `search_all_logs` provato in produzione: cinque difetti — **FATTO** (2026-08-24)
+
+Il tool era **l'unico dei 16 mai eseguito sui log veri**, escluso dallo sweep del 2026-08-21
+per durata, ed è quello con la superficie più ampia. La voce prevedeva che «la probabilità
+che il tool con la superficie maggiore sia l'unico pulito è bassa». Eseguito sul nodo 4 di
+`prod`: 353 file, 294 MB, 190 `.gz`, due app.
+
+**Verificato funzionante**, e va detto perché è metà del risultato: politica cross-app con
+colonna APP (principio 6), lettura `.gz` (39 dei 40 file con match sono compressi), tempo
+di risposta 8,2–17,2 s su 49 file con 4 worker, estrazione del pattern quotato, marcatore
+`*` con nota per i timestamp solo-ora.
+
+**Cinque difetti**, di cui quattro trovati provando il tool e uno cercando la causa di un
+conteggio che non tornava. Ognuno misurato contro una verità di riferimento `grep`
+indipendente, mai dedotto dal codice.
+
+### D1 — Il filtro temporale saltato sui log con timestamp non riconosciuto
+
+Query `cerca "MOVE_TO_QUEUE"` con finestra **oggi**: **61 occorrenze** riportate contro **4**
+corrette. **15,25×**, lo stesso ordine di THR-1. Prova isolata: una stringa presente solo
+nella rotazione del 15 agosto (`cc-1786662052345-375622044`) veniva restituita da una query
+su oggi.
+
+Causa: 2 gruppi di log su 14 sono JSON-lines, col timestamp dentro un campo —
+`{"UpdateTime":"2026-08-24 03:08:01.352"` e `{…"time":"2026-08-24T07:12:12.514CEST"`.
+Nessuna grammatica li riconosceva, quindi `search_all_logs.awk` saltava il filtro riga
+(richiede `eff_has_date`) e includeva tutto (principio 5).
+
+**Due sotto-casi con sintomi opposti, e il secondo è il più insidioso:**
+- **KPI** — nessuno dei due gemelli riconosceva → `ts_start=0`, il walk di
+  `select_log_files_grouped` non si fermava mai e leggeva **tutte le 11 rotazioni**, cioè
+  l'intera retention, per una query su oggi.
+- **JF4U** — il gemello **bash** riconosceva (via il ramo ISO non ancorato), quello awk no.
+  La selezione file sembrava corretta, quindi **niente suggeriva un problema**, e il filtro
+  riga era saltato comunque. `utils-logline.awk:5` dichiara che le due liste vanno tenute in
+  parità: era rotta, e in silenzio.
+
+Corretto con **una** grammatica per entrambe le forme (`"chiave":"<data>[ T]<ora>"`),
+aggiunta ai due gemelli. Ultima posizione, e la ragione è verificata ramo per ramo, non
+presunta: nessuno dei 6 esistenti matcha una riga JSON (1-2 richiedono la quadra, 3/5/6 sono
+ancorati a `^` e la riga apre con `{`, 4 richiede un `LEVEL`). Stare per ultimo **protegge**
+anche il caso inverso — una riga di access log con un corpo JSON resta gestita dal ramo 1.
+
+**La stessa grammatica mancante causava due difetti opposti in due tool**, e la simmetria è
+la parte istruttiva: `search_all_logs` **contava tutto** (61 contro 4), `grep_named_log`
+— che filtra col criterio opposto, `row_epoch <= 0 → next` — **non trovava nulla** (0 righe
+contro 1 corretta, misurato). Un falso positivo clamoroso e un falso negativo silenzioso
+dalla stessa radice.
+
+### D2 — Le occorrenze non filtrabili contate in silenzio
+
+Il difetto di D1 è rimasto invisibile perché una riga che il filtro non può valutare veniva
+**inclusa** (principio 5, corretto) e **contata senza dirlo** (non corretto). Il principio 5
+protegge dal falso negativo sulla *selezione file*; applicato al *conteggio* produce un
+numero sbagliato presentato come giusto.
+
+Aggiunto un **quinto campo** `unfiltered` al contratto di `search_all_logs.awk`, marcatore
+`!` per riga e nota a piè di tabella. Un **conteggio** e non un flag per-file, perché un log
+può essere misto. In coda a ogni salto, così `hits` resta in posizione 2 e la somma parziale
+del progresso (`awk -F'|' '{s+=$2}'`) non va rinumerata.
+
+La nota è tenuta **distinta** da quella del `*`: `*` riguarda la precisione del min/max
+mostrato, `!` la validità del conteggio rispetto alla finestra chiesta. Confonderle farebbe
+leggere un problema di visualizzazione dove c'è un problema di misura.
+
+**Una distinzione che il test ha dovuto insegnare:** «senza data» non è «non filtrabile».
+Una riga priva di timestamp **eredita** quello dell'ultima riga datata (il meccanismo che
+tiene insieme una stack trace con la sua eccezione, 2026-08-05), quindi è filtrabile. Non
+filtrabile è solo la riga che non ha nulla da cui ereditare. La prima fixture asseriva 1 e
+otteneva 0: era la fixture a violare un'invariante voluta, non il codice — la quarta volta
+in questo progetto.
+
+### D3 — La stringa cercata decideva dove si cercava
+
+`cerca "chiamata al nodo 7" nel nodo 4`, con `--node 4` **anche** sulla riga di comando:
+il bot ha cercato sul **nodo 07**. Verificato end-to-end in produzione. Idem
+`cerca "utente su ContactManager"` → `DETECTED_APP=contactmanager`, e
+`cerca "api-gateway timeout"` → `NAMED_LOG='api'` con un avviso che accusava l'utente di
+aver nominato un log che non aveva nominato.
+
+Causa comune: la regione quotata — l'unico pezzo della query che **non** è linguaggio
+naturale — non era sottratta agli estrattori. **Sette leak in più erano stati dedotti dal
+codice e non misurati; provati poi tutti veri**, e il più insidioso è quello temporale:
+
+| query | prima |
+|-------|-------|
+| `cerca "errori di ieri"` | `TIME_FROM` = ieri — **sposta la finestra** |
+| `cerca "errore 500 interno"` | `STATUS_CODE=500` |
+| `cerca "chiamata da 10.1.2.3 rifiutata"` | `IP_FILTER=10.1.2.3` |
+| `cerca "riga di ERROR grave"` | `LEVEL_EXPLICIT=1` |
+
+Corretto con `lib/utils-quoted.sh`, punto unico, e **due correzioni speculari** perché
+`chatbot.sh` passa la query grezza a due pipeline indipendenti:
+- `param-extract.sh` — maschera in **un solo punto** (`query="${1,,}"`), che copre tutti e
+  nove gli estrattori invece di correggerne uno alla volta;
+- `normalize-query.sh` — maschera prima del rilevamento entità e **ripristina** prima della
+  sezione 3.5. Preferito allo spostamento della sezione: quel blocco ha un sotto-ramo
+  (SRCH-4) che **rimuove** le virgolette lasciando il nome letterale, e spostarlo lo
+  esporrebbe alle sezioni da cui lo si protegge — sposterebbe il difetto. È anche ciò che
+  garantisce `NORM_QUERY` invariato e quindi **nessun retrain**.
+
+**Una regressione che il fix ha causato e i test preesistenti hanno intercettato:** il
+mascheramento indiscriminato ha rotto SRCH-4, perché un log **di sistema** citato
+(`errori nel "server.log"`) è un log che l'utente sta **nominando**, non una stringa da
+cercare. Avevo previsto la sottigliezza per una pipeline e l'avevo mancata per l'altra —
+il principio 8 nella sua forma esatta. Corretta riusando `system_log_kind_of`, la fonte di
+verità già condivisa.
+
+**Un difetto nel rimedio, trovato prima di committarlo:** la prima versione di
+`quoted_spans_of` emetteva prima tutte le doppie e poi le singole, mentre le sentinelle
+stanno nella stringa in ordine **posizionale**: su `trova 'x' e "y" ora` il ripristino li
+avrebbe **scambiati**. Corretto con una scansione unica ad alternanza.
+
+### D4 — L'apostrofo italiano letto come citazione
+
+Trovato **verificando la parità** su query fuori dataset. Il ramo `a-bis` usava `'[^']*'`
+senza delimitatori, e in italiano l'apostrofo è graficamente la virgoletta singola:
+
+    «errori nell'ultima ora dell'app»  →  «errori nell<PATTERN>app»
+
+L'espressione temporale **spariva dal vettore di feature**. Misurato sul classificatore:
+confidenza da **66,2% a 56,8%**, e `search_all_logs` compariva al **13,3%** — perché
+`<PATTERN>` è per costruzione il segnale «qui c'è una stringa da cercare», che quella frase
+non conteneva. Il vincitore teneva, ma su una query con margine minore girerebbe.
+
+Sopravvissuto perché **zero delle 1171 query etichettate contiene un apostrofo**: il dataset
+non rappresenta la forma più naturale dell'italiano, quindi nessun test poteva inciamparvi.
+È anche la ragione per cui correggerlo non ha richiesto retrain.
+
+Corretto migrando il ramo alla regola di `utils-quoted.sh` (una coppia di apici è citazione
+solo se **delimitata** da spazi). Un chiamante non migrato, di nuovo il principio 8.
+
+**Limite dichiarato e asserito**, non scoperto da un utente: una citazione fra apici singoli
+non può contenere un apostrofo, perché nessuna regola locale distingue `'errore nell'app'`
+da due elisioni. Stesso vincolo del quoting di shell, stesso rimedio: virgolette doppie.
+
+### D5 — «ultimi N giorni» non interpretato
+
+`TIME_FROM`/`TIME_TO` vuoti → fallback **silenzioso** a oggi: chi chiedeva sette giorni
+riceveva oggi senza avviso. Asimmetria nella grammatica: esistevano
+`ultim[aeio] [0-9]+ or[ae]` e `[0-9]+ minut`, per i giorni solo `ultim[aeio] giorn`, che il
+numero interposto non fa matchare.
+
+Aggiunto `_RE_LAST_N_DAYS` con semantica **calendario, oggi incluso** (scelta con l'utente):
+`ultimi 7 giorni` = `2026-08-18T00:00 → 2026-08-24T23:59`. Coerente con `ieri`/`oggi`, e su
+un log copre rotazioni **intere** invece di tagliarle a metà giornata — quindi la risposta
+non cambia secondo l'ora in cui si pone la domanda. `date_filter` resta vuoto: la frase
+nomina più rotazioni, e la selezione la guida il range.
+
+Collocato **prima** di `_RE_LAST_DAY` anche se oggi non collidono, per non dipendere da
+un'assenza di collisione che una modifica futura alla regex più generica rimuoverebbe in
+silenzio.
+
+### E un difetto nei test, trovato da un conteggio che non tornava
+
+Aggiunte 5 asserzioni a `test-logline.sh` e il totale della suite **non si muoveva**. La
+prima spiegazione era corretta — `run-tests.sh` conta i file esterni come un PASS ciascuno —
+ed era anche quella che nascondeva il difetto: **`tests/test-normalize-query.sh`, 302 righe e
+56 asserzioni, non era nella lista del runner**. Un file sano (56 PASS, exit 0),
+semplicemente dimenticato, che non ha mai protetto nulla dalla suite — ed è il test del file
+modificato per D3 e D4. Aggiunto alla lista, con l'intestazione della sezione allineata.
+
+### Esito
+
+- **186 PASS / 0 FAIL** su entrambi i profili, `--parity` **1171/1171** su entrambi
+- **Nessun retrain**: `queries.txt` rigenerato bit-identico **col backend Python** (cioè col
+  codice modificato), pesi `bef9198b…` invariati, `input 119`, training deterministico
+- Ogni test nuovo eseguito **prima** del fix per vederlo fallire; il loop di parità dei
+  gemelli validato con una **mutazione deliberata** (ramo rimosso da un solo lato → 5 FAIL
+  mirati, fra cui entrambe le asserzioni di parità), file ripristinato bit-identico
 
 ## SVCGRAN-2 — Un prefisso fisso che consumava le componenti — **FATTO** (2026-08-21)
 
