@@ -397,12 +397,13 @@ logfiles_coverage_note() {
         local _names
         _names=$(printf '%s, ' "${unverifiable[@]}"); _names="${_names%, }"
         if [[ ${#unverifiable[@]} -eq 1 ]]; then
-            printf "  ${C_PARTIAL}? copertura non verificabile su %s: il file più vecchio non${C_RESET}\n" "$_names"
+            printf "  ${C_PARTIAL}? copertura non verificabile su %s: il file più vecchio${C_RESET}\n" "$_names"
+            printf "  ${C_PARTIAL}  non espone un timestamp riconoscibile.${C_RESET}\n"
         else
             printf "  ${C_PARTIAL}? copertura non verificabile su %d log (%s): i file più vecchi${C_RESET}\n" \
                 "${#unverifiable[@]}" "$_names"
+            printf "  ${C_PARTIAL}  non espongono un timestamp riconoscibile.${C_RESET}\n"
         fi
-        printf "  ${C_PARTIAL}  non espongono un timestamp riconoscibile.${C_RESET}\n"
     fi
 }
 
