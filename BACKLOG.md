@@ -381,13 +381,25 @@ rimisurato sulla flotta reale: che i 13 nodi in produzione abbiano ≤30 nomi lo
 è un'inferenza dalla configurazione di profilo (`SERVER_LOG_BASE`/`ACCESS_LOG_BASE`/
 `GC_LOG_BASE`/`CUSTOM_LOG_SUBPATH`), non un conteggio dal vivo sull'albero di produzione.
 
-### Non ancora fatto
+### Verifica in produzione (2026-08-25)
 
-Il piano approvato prevedeva anche: verifica in produzione (ripetere «ieri» su `cc.log` a
-un'ora di distanza e controllare che le due risposte restino spiegabili — il caso che ha
-aperto questa voce) e deploy via `./deploy.sh`. **Nessuno dei due è stato eseguito in questa
-sessione**: locale e test sono verdi, ma non equivalgono alla verifica dal vivo che questa
-stessa voce chiede per un motivo diretto — vedi session log `docs/sessions/2026-08-25-01.md`.
+Deploy via `./deploy.sh` (dry-run prima, md5 di `queries.txt`/`dataset.txt` confrontati
+locale/remoto per escludere modifiche al modello — erano trasferimenti a vuoto per solo
+mtime, come già osservato in SALPERF-1). `errori nel cc.log di ieri` sul nodo 4 ha dichiarato
+correttamente la finestra scoperta; ripetuta ~50 minuti dopo la prima verifica, la nota ha
+avanzato l'orario di copertura in modo coerente con la rotazione oraria — la progressione
+stessa è la conferma che la voce chiedeva. Verificato anche il footer multi-nodo di
+`search_all_logs` (11 gruppi `cc.log` dichiarati scoperti in un colpo, più un `console.log`
+dichiarato non verificabile).
+
+**La verifica dal vivo ha trovato due difetti che la suite locale non copriva**, entrambi di
+formulazione del messaggio, non di logica: il ramo a un solo gruppo duplicava «non copre»
+(«il risultato non copre non copre l'intera finestra…») e il ramo a un solo file duplicava
+«non» con concordanza plurale su soggetto singolare («il file più vecchio non non
+espongono…», invece di «non espone»). Nessuna delle 11 asserzioni locali li intercettava
+perché tutte controllavano la **radice** del testo («dati disponibili solo da», «? »), non la
+frase intera — lo stesso metodo che le rende resistenti alla concordanza le rendeva cieche a
+questa duplicazione. Corretti con due commit separati, ridistribuiti, riverificati dal vivo.
 
 ## LVLCNT-1 — «ERRORI» contiene «ERROR» — **FATTO** (2026-08-24)
 
