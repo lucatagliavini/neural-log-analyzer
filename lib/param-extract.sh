@@ -284,16 +284,10 @@ if [[ -z "$NAMED_LOG" ]]; then
     _fb=$(grep -oE "[A-Za-z0-9_.-]+\.log\b" <<< "$query_orig_masked" | head -1)
     if [[ -n "$_fb" ]]; then
         _fb_base="${_fb%.log}"
-        _fb_ok=1
-        # Il valore finisce in `find -name`: whitelist obbligatoria, non difensiva.
-        [[ "$_fb_base" == *".."* ]] && _fb_ok=0
-        [[ ! "$_fb_base" =~ ^[A-Za-z0-9_.-]+$ ]] && _fb_ok=0
-        # Serve almeno un alfanumerico: "..log" passerebbe la whitelist con base "."
-        # e "-.log" con base "-", che non sono nomi di log. Innocui per `find -name`
-        # (che tratta il valore come pattern di nome, non come path) ma privi di senso.
-        [[ ! "$_fb_base" =~ [A-Za-z0-9] ]] && _fb_ok=0
-        _is_system_log_base "$_fb_base" && _fb_ok=0
-        [[ "$_fb_ok" -eq 1 ]] && NAMED_LOG="$_fb_base"
+        # Whitelist e distinzione sintassi/sistema centralizzate in
+        # named_log_base_problem() (utils-logfiles.sh, CTX-4): stessa funzione
+        # usata da chatbot.sh --named-log, un solo punto di verità.
+        [[ -z "$(named_log_base_problem "$_fb_base")" ]] && NAMED_LOG="$_fb_base"
     fi
 fi
 

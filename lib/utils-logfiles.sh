@@ -529,6 +529,33 @@ system_log_kind_of() {
     return 1
 }
 
+# named_log_base_problem NAME
+# Valida un basename di named log (senza .log) prima che finisca in
+# `find -name` (dispatch.sh:187): whitelist OBBLIGATORIA, non difensiva, sul
+# valore che raggiunge il comando, non un controllo di comodo. Stampa
+# "sintassi" se NAME non la supera (traversal, caratteri fuori whitelist,
+# nessun alfanumerico — "..log"/"-.log" passerebbero il solo pattern ma sono
+# prive di senso), "sistema" se identifica un log di sistema
+# (system_log_kind_of: quei log hanno tool dedicati, non la sintassi
+# "<nome>.log"), stringa vuota se NAME è valido. Estratta da
+# param-extract.sh:283-298 (principio 8 di CLAUDE.md: centralizzare significa
+# migrare il chiamante esistente, non solo crearne uno nuovo) perché
+# chatbot.sh --named-log (CTX-4) applica la stessa whitelist allo stesso
+# comando a valle e una seconda copia divergerebbe silenziosamente.
+named_log_base_problem() {
+    local name="$1"
+    if [[ "$name" == *".."* ]] || [[ ! "$name" =~ ^[A-Za-z0-9_.-]+$ ]] \
+        || [[ ! "$name" =~ [A-Za-z0-9] ]]; then
+        echo "sintassi"
+        return
+    fi
+    if _is_system_log_base "$name"; then
+        echo "sistema"
+        return
+    fi
+    echo ""
+}
+
 # discover_log_dirs ROOT
 # Stampa (una per riga, deduplicata e ordinata) le directory che CONTENGONO
 # file di log sotto ROOT, a qualsiasi profondità.

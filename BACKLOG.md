@@ -3389,6 +3389,7 @@ profilo senza retrain. Non abbiamo eliminato la whitelist: l'abbiamo tolta dai p
 | CTX-1 | **Persistenza filtro temporale** — `ACTIVE_TIME_FROM` / `ACTIVE_TIME_TO` in `chatbot.sh`. Se la query specifica un tempo → aggiorna; se non → eredita. | **Fatto** (2026-07-31) |
 | CTX-2 | **Header contesto ad ogni query** — `context_line()` in cima a ogni risposta. Formato: `[prod · nodo 03 · ClaimCenter · 10:00→13:00]` con DIM/bianco (UI-8). | **Fatto** (2026-07-31) |
 | CTX-3 | **Frasi di set-context** — intercetta "considera nodo X", "lavoriamo in prod", "dalle 10 alle 14" prima del classificatore. Risposta: "Contesto aggiornato". No nuova classe ML. | **Fatto** (2026-07-31) |
+| CTX-4 | **CTX-1 esteso a `--query`** — un chiamante esterno usa `--query` (un processo per invocazione: la persistenza CTX-1 non esiste lì) senza poter impostare la finestra temporale o il named log, né rileggere il contesto risolto. Nuovi flag `--time-from`/`--time-to`/`--named-log` (validazione non difensiva: formato + `date -d`, whitelist condivisa via `named_log_base_problem()` in `utils-logfiles.sh`) e nuova riga `CONTEXT env=… node=… app=… named_log=… time_from=… time_to=…` su stdout dopo ogni `--query`, greppabile su `^CONTEXT`. Ricostruendo i flag dalla riga e rilanciando si ottiene una riga identica (idempotenza verificata). | **Fatto** (2026-08-25) |
 
 ---
 

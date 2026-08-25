@@ -77,7 +77,10 @@ bash tests/run-tests.sh
 ```
 
 **Opzioni chatbot.sh:** `--profile <dir>` (obbligatorio), `--env`, `--node`, `--app`,
-`--query`, `--base-dir`.
+`--query`, `--base-dir`, `--time-from`, `--time-to`, `--named-log`. Gli ultimi tre (CTX-4)
+impostano il contesto anche in modalità `--query`, che poi lo stampa su stdout come riga
+`CONTEXT key=value...` — così un chiamante esterno può leggerlo e reimpostarlo alla
+chiamata successiva.
 
 ## Architecture
 

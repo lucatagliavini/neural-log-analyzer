@@ -96,6 +96,20 @@ _session() {
         | sed 's/\x1b\[[0-9;]*m//g'
 }
 
+# _ctx_call QUERY [FLAG…] — invoca --query (un processo per chiamata: è il
+# percorso che _session sopra dichiara "NON ha stato", e che CTX-4 ricuce con
+# la riga CONTEXT). Riempie le globali CTX_OUT (stdout+stderr uniti) e CTX_RC
+# (exit code): servono entrambe per i test sugli errori fatali.
+_ctx_call() {
+    local _q="$1"; shift
+    CTX_OUT=$(QUERY_LOG_DIR= bash "$ROOT_DIR/chatbot.sh" \
+        --profile "$PROFILE_DIR" --base-dir "$_FIX" --env prod --node 4 \
+        --query "$_q" "$@" 2>&1)
+    CTX_RC=$?
+}
+# _ctx_line QUERY [FLAG…] — come sopra, ma restituisce SOLO la riga CONTEXT.
+_ctx_line() { _ctx_call "$@"; printf '%s\n' "$CTX_OUT" | grep '^CONTEXT'; }
+
 # _block N OUTPUT — il blocco della N-esima query (delimitato da "┌─ Query:").
 _block() {
     printf '%s\n' "$2" | awk -v want="$1" '
@@ -257,6 +271,81 @@ section "F. Il contesto sopravvive a una query a vuoto"
 _out=$(_session "errori nel server log del nodo 3" "quanti errori 302 ci sono" "errori nel server log")
 _assert_in "q3 mantiene il nodo 3 dopo una query a vuoto" "$(_block 3 "$_out")" "nodo 03"
 _assert_in "q3 legge ancora il file del nodo 3"           "$(_block 3 "$_out")" "lxprjbliq03"
+
+# ─── G. Contesto esportabile in modalità --query (CTX-4) ──────────────────────
+# --query è il percorso che _session sopra dichiara "NON ha stato": ogni
+# invocazione è un processo nuovo. CTX-4 chiude il giro con --time-from/
+# --time-to/--named-log in ingresso e la riga CONTEXT in uscita — l'asserzione
+# più forte è l'idempotenza (3): ricostruire i flag dalla riga e rilanciare
+# deve dare una riga identica, non solo "contenente" i valori giusti.
+section "G. Contesto esportabile in modalità --query"
+
+# 1. La riga esiste con le sei chiavi, nell'ordine del contratto.
+_line=$(_ctx_line "quanti errori 500")
+_assert_line "1. riga CONTEXT con le sei chiavi in ordine" "$_line" \
+    '^CONTEXT env=[^ ]* node=[^ ]* app=[^ ]* named_log=[^ ]* time_from=[^ ]* time_to=[^ ]*$'
+
+# 2. I flag nuovi passano invariati; --named-log cc.log perde l'estensione.
+_line=$(_ctx_line "quanti errori 500" \
+    --time-from "${_T}T08:00" --time-to "${_T}T18:00" --named-log cc.log)
+_assert_in "2. time_from riflette il flag"     "$_line" "time_from=${_T}T08:00"
+_assert_in "2. time_to riflette il flag"       "$_line" "time_to=${_T}T18:00"
+_assert_in "2. named_log senza estensione .log" "$_line" "named_log=cc"
+
+# 3. Idempotenza — il giro chiuso: dalla riga ai flag, di nuovo alla riga,
+# stessa riga byte per byte. Non un assert di sottostringa: uno di uguaglianza.
+declare -A _kv
+while IFS='=' read -r _k _v; do _kv["$_k"]="$_v"; done \
+    < <(printf '%s\n' "$_line" | sed 's/^CONTEXT //' | tr ' ' '\n')
+_line2=$(_ctx_line "quanti errori 500" \
+    --env "${_kv[env]}" --node "${_kv[node]}" --app "${_kv[app]}" \
+    --named-log "${_kv[named_log]}" \
+    --time-from "${_kv[time_from]}" --time-to "${_kv[time_to]}")
+if [[ "$_line" == "$_line2" ]]; then _ok "3. idempotenza: riga → flag → riga identica"
+else _ko "3. idempotenza: riga → flag → riga identica" "$_line" "$_line2"; fi
+unset _kv
+
+# 4. Precedenza CTX-1: un tempo nominato NELLA QUERY vince sul flag --time-from/--time-to.
+_line=$(_ctx_line "quanti errori 500 di ieri" \
+    --time-from 2026-01-01T00:00 --time-to 2026-01-01T23:59)
+_assert_in "4. la query vince sul flag --time-from" "$_line" "time_from=${_Y}T00:00"
+_assert_in "4. la query vince sul flag --time-to"   "$_line" "time_to=${_Y}T23:59"
+
+# 5. La riga c'è ANCHE quando nessun tool si attiva — il caso in cui serve di più.
+_line=$(_ctx_line "blaterazione ipsum lorem qwerty")
+_assert_line "5. riga CONTEXT anche senza tool attivato" "$_line" '^CONTEXT '
+
+# 6. La riga NON compare nel REPL (_session): non deve inquinare l'output umano.
+_out_repl=$(_session "quanti errori 500")
+_assert_no_line "6. nessuna riga CONTEXT nel REPL" "$_out_repl" '^CONTEXT '
+
+# 7. Errori fatali, radice del messaggio (convenzione del progetto — ma i
+# messaggi completi sono stati riletti a mano, lezione RETENT-1: l'assert sulla
+# radice non protegge dal resto della frase).
+_ctx_call "quanti errori 500" --time-from "25-08-2026T10:00"
+[[ "$CTX_RC" -ne 0 ]] && _ok "7. formato senza T: exit non-zero" \
+    || _ko "7. formato senza T: exit non-zero" "!=0" "$CTX_RC"
+_assert_in "7. formato senza T: messaggio" "$CTX_OUT" "formato non valido"
+
+_ctx_call "quanti errori 500" --time-from "${_T}T10:30:00"
+[[ "$CTX_RC" -ne 0 ]] && _ok "7. secondi nel flag: exit non-zero" \
+    || _ko "7. secondi nel flag: exit non-zero" "!=0" "$CTX_RC"
+_assert_in "7. secondi nel flag: messaggio" "$CTX_OUT" "formato non valido"
+
+_ctx_call "quanti errori 500" --time-from "${_T}T98:30"
+[[ "$CTX_RC" -ne 0 ]] && _ok "7. orario fuori scala: exit non-zero" \
+    || _ko "7. orario fuori scala: exit non-zero" "!=0" "$CTX_RC"
+_assert_in "7. orario fuori scala: messaggio" "$CTX_OUT" "data/ora inesistente"
+
+_ctx_call "quanti errori 500" --named-log "../../etc/passwd"
+[[ "$CTX_RC" -ne 0 ]] && _ok "7. --named-log path traversal: exit non-zero" \
+    || _ko "7. --named-log path traversal: exit non-zero" "!=0" "$CTX_RC"
+_assert_in "7. --named-log path traversal: messaggio" "$CTX_OUT" "nome non valido"
+
+_ctx_call "quanti errori 500" --named-log "server"
+[[ "$CTX_RC" -ne 0 ]] && _ok "7. --named-log su log di sistema: exit non-zero" \
+    || _ko "7. --named-log su log di sistema: exit non-zero" "!=0" "$CTX_RC"
+_assert_in "7. --named-log su log di sistema: messaggio" "$CTX_OUT" "è un log di sistema"
 
 # ─── Esito ────────────────────────────────────────────────────────────────────
 printf "\n────────────────────────────────────────────────────────\n"

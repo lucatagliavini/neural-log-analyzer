@@ -26,6 +26,18 @@
 #   Per fissare un tema sulla propria installazione senza passarlo ogni volta:
 #   BOT_THEME=<nome> in profiles/<profilo>/system.local.conf (non deployato).
 #
+# Contesto in modalità --query, per uno strumento esterno (CTX-4):
+#   --time-from <ISO>   inizio finestra (YYYY-MM-DDTHH:MM, niente secondi)
+#   --time-to   <ISO>   fine finestra   (stesso formato)
+#   --named-log <nome>  log nominato attivo (senza estensione .log)
+#
+#   Un tempo o un log nominati nel TESTO della query hanno precedenza sui
+#   flag (stessa regola del REPL). In modalità --query lo stato risolto viene
+#   stampato su stdout come riga CONTEXT (key=value, greppabile su ^CONTEXT):
+#     CONTEXT env=coll node=04 app=ClaimCenter named_log=cc time_from=... time_to=...
+#   Ricostruendo i flag da questa riga e rilanciando, il contesto sopravvive
+#   fra un'invocazione e la successiva — cosa che --query da sola non fa.
+#
 # END-HELP
 
 set -euo pipefail
@@ -56,6 +68,15 @@ THEME_CLI=""
 # Default temporale: oggi (00:00→23:59). L'utente può sovrascrivere con query esplicita.
 ACTIVE_TIME_FROM="$(date +%Y-%m-%dT00:00)"
 ACTIVE_TIME_TO="$(date +%Y-%m-%dT23:59)"
+# CTX-4: valore grezzo dai flag --time-from/--time-to/--named-log. Non
+# validato qui: named_log_base_problem() e le altre funzioni condivise non
+# sono ancora disponibili durante il parsing (arrivano con `source
+# dispatch.sh`, sotto). *_CLI_SET distingue "flag non passato" da "passato
+# vuoto" — quest'ultimo cancella deliberatamente il limite/log attivo,
+# necessario per il giro CONTEXT (idempotenza su un valore vuoto).
+TIME_FROM_CLI=""; TIME_FROM_CLI_SET=0
+TIME_TO_CLI="";   TIME_TO_CLI_SET=0
+NAMED_LOG_CLI=""; NAMED_LOG_CLI_SET=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -69,6 +90,9 @@ while [[ $# -gt 0 ]]; do
         --gc-log)     GC_LOG="$2";              shift 2 ;;
         --query)      QUERY="$2"; INTERACTIVE=0; shift 2 ;;
         --theme)      THEME_CLI="$2";           shift 2 ;;
+        --time-from)  TIME_FROM_CLI="$2"; TIME_FROM_CLI_SET=1; shift 2 ;;
+        --time-to)    TIME_TO_CLI="$2";   TIME_TO_CLI_SET=1;   shift 2 ;;
+        --named-log)  NAMED_LOG_CLI="$2"; NAMED_LOG_CLI_SET=1; shift 2 ;;
         --dry-run)    DRY_RUN=1; shift ;;
         --list-themes)
             source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/utils-theme.sh"
@@ -211,6 +235,55 @@ TOOLS_DIR="$SCRIPT_DIR/lib/tools"
 
 # Carica dispatch (open_log + dispatch_tool)
 source "$LIB_DIR/dispatch.sh"
+
+# ─── Validazione contesto da CLI (CTX-4) ─────────────────────────────────────
+# Primo punto in cui named_log_base_problem() esiste (arriva da
+# utils-logfiles.sh, sourciato transitivamente da dispatch.sh sopra): non può
+# stare nel loop di parsing. La validazione è obbligatoria, non difensiva — a
+# valle nessuno rifiuta un valore malformato (date -d degrada a "nessun
+# limite", mktime() in AWK normalizza i valori fuori scala): è il difetto già
+# documentato in utils-time.sh:132-137, dove "alle 99" produceva un istante 4
+# giorni nel futuro — falso negativo, non errore. Un flag CLI non validato
+# riaprirebbe lo stesso difetto da un ingresso diverso.
+_ctx_validate_time() {
+    local _flag="$1" _v="$2"
+    [[ -z "$_v" ]] && return 0
+    # Secondi rifiutati: search_all_logs.sh li appende (:00/:59) a un
+    # confronto di stringhe, e "10:30:00:00" non è confrontabile.
+    if [[ ! "$_v" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}$ ]]; then
+        echo "[ERROR] $_flag: formato non valido '$_v' (atteso YYYY-MM-DDTHH:MM, senza secondi)" >&2
+        exit 1
+    fi
+    if ! date -d "${_v/T/ }" &>/dev/null; then
+        echo "[ERROR] $_flag: data/ora inesistente '$_v'" >&2
+        exit 1
+    fi
+}
+_ctx_validate_time "--time-from" "$TIME_FROM_CLI"
+_ctx_validate_time "--time-to"   "$TIME_TO_CLI"
+[[ "$TIME_FROM_CLI_SET" -eq 1 ]] && ACTIVE_TIME_FROM="$TIME_FROM_CLI"
+[[ "$TIME_TO_CLI_SET"   -eq 1 ]] && ACTIVE_TIME_TO="$TIME_TO_CLI"
+unset -f _ctx_validate_time
+
+if [[ "$NAMED_LOG_CLI_SET" -eq 1 ]]; then
+    if [[ -n "$NAMED_LOG_CLI" ]]; then
+        _ctx_nlog_base="${NAMED_LOG_CLI%.log}"
+        case "$(named_log_base_problem "$_ctx_nlog_base")" in
+            sintassi)
+                echo "[ERROR] --named-log: nome non valido '$NAMED_LOG_CLI'" >&2
+                exit 1
+                ;;
+            sistema)
+                echo "[ERROR] --named-log: '$_ctx_nlog_base' è un log di sistema, usa i tool dedicati (access/server/gc)" >&2
+                exit 1
+                ;;
+        esac
+        ACTIVE_NAMED_LOG="$_ctx_nlog_base"
+        unset _ctx_nlog_base
+    else
+        ACTIVE_NAMED_LOG=""
+    fi
+fi
 
 # ─── Modalità non interattiva: deduzione contesto dalla query ────────────────
 if [[ "$INTERACTIVE" -eq 0 && -z "$ACCESS_LOG" ]]; then
@@ -588,11 +661,33 @@ context_line() {
     fi
 }
 
+# Riga a valle per un chiamante PROGRAMMATICO (CTX-4): key=value, senza ANSI
+# in nessun tema — è un dato, non presentazione, e tests/test-theme.sh
+# confronta l'intero stdout byte per byte fra i temi. Ordine di chiave
+# fissato per contratto (aggiungere solo IN CODA, come le colonne di
+# log_query): ogni chiave ha un flag CLI omonimo, così il giro riga → flag →
+# riga è verificabile per idempotenza. Valori vuoti stampati, non omessi:
+# "nessun limite" è uno stato legittimo e la riga deve restare ricostruibile
+# meccanicamente anche in quel caso.
+context_kv() {
+    printf 'CONTEXT env=%s node=%s app=%s named_log=%s time_from=%s time_to=%s\n' \
+        "${ACTIVE_ENV:-}" "${ACTIVE_NODE:-}" "${ACTIVE_APP:-}" \
+        "${ACTIVE_NAMED_LOG:-}" "${ACTIVE_TIME_FROM:-}" "${ACTIVE_TIME_TO:-}"
+}
+
 profile_name=$(basename "$PROFILE_DIR")
 _init_query_log
 
 if [[ "$INTERACTIVE" -eq 0 ]]; then
-    run_query "${QUERY:-}"
+    # run_query ha cinque uscite anticipate (contesto-solo, aiuto, ambiente
+    # non impostato, dry-run, nessun tool sopra soglia): la riga CONTEXT va
+    # stampata comunque, e serve più che altrove proprio in quei casi. L'exit
+    # code va catturato — sotto `set -e` un `return` non a zero uscirebbe
+    # prima della stampa.
+    _rc=0
+    run_query "${QUERY:-}" || _rc=$?
+    context_kv
+    exit "$_rc"
 else
     printf "${C_BOLD}Neural Log Analyzer${C_RESET} — profilo: ${C_ACCENT}${profile_name}${C_RESET}\n"
     context_line

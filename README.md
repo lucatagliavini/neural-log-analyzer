@@ -37,9 +37,19 @@ $ ./chatbot.sh --profile profiles/liquido --env coll
 | `--app <nome>` | Applicazione: `ClaimCenter`, `ContactManager` (default da profilo) |
 | `--query <testo>` | Modalità non interattiva: esegue la query e termina |
 | `--base-dir <path>` | Override path base log (default da `system.conf`) |
+| `--time-from <ISO>` | Inizio finestra temporale (`YYYY-MM-DDTHH:MM`, senza secondi) |
+| `--time-to <ISO>` | Fine finestra temporale (stesso formato) |
+| `--named-log <nome>` | Log nominato attivo (senza estensione `.log`) |
 
 In modalità interattiva `--env` è opzionale: il bot lo deduce dalla query
 se viene menzionato l'ambiente (es: *"errori in produzione"*).
+
+In modalità `--query`, un tempo o un log nominati nel testo della query hanno
+precedenza sui flag. Il contesto risolto viene stampato su stdout come riga
+`CONTEXT env=... node=... app=... named_log=... time_from=... time_to=...`
+(greppabile su `^CONTEXT`): uno strumento esterno può leggerla e ricostruire
+i flag per la chiamata successiva, così il contesto sopravvive fra
+un'invocazione e l'altra — cosa che `--query` da sola non fa (CTX-4).
 
 ## Tool disponibili
 
