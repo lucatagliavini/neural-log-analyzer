@@ -384,7 +384,7 @@ logfiles_coverage_note() {
         _from=$(date -d "@$tf_epoch" '+%Y-%m-%d %H:%M')
         _since=$(date -d "@$worst_ts" '+%Y-%m-%d %H:%M')
         if [[ ${#not_covered[@]} -eq 1 ]]; then
-            printf "  ${C_PARTIAL}~ dati disponibili solo da %s: il risultato non copre${C_RESET}\n" "$_since"
+            printf "  ${C_PARTIAL}~ dati disponibili solo da %s: il risultato${C_RESET}\n" "$_since"
         else
             _names=$(printf '%s, ' "${not_covered[@]}"); _names="${_names%, }"
             printf "  ${C_PARTIAL}~ dati disponibili solo da %s su %d log (%s): il risultato${C_RESET}\n" \
