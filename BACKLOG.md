@@ -198,6 +198,76 @@ segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manual
 (nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
 implementato su richiesta esplicita dell'utente ("implementiamo domani").
 
+## GCCORR-1 — `correlate_gc_slow`: da «c'è una pausa vicina» a «quanto conta davvero?» — **FATTO** (2026-08-25)
+
+L'utente ha osservato in produzione che quasi tutte le richieste lente risultano
+correlate a una pausa GC, e ha chiesto tre cose: se l'algoritmo è corretto, perché la
+percentuale sia così alta, e se si possano avere dettagli — quale pausa, quale area.
+
+**L'algoritmo era corretto rispetto a ciò che dichiarava.** `gc_at[epoch]` + lookup
+`±gc_margin_s` faceva esattamente quello che prometteva. **Il problema era il metodo**:
+la domanda posta era «esiste *una* pausa entro ±2s?», e con le Young G1 frequenti quasi
+ogni istante soddisfa quella condizione — la percentuale tende al 100% per **densità
+temporale**, non per causalità. Mancava un termine di confronto (un modello nullo), e
+l'informazione richiesta dall'utente (quale pausa, quale area) era stata scartata a
+disegno (commento storico: «basta un flag, non l'indice della pausa»).
+
+**Riscrittura** (`lib/tools/correlate_gc_slow.awk`, parti A+B+C):
+- **Quale pausa/area**: `gc_at[sec]` da flag a indice di pausa (la più lunga vince a
+  parità di secondo); array paralleli per tipo, durata, regioni Eden/Old/Humongous;
+  attribuzione per richiesta lenta alla pausa più vicina con **segno del Δ** (prima/dopo
+  la richiesta) — il vecchio codice usava `||` in corto circuito e perdeva il segno.
+  Corretto anche un difetto latente sull'attribuzione regioni cross-rotazione (`GC(N)`
+  non è univoco: riparte da 0 al restart JVM e fra rotazioni concatenate) — guard
+  `_pend_ts[gid]` con finestra di prossimità ≤2s, cancellato dopo il consumo. **La stessa
+  correzione è stata portata in `gc_stats.awk`** (principio 8: non lasciare una copia
+  parallela della stessa assunzione, di cui una sola corretta).
+- **Verdetto a quattro stati, non due**: NODISC (non discriminabile — manca il gruppo di
+  controllo o il campione è insufficiente per una tabella di contingenza, attesa <5),
+  PERVASIVO (copertura temporale delle pause ≥ soglia — la vicinanza non discrimina più),
+  CRIT/WARN in base a `pct_slow` **e** lift sul gruppo di controllo delle richieste
+  **veloci** (non su tutte le richieste: un baseline su tutte include le lente stesse,
+  e sotto GC pervasivo il lift si autoannulla proprio quando il problema è più grave).
+  NODISC e PERVASIVO sono esiti positivi — dicono cosa manca o cosa domina — e non devono
+  collassare su «non è la causa»: è l'invariante che l'intera suite di test protegge.
+- Soglie nuove in entrambi i profili: `GC_CORR_LIFT_WARN`/`_CRIT` (1.5×/3.0×),
+  `GC_CORR_COVER_SAT_PCT` (80%).
+- `tests/test-correlate-gc-slow.sh` riscritto: 53 asserzioni, tutti e cinque i verdetti
+  (NODISC per due vie distinte, CRIT, WARN, NONCAUSE, PERVASIVO), segno del Δ, righe
+  regione senza inquinare i conteggi, attribuzione cross-rotazione, footer di
+  troncamento (TRUNC-1), casi degeneri con stderr pulito.
+
+**Verifica in produzione (nodo 4, `lxprjbliq04`, app ClaimCenter, traffico reale del
+2026-08-24, finestra 16:00–23:59 — le uniche ~8h con dati access log in quel file di
+rotazione, non l'intera giornata)**: 101.254 richieste, di cui 7.657 lente (>500ms).
+**Correlate a una pausa GC (±2s): 1.442, cioè 19%** delle lente. **Gruppo di controllo**
+(richieste veloci correlate a una pausa): 12%. **Lift: 1,6×** — un eccesso reale ma
+moderato, non dominante. **Copertura temporale delle pause sulla finestra: 63%**.
+Verdetto: **GC CONTRIBUISCE alla lentezza** (WARN: sopra la soglia del 10% e lift ≥1.5×,
+sotto la soglia CRIT del 30%/3×). Su 3.435 pause analizzate nella finestra, solo 285
+(8%) hanno almeno una richiesta lenta attribuita — la stragrande maggioranza delle pause
+non "cattura" nessuna lenta.
+
+**Risposta alla domanda originale**: la percentuale alta osservata dall'utente era in
+parte reale (il lift di 1,6× lo confirma: le lente sono più vicine a una pausa delle
+veloci, non è puro rumore) e in parte densità — durante i minuti più densi della
+giornata (fino a 40 pause/minuto, ~1 ogni 1,5s) la copertura locale sale molto oltre il
+63% medio, e in quei minuti "quasi tutto" risulta vicino a una pausa per costruzione. Il
+nuovo verdetto WARN, non CRIT, distingue correttamente le due cose: il GC **contribuisce**
+misurabilmente, ma non è la causa dominante delle richieste lente su questo nodo in
+questa finestra.
+
+**Pendenti registrati, esclusi con motivazione**: `gc_margin_s` configurabile (oggi
+cablato a 2s) — richiederebbe lavoro sul linguaggio in `param-extract.sh`, non fatto per
+mancanza di una richiesta concreta. Finestra proporzionale a `resp_ms` invece che fissa —
+scartata perché darebbe alle richieste lente una finestra più larga che al gruppo di
+controllo, confondendo il lift in modo sistematico (non è una correzione, è un bias).
+
+Nota di continuità: `UI-1` (verdict block + soglie 10%/30%) e `O6` («il denominatore su
+TUTTE le righe è voluto» per `Di cui correlate a pausa GC`) restano veri — questo lavoro
+aggiunge il gruppo di controllo e il lift **accanto** al denominatore esistente, non lo
+sostituisce.
+
 ## SALPERF-1 — Il multi-nodo usava il 6% della macchina — **FATTO** (2026-08-24)
 
 `search_all_logs` **multi-nodo** era l'unico percorso con logica propria mai eseguito in

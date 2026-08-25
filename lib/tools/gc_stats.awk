@@ -31,25 +31,36 @@ BEGIN {
 }
 
 # ── Raccolta dati regioni per GC(N) corrente ─────────────────────────────────
+# _pend_ts[gid] registra QUANDO è stata vista la regione: GC(N) non è univoco
+# (riparte da 0 al restart JVM e fra le rotazioni concatenate da open_gc_logs),
+# quindi un vecchio GC(7) può lasciare dati pending che un NUOVO GC(7), molto
+# più avanti nel tempo, erediterebbe per errore. La riga di pausa (sotto) accetta
+# i pending solo se sono dello stesso evento (prossimità in secondi).
 /GC\([0-9]+\) Eden regions:/   { match($0, /GC\(([0-9]+)\)/, g); _gc_id = g[1]
+                                  _pend_ts[_gc_id] = parse_gc($1)
                                   match($0, /Eden regions: ([0-9]+)->([0-9]+)\(([0-9]+)\)/, r)
                                   _eden_used[_gc_id] = r[2]+0; _eden_cap[_gc_id] = r[3]+0 }
 /GC\([0-9]+\) Survivor regions:/{ match($0, /GC\(([0-9]+)\)/, g); _gc_id = g[1]
+                                  _pend_ts[_gc_id] = parse_gc($1)
                                   match($0, /Survivor regions: ([0-9]+)->([0-9]+)/, r)
                                   _surv[_gc_id] = r[2]+0 }
 /GC\([0-9]+\) Old regions:/    { match($0, /GC\(([0-9]+)\)/, g); _gc_id = g[1]
+                                  _pend_ts[_gc_id] = parse_gc($1)
                                   match($0, /Old regions: ([0-9]+)->([0-9]+)/, r)
                                   _old[_gc_id] = r[2]+0 }
 /GC\([0-9]+\) Humongous regions:/{ match($0, /GC\(([0-9]+)\)/, g); _gc_id = g[1]
+                                  _pend_ts[_gc_id] = parse_gc($1)
                                   match($0, /Humongous regions: ([0-9]+)->([0-9]+)/, r)
                                   _hum[_gc_id] = r[2]+0 }
 /GC\([0-9]+\) Metaspace:/      { match($0, /GC\(([0-9]+)\)/, g); _gc_id = g[1]
+                                  _pend_ts[_gc_id] = parse_gc($1)
                                   match($0, /Metaspace: ([0-9]+)K\([0-9]+K\)->([0-9]+)K\(([0-9]+)K\)/, r)
                                   _meta_used[_gc_id] = int(r[2]/1024); _meta_cap[_gc_id] = int(r[3]/1024) }
 
 # ── Riga di riepilogo pausa ───────────────────────────────────────────────────
 /Pause (Young|Full|Mixed)/ && /[0-9]+M->[0-9]+M/ {
-    if ((time_from != "" || time_to != "") && !in_range(parse_gc($1))) next
+    gc_epoch = parse_gc($1)
+    if ((time_from != "" || time_to != "") && !in_range(gc_epoch)) next
 
     match($0, /GC\(([0-9]+)\)/, gi); gid = gi[1]+0
 
@@ -76,11 +87,24 @@ BEGIN {
     buf_ts[idx]     = ts; buf_type[idx] = pause_type; buf_cause[idx] = sub_cause
     buf_before[idx] = heap_before; buf_after[idx]  = heap_after; buf_cap[idx] = heap_cap
     buf_pause[idx]  = pause_ms
-    buf_eden[idx]   = _eden_used[gid]+0; buf_eden_cap[idx] = _eden_cap[gid]+0
-    buf_surv[idx]   = _surv[gid]+0
-    buf_old[idx]    = _old[gid]+0
-    buf_hum[idx]    = _hum[gid]+0
-    buf_meta[idx]   = _meta_used[gid]+0; buf_meta_cap[idx] = _meta_cap[gid]+0
+    # Pending accettato solo se dello stesso evento (stesso gid RIUSATO da un
+    # restart/rotazione precedente avrebbe un _pend_ts molto più vecchio).
+    if ((gid in _pend_ts) && (gc_epoch - _pend_ts[gid] <= 2)) {
+        buf_eden[idx]   = _eden_used[gid]+0; buf_eden_cap[idx] = _eden_cap[gid]+0
+        buf_surv[idx]   = _surv[gid]+0
+        buf_old[idx]    = _old[gid]+0
+        buf_hum[idx]    = _hum[gid]+0
+        buf_meta[idx]   = _meta_used[gid]+0; buf_meta_cap[idx] = _meta_cap[gid]+0
+    } else {
+        buf_eden[idx]   = 0; buf_eden_cap[idx] = 0
+        buf_surv[idx]   = 0
+        buf_old[idx]    = 0
+        buf_hum[idx]    = 0
+        buf_meta[idx]   = 0; buf_meta_cap[idx] = 0
+    }
+    delete _eden_used[gid]; delete _eden_cap[gid]; delete _surv[gid]
+    delete _old[gid]; delete _hum[gid]; delete _meta_used[gid]; delete _meta_cap[gid]
+    delete _pend_ts[gid]
 
     type_count[pause_type]++
     type_pause[pause_type]  += pause_ms

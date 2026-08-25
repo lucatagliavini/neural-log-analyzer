@@ -506,9 +506,9 @@ run_param_tests() {
 # Prima (fino al 2026-08-06) nessun runner aggregato li invocava: erano
 # eseguiti solo a mano, quindi senza rete di regressione automatica.
 run_unit_tests() {
-    print_header "UNIT — utils-logfiles, param-extract, search_all_logs, correlate_gc_slow, slow_requests, dispatch-perf, logline, logname-display, help-sources, vocab-gap, normalize-query"
+    print_header "UNIT — utils-logfiles, param-extract, search_all_logs, correlate_gc_slow, gc_stats, slow_requests, dispatch-perf, logline, logname-display, help-sources, vocab-gap, normalize-query"
     for _t in test-utils-logfiles.sh test-param-extract.sh test-search-all-logs.sh \
-              test-correlate-gc-slow.sh test-slow-requests.sh test-dispatch-perf.sh \
+              test-correlate-gc-slow.sh test-gc-stats.sh test-slow-requests.sh test-dispatch-perf.sh \
               test-theme.sh test-filter-ip.sh test-srch-named-log.sh test-log-discovery.sh \
               test-logdisc-4.sh test-access-format.sh test-profile-config.sh \
               test-train-regression.sh test-logline.sh test-logname-display.sh \

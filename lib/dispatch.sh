@@ -847,6 +847,8 @@ _dispatch_tool_run() {
     thr_v+=" -v req_time_warn_ms='${REQ_TIME_WARN_MS:-}' -v req_time_crit_ms='${REQ_TIME_CRIT_MS:-}'"
     thr_v+=" -v heap_warn_pct='${HEAP_USED_WARN_PCT:-}' -v heap_crit_pct='${HEAP_USED_CRIT_PCT:-}'"
     thr_v+=" -v gc_corr_warn_pct='${GC_CORR_WARN_PCT:-}' -v gc_corr_crit_pct='${GC_CORR_CRIT_PCT:-}'"
+    thr_v+=" -v gc_corr_lift_warn='${GC_CORR_LIFT_WARN:-}' -v gc_corr_lift_crit='${GC_CORR_LIFT_CRIT:-}'"
+    thr_v+=" -v gc_corr_cover_sat_pct='${GC_CORR_COVER_SAT_PCT:-}'"
     # Canale DEBUG per il conteggio delle righe senza timestamp riconosciuto
     # (utils-time.awk, END). Serve a MISURARE in produzione quanto sia frequente il
     # caso su cui poggia in_range(epoch<=0)=1: una riga non databile viene inclusa
