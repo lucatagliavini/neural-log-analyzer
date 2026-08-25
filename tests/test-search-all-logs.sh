@@ -698,6 +698,49 @@ assert_true "nessuna riga PERF_* finisce su stdout" \
     "$([[ "$_perf_stdout" != *"PERF_"* ]] && echo 1 || echo 0)"
 rm -f "$_PERF_OUT"
 
+# ─── RETENT-1: retention insufficiente per la finestra richiesta ──────────────
+section "RETENT-1: nota di copertura sul footer, solo quando la finestra non è coperta"
+
+# Misurato in produzione il 2026-08-24: la stessa query «ieri» ha dato 72.940
+# occorrenze su 59 log alle 16:00 e 56.676 su 56 log alle 17:15, perché le
+# rotazioni più vecchie erano state cancellate dalla retention nel frattempo.
+# Il bot non lo diceva: due numeri diversi per la stessa domanda, entrambi
+# presentati come completi. Qui: un solo file, senza rotazioni, il cui unico
+# dato inizia DOPO l'inizio della finestra richiesta — la retention non
+# copre la finestra fin dall'inizio, non solo "in parte".
+_FIX11="$(mktemp -d)"
+_node11_dir="$_FIX11/prod/lxprjbliq04"
+mkdir -p "$_node11_dir/ClaimCenter/Guidewire"
+echo "2026-08-24T10:00:00,000 INFO searchHub presente" \
+    > "$_node11_dir/ClaimCenter/Guidewire/policysearch.log"
+
+export LOG_BASE_DIR="$_FIX11"
+export DETECTED_NODE="04" ACTIVE_NODE="04"
+export LOG_SEARCH_ROOT="$_node11_dir"
+export SEARCH_PATTERN="searchHub"
+export TIME_FROM="2026-08-20T00:00" TIME_TO="2026-08-24T23:59"
+
+_out_retent=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+
+# Radice del testo, non la frase intera (stesso metodo della riga 639-642):
+# la concordanza singolare/plurale è un dettaglio di formattazione, non
+# l'invariante che il test protegge.
+assert_true "finestra non coperta: la nota compare sul footer" \
+    "$([[ "$_out_retent" == *"dati disponibili solo da"* ]] && echo 1 || echo 0)"
+assert_true "finestra non coperta: nomina l'ora da cui i dati sono disponibili (2026-08-24 10:00)" \
+    "$([[ "$_out_retent" == *"2026-08-24 10:00"* ]] && echo 1 || echo 0)"
+
+# Stessa fixture, nessuna finestra richiesta: senza TIME_FROM non c'è nulla da
+# cui essere scoperti — la nota sarebbe rumore su ogni ricerca non filtrata
+# per data (stesso principio della nota "!" di SRCH-5, riga 583-585).
+unset TIME_FROM TIME_TO
+_out_retent_nofilter=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+
+assert_true "senza finestra temporale: la nota non compare" \
+    "$([[ "$_out_retent_nofilter" != *"dati disponibili solo da"* ]] && echo 1 || echo 0)"
+
+rm -rf "$_FIX11"
+
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"

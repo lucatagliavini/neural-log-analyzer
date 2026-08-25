@@ -394,6 +394,51 @@ assert_eq "resolve_app_from_path: match sul segmento, non sul prefisso" "" \
 assert_eq "resolve_app_from_path: path vuoto → vuoto" "" \
     "$(resolve_app_from_path "" || true)"
 
+# ─── logfiles_coverage_note (RETENT-1) ────────────────────────────────────────
+section "logfiles_coverage_note: finestra non coperta / non verificabile"
+
+# Finestra ben PRIMA della rotazione più vecchia disponibile (2026-08-02T06:00):
+# il walk backward esaurisce tutte le rotazioni di "policysearch" senza mai
+# trovare un ts_start <= TIME_FROM — è esattamente il caso che RETENT-1 apre
+# (il for si esaurisce senza break, e prima non ne restava traccia).
+_rc_uncovered=$(select_log_files_grouped "$_FIX" "2026-08-01T00:00" "" "policysearch*")
+_rc_note=$(logfiles_coverage_note "$_rc_uncovered" "2026-08-01T00:00")
+assert_true "finestra non coperta: la nota compare" \
+    "$([[ -n "$_rc_note" ]] && echo 1 || echo 0)"
+assert_true "finestra non coperta: nomina l'ora da cui i dati sono disponibili" \
+    "$([[ "$_rc_note" == *"dati disponibili solo da 2026-08-02 06:00"* ]] && echo 1 || echo 0)"
+assert_true "finestra non coperta: usa il marcatore '~', non '?'" \
+    "$([[ "$_rc_note" == *"  ~ "* && "$_rc_note" != *"?"* ]] && echo 1 || echo 0)"
+
+# Finestra interamente coperta (già usata sopra per il test sul walk): nessuna
+# riga da stampare — un dato completo non va dichiarato incompleto.
+_rc_covered_note=$(logfiles_coverage_note "$_win_policysearch" "2026-08-04T10:00")
+assert_eq "finestra coperta: nessuna nota" "" "$_rc_covered_note"
+
+# Senza TIME_FROM non c'è una finestra da confrontare: nessuna nota, anche con
+# una selezione che potrebbe apparire incompleta.
+_rc_no_tf=$(logfiles_coverage_note "$_all_policysearch" "")
+assert_eq "TIME_FROM vuoto: nessuna nota" "" "$_rc_no_tf"
+
+# File senza timestamp riconoscibile (noise.log, ts_start=0): non si può
+# affermare né "coperta" né "non coperta" (principio 5) — si dichiara il
+# terzo esito, distinto dal precedente.
+_rc_unverif=$(logfiles_coverage_note "$_FIX/noise.log" "2026-08-01T00:00")
+assert_true "timestamp non riconoscibile: la nota compare" \
+    "$([[ -n "$_rc_unverif" ]] && echo 1 || echo 0)"
+assert_true "timestamp non riconoscibile: usa il marcatore '?', non '~'" \
+    "$([[ "$_rc_unverif" == *"  ? "* && "$_rc_unverif" != *"~"* ]] && echo 1 || echo 0)"
+assert_true "timestamp non riconoscibile: nomina il file" \
+    "$([[ "$_rc_unverif" == *"noise.log"* ]] && echo 1 || echo 0)"
+
+# Due gruppi, un solo esito: solo il gruppo NON coperto va dichiarato, quello
+# coperto resta silenzioso nella stessa nota.
+_rc_mixed=$(logfiles_coverage_note "$_FIX/cc.log $_FIX/srv.log" "2026-08-05T10:00")
+assert_true "gruppi misti: dichiara solo il gruppo scoperto (srv, 20:00)" \
+    "$([[ "$_rc_mixed" == *"dati disponibili solo da 2026-08-05 20:00"* ]] && echo 1 || echo 0)"
+assert_true "gruppi misti: non nomina cc.log (coperto)" \
+    "$([[ "$_rc_mixed" != *"cc.log"* ]] && echo 1 || echo 0)"
+
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"

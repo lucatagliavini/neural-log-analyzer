@@ -1,6 +1,6 @@
 # Backlog — neural-log-analyzer
 
-Aggiornato: 2026-08-24
+Aggiornato: 2026-08-25
 
 ---
 
@@ -8,7 +8,6 @@ Aggiornato: 2026-08-24
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
-| RETENT-1 | **«Ieri» non è una finestra affidabile, e il tool non lo dice** (misurato 2026-08-24 durante SALPERF-1). Il gruppo `prod1nssd-cc.log` — la principale fonte di errori applicativi — conserva **11 rotazioni** con una rotazione ogni ~ora, cioè una retention di circa **11 ore**. Conseguenza misurata dal vivo: la stessa query su «ieri» ha dato **72.940 occorrenze in 59 log alle 16:00** e **56.676 in 56 log alle 17:15**, perché nel frattempo le rotazioni del 23 agosto erano state **cancellate**. Non è un difetto del bot — i file non ci sono più — ma il bot **non lo dichiara**: risponde «56 log» come se fossero tutti quelli esistiti, ed è lo stesso schema di LVLCNT-1 e del quinto campo di SRCH-5, cioè un dato incompleto presentato come completo. Ha anche una conseguenza di metodo già pagata: «ieri» sembra la finestra ovvia per una prova ripetibile e **non lo è**, e per un attimo ho letto il calo come una regressione del mio codice. **Direzione**: quando la finestra richiesta inizia prima del file più vecchio disponibile per un gruppo, dirlo — «i dati prima di HH:MM non sono più sul disco». L'informazione c'è già (il primo timestamp del file più vecchio è quello che `select_log_files_grouped` legge per il walk), quindi è un avviso, non una raccolta dati nuova | **Alta** |
 | SRCHQ-1 | **La regola sugli apici singoli è ora in un punto solo, ma resta un'euristica** — `lib/utils-quoted.sh` (SRCH-5/D3-D4) tratta una coppia di apici come citazione **solo se delimitata da spazi**, perché in italiano `'` è anche l'apostrofo. Conseguenza dichiarata e coperta da test: una citazione fra apici singoli **non può contenere un apostrofo** (`trova 'errore nell'app'` non è riconosciuta come citazione; con le virgolette doppie sì). È lo stesso vincolo del quoting di shell e il messaggio d'aiuto del bot documenta entrambe le forme, quindi l'utente ha già la via d'uscita. **Non c'è nulla da correggere adesso**: la voce esiste perché se un giorno arrivasse una segnalazione su una ricerca fra apici che «non funziona», la causa è questa e sta scritta, invece di essere ridiagnosticata da zero | Promemoria |
 | FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
@@ -340,13 +339,55 @@ dentro la stessa mezz'ora, quando i file c'erano.
   per nodo sono ~0,3 s per nodo.
 - Insieme spiegano buona parte dei 12,3 s residui della selezione.
 
-## RETENT-1 — «ieri» non è una finestra affidabile, e il tool non lo dice — **APERTA**
+## RETENT-1 — «ieri» non è una finestra affidabile, e il tool non lo dice — **FATTO** (2026-08-25)
 
-Vedi la tabella delle voci aperte in testa. Nata da SALPERF-1: la retention di `cc.log` è
-~11 ore, quindi una domanda su «ieri» posta alle 18 riceve una risposta diversa dalla stessa
-domanda posta alle 14 — e il tool risponde «56 log» senza dire che i file di ieri non ci sono
-più. È lo stesso schema di LVLCNT-1 e del quinto campo di SRCH-5: **un dato incompleto
-presentato come completo**.
+Nata da SALPERF-1: la retention di `cc.log` è ~11 ore, quindi una domanda su «ieri» posta
+alle 18 riceve una risposta diversa dalla stessa domanda posta alle 14 — misurato dal vivo
+il 2026-08-24, **72.940 occorrenze su 59 log alle 16:00** contro **56.676 su 56 log alle
+17:15**, perché nel frattempo le rotazioni del 23 agosto erano state cancellate. Il tool
+rispondeva «56 log» senza dirlo: stesso schema di LVLCNT-1 e del quinto campo di SRCH-5, un
+dato incompleto presentato come completo.
+
+### La correzione
+
+`logfiles_coverage_note LIST TIME_FROM_RAW` (nuova, `lib/utils-logfiles.sh`) raggruppa i
+path già selezionati per nome logico, prende per ciascun gruppo il file più vecchio e
+confronta il suo primo timestamp con `TIME_FROM`. Tre esiti, non due:
+
+- **coperta** — silenzio, un dato completo non va dichiarato incompleto;
+- **non coperta** (marcatore `~`) — «dati disponibili solo da HH:MM», con più gruppi
+  scoperti si riporta il caso peggiore (il `ts` più tardivo);
+- **non verificabile** (marcatore `?`) — timestamp non riconoscibile sul file più vecchio
+  (principio 5: non si dichiara né coperta né scoperta quello che non si può leggere).
+
+Due soli punti di stampa, non diciannove: `print_log_source` (`lib/dispatch.sh`, copre i 15
+tool che passano dal motore condiviso) e il footer di `search_all_logs.sh`, accanto alle
+note `*`/`!` già esistenti — stessa convenzione TRUNC-1.
+
+### Test e costo
+
+8 asserzioni unitarie in `tests/test-utils-logfiles.sh` (finestra scoperta, coperta, senza
+`TIME_FROM`, timestamp non riconoscibile, gruppi misti) + 3 di integrazione in
+`tests/test-search-all-logs.sh` (nota sul footer, nota assente senza filtro temporale).
+Suite completa **190/190 PASS** inclusa `--parity` (1171/1171 identici, `normalize-query.sh`
+non toccato).
+
+Costo su `search_all_logs` multi-nodo: la funzione raggruppa per nome logico **soltanto**,
+quindi il suo costo è legato al numero di *nomi di log distinti* nella flotta, non al
+numero di nodi né di file. **Misurato** localmente: 30 gruppi sintetici, ~0,13 s/chiamata
+(0,654 s per 5 iterazioni) — contro il baseline di 187 s di SALPERF-1, **~0,07%**, ben sotto
+la soglia dell'1% che avrebbe richiesto il fallback `_PERF_SELECT_FILE`. **Dedotto**, non
+rimisurato sulla flotta reale: che i 13 nodi in produzione abbiano ≤30 nomi logici distinti
+è un'inferenza dalla configurazione di profilo (`SERVER_LOG_BASE`/`ACCESS_LOG_BASE`/
+`GC_LOG_BASE`/`CUSTOM_LOG_SUBPATH`), non un conteggio dal vivo sull'albero di produzione.
+
+### Non ancora fatto
+
+Il piano approvato prevedeva anche: verifica in produzione (ripetere «ieri» su `cc.log` a
+un'ora di distanza e controllare che le due risposte restino spiegabili — il caso che ha
+aperto questa voce) e deploy via `./deploy.sh`. **Nessuno dei due è stato eseguito in questa
+sessione**: locale e test sono verdi, ma non equivalgono alla verifica dal vivo che questa
+stessa voce chiede per un motivo diretto — vedi session log `docs/sessions/2026-08-25-01.md`.
 
 ## LVLCNT-1 — «ERRORI» contiene «ERROR» — **FATTO** (2026-08-24)
 

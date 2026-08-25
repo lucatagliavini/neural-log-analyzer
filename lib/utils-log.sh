@@ -31,6 +31,10 @@ declare -A _LOG_LEVEL_NUM=([debug]=0 [info]=1 [warn]=2 [error]=3 [off]=4)
 # da theme_load, quindi il tema attivo vince sempre.
 : "${C_CRIT:=}" "${C_WARN:=}" "${C_OK:=}" "${C_VAL:=}"
 : "${C_LBL:=}" "${C_ACCENT:=}" "${C_ROW_ALT:=}" "${C_BOLD:=}" "${C_RESET:=}"
+# C_PARTIAL ("un valore non è il dato completo che sembra", RETENT-1): usato da
+# logfiles_coverage_note() in utils-logfiles.sh, che può girare negli stessi
+# contesti senza tema di cui sopra.
+: "${C_PARTIAL:=}"
 
 # ─── Decompressore per i log .gz ──────────────────────────────────────────────
 # Unica fonte di verità (principio 2): usato da open_log() in dispatch.sh — e

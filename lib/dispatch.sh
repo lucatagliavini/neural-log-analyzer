@@ -589,6 +589,12 @@ print_log_source() {
         fi
     fi
     [[ -n "$suffix" ]] && printf "${C_LBL}%s${C_RESET}\n" "$suffix"
+    # RETENT-1: dichiara se $paths (i file EFFETTIVAMENTE letti, non la
+    # selezione teorica — vedi logfiles_coverage_note) non copre TIME_FROM per
+    # retention, o se non è verificabile. Qui e non nel motore perché
+    # open_logs_for/open_glob_logs hanno un fallback che sostituisce la
+    # selezione quando la finestra non produce candidati.
+    logfiles_coverage_note "$paths" "${TIME_FROM:-}"
     printf '\n'
 }
 

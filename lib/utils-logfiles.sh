@@ -10,6 +10,9 @@
 #       Motore generalizzato: LOGICAL_NAME vuoto seleziona TUTTI i nomi
 #       logici trovati in DIR (caso log applicativi custom — cartella flat
 #       senza basename uniforme), raggruppando ogni log e le sue rotazioni.
+#   logfiles_coverage_note LIST TIME_FROM
+#       Dichiara (stdout, righe già marcate) se LIST non copre TIME_FROM per
+#       retention, o se non è verificabile (RETENT-1) — vedi la funzione.
 #
 #   DIR      : directory dove cercare i file
 #   TIME_FROM: "YYYY-MM-DDTHH:MM" (vuoto = nessun limite inferiore)
@@ -314,6 +317,93 @@ select_log_files_grouped() {
 select_log_files() {
     local dir="$1" base="$2" tf_raw="${3:-}" tt_raw="${4:-}"
     select_log_files_grouped "$dir" "$tf_raw" "$tt_raw" "${base}*"
+}
+
+# logfiles_coverage_note LIST TIME_FROM_RAW (RETENT-1)
+#
+# Dichiara se LIST — i path GIÀ selezionati per la stampa, separati da spazi o
+# `|` — copre TIME_FROM_RAW, o se non è verificabile. Calcolato qui e non
+# dentro select_log_files_grouped: i chiamanti (open_logs_for, open_glob_logs)
+# hanno un fallback che sostituisce la selezione col file corrente quando la
+# finestra non produce candidati, quindi solo il punto di stampa vede i path
+# EFFETTIVAMENTE letti dal tool — un avviso nel motore descriverebbe a volte
+# una selezione poi scartata.
+#
+# LIST è già ordinata per ts_start crescente (contratto di
+# select_log_files_grouped): la prima occorrenza di ogni nome logico è quindi
+# il file più VECCHIO selezionato per quel gruppo, senza bisogno di rifare il
+# walk. Tre esiti sul ts_start di quel file, gli stessi tre del motore:
+#   ts_start <= TIME_FROM   coperta:          nessuna riga
+#   ts_start >  TIME_FROM   non coperta:      riga "~"
+#   ts_start == 0           non verificabile: riga "?" (principio 5: un
+#                                              timestamp ignoto non permette
+#                                              di affermare nulla, ma non va
+#                                              nemmeno taciuto)
+# Con più gruppi non coperti si riporta il ts_start più TARDIVO fra loro — il
+# punto da cui TUTTI i gruppi hanno dati, non il primo che manca.
+#
+# Stampa 0, 1 o 2 righe già marcate su stdout (C_PARTIAL + marcatore testuale
+# "~"/"?", stessa convenzione TRUNC-1 di search_all_logs.sh: nei temi mono il
+# colore non esiste, quindi il marcatore deve restare visibile senza di
+# esso). Nessuna riga se tutto è coperto o se TIME_FROM_RAW è vuoto o non
+# convertibile — stessa conversione del motore (riga sopra, tf_epoch): un
+# TIME_FROM non parsabile equivale per il motore a "nessun limite", quindi non
+# c'è nulla da dichiarare.
+logfiles_coverage_note() {
+    local list="$1" tf_raw="${2:-}"
+    [[ -z "$tf_raw" || -z "$list" ]] && return
+    local tf_epoch
+    tf_epoch=$(date -d "${tf_raw//T/ }" +%s 2>/dev/null || echo 0)
+    [[ "$tf_epoch" -eq 0 ]] && return
+
+    local -a paths=()
+    read -ra paths <<< "${list//|/ }"
+    [[ ${#paths[@]} -eq 0 ]] && return
+
+    local -A seen=()
+    local -a not_covered=() unverifiable=()
+    local worst_ts=0
+    local f logical ts
+
+    for f in "${paths[@]}"; do
+        [[ -z "$f" ]] && continue
+        logfile_logical_name_into "$f"; logical="$_LOGF_LOGICAL"
+        [[ -n "${seen[$logical]:-}" ]] && continue
+        seen["$logical"]=1
+        ts=$(_logfiles_read_first_ts "$f")
+        if [[ "$ts" -eq 0 ]]; then
+            unverifiable+=("$(basename "$f")")
+        elif [[ "$ts" -gt "$tf_epoch" ]]; then
+            not_covered+=("$(basename "$f")")
+            [[ "$ts" -gt "$worst_ts" ]] && worst_ts="$ts"
+        fi
+    done
+
+    if [[ ${#not_covered[@]} -gt 0 ]]; then
+        local _from _since _names
+        _from=$(date -d "@$tf_epoch" '+%Y-%m-%d %H:%M')
+        _since=$(date -d "@$worst_ts" '+%Y-%m-%d %H:%M')
+        if [[ ${#not_covered[@]} -eq 1 ]]; then
+            printf "  ${C_PARTIAL}~ dati disponibili solo da %s: il risultato non copre${C_RESET}\n" "$_since"
+        else
+            _names=$(printf '%s, ' "${not_covered[@]}"); _names="${_names%, }"
+            printf "  ${C_PARTIAL}~ dati disponibili solo da %s su %d log (%s): il risultato${C_RESET}\n" \
+                "$_since" "${#not_covered[@]}" "$_names"
+        fi
+        printf "  ${C_PARTIAL}  non copre l'intera finestra richiesta (da %s).${C_RESET}\n" "$_from"
+    fi
+
+    if [[ ${#unverifiable[@]} -gt 0 ]]; then
+        local _names
+        _names=$(printf '%s, ' "${unverifiable[@]}"); _names="${_names%, }"
+        if [[ ${#unverifiable[@]} -eq 1 ]]; then
+            printf "  ${C_PARTIAL}? copertura non verificabile su %s: il file più vecchio non${C_RESET}\n" "$_names"
+        else
+            printf "  ${C_PARTIAL}? copertura non verificabile su %d log (%s): i file più vecchi${C_RESET}\n" \
+                "${#unverifiable[@]}" "$_names"
+        fi
+        printf "  ${C_PARTIAL}  non espongono un timestamp riconoscibile.${C_RESET}\n"
+    fi
 }
 
 # Rimuove il suffisso di rotazione dal nome di un file di log, restituendo il

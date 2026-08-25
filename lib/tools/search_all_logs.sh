@@ -610,6 +610,14 @@ if [[ "$total_unfiltered" -gt 0 ]]; then
     printf "  ${C_PARTIAL}  finestra richiesta.${_X}\n"
 fi
 
+# RETENT-1: dichiara se all_paths (i file EFFETTIVAMENTE aggregati, su tutti i
+# nodi/app scandagliati) non copre TIME_FROM per retention, o se non è
+# verificabile. Stessa funzione condivisa usata da print_log_source in
+# dispatch.sh (lib/utils-logfiles.sh, già sourciato sopra) — un solo punto di
+# verità per il calcolo, due punti di stampa per i due percorsi che non
+# convergono mai in un unico chiamante (RETENT-1).
+logfiles_coverage_note "${all_paths[*]}" "${TIME_FROM:-}"
+
 if [[ -z "${DETECTED_NODE:-}" && -n "$best_node" ]]; then
     printf "  ${_D}→ Nodo con più occorrenze: nodo %s — es: \"errori sul nodo %s\"${_X}\n" \
         "$best_node" "$best_node"
