@@ -1,6 +1,6 @@
 # Backlog — neural-log-analyzer
 
-Aggiornato: 2026-08-25
+Aggiornato: 2026-08-27
 
 ---
 
@@ -2830,6 +2830,94 @@ recente il file che stava mostrando.
 `Log:` e la tabella, annotazione `[237B, 1s fa]` corretta sia nel caso a file singolo che
 nel caso a più file (rotazione, dove mostra la somma delle dimensioni e il "fa" del file
 più recente del gruppo).
+
+---
+
+## NODE-1 — I nodi 08 e 09 rispondevano coi dati del nodo 01, in silenzio — **FATTO** (2026-08-27)
+
+**Come è emerso.** Non da una segnalazione su questo: l'utente stava verificando un sospetto
+diverso (`tail_named_log` che sembrava ignorare il file live a favore delle rotazioni `.gz`).
+Provando le query di controllo in produzione, il footer di contesto continuava a dire
+`node=01` per richieste sul nodo 9. Il sospetto era sul riconoscimento del testo — la causa
+era altrove.
+
+**La causa: interpretazione ottale in `printf`.** `lib/resolve-logs.sh:81` era
+
+```bash
+NODE_NUM=$(printf "%02d" "$NODE_NUM" 2>/dev/null || echo "$NODE_NUM")
+```
+
+Il `printf` di bash converte `%d` con semantica **base 0**: lo zero iniziale significa
+ottale, e `8`/`9` non sono cifre ottali valide. Misurato:
+
+```
+$ printf "%02d" 09
+bash: printf: 09: invalid octal number
+00   <- stdout, exit=1
+```
+
+Il punto non ovvio è l'**ordine**: `printf` scrive `00` **e poi** fallisce. Il `|| echo`,
+scritto per preservare il valore originale, non lo sostituisce — lo **appende** all'output
+parziale. `00` + `09` = **`0009`** → `NODE_NAME=lxprjbliq0009` → directory inesistente →
+fallback delle righe 86-93 (`list_env_node_dirs | head -1`) → **nodo 01**, senza un avviso.
+
+Affetti i soli nodi **08** e **09**: unici valori a due cifre con zero iniziale e cifra non
+ottale. `04`, `07`, `12` funzionavano — ed è il controllo che isola la causa dalla scoperta
+su filesystem.
+
+**Perché sembrava intermittente** (e perché era difficile da attribuire): il numero di nodo
+era normalizzato in tre punti, in tre modi. `chatbot.sh:294` (deduzione iniziale del contesto
+in `--query`) **non** normalizzava e passava il valore grezzo, quindi `"nodo 9"` arrivava come
+`9` e funzionava. Ma `chatbot.sh:423` normalizzava **correttamente** con `10#` a `09`, e una
+finestra temporale nella query imposta `ctx_changed=1` (riga 462) che forza una **seconda**
+risoluzione (righe 517-518) — questa volta col `09` già impaginato, il solo valore su cui la
+riga 81 si rompeva. Quindi: query **senza** finestra temporale → corretta; **con** finestra
+temporale → nodo 01. La correzione corretta di un punto alimentava il difetto dell'altro, e
+non esisteva alcun aggiramento lato utente.
+
+**Il sito difettoso era uno solo, e la conoscenza c'era già.** `10#` era già usato
+correttamente in `chatbot.sh:423`, `lib/utils-nodes.sh:29` e `lib/utils-time.sh:146`, e
+`lib/param-extract.sh:160-162` ha perfino un commento che descrive **esattamente** questa
+trappola. `lib/resolve-logs.sh:81` era l'unico rimasto indietro: caso da manuale del
+**principio 8** — assunzioni parallele sullo stesso formato, una estesa e le altre no, «solo
+più difficile da notare perché *sembra* già risolto altrove».
+
+**Intervento** (ambito completo scelto dall'utente):
+
+1. **`node_num_canonical()`** in `lib/utils-nodes.sh` — unico punto di canonicalizzazione.
+   Rifiuta un input non numerico (ritorna 1 senza stampare) invece di inventare un valore.
+2. **Quattro chiamanti migrati**: `lib/resolve-logs.sh:81` (difettoso), `chatbot.sh:294`
+   (non normalizzava affatto — gemello asimmetrico), `chatbot.sh:423` (copia inline corretta,
+   migrata per non lasciare una variante da tenere in parità a mano), `node_num_from_dir()`
+   (delega, evita una quarta copia).
+3. **Il pattern `$(cmd || echo fallback)` rimosso** da quel percorso. Il difetto è
+   indipendente dall'ottale: ogni volta che `cmd` può scrivere output parziale prima di
+   fallire, il fallback non *sostituisce* — si *aggiunge*.
+4. **La sostituzione di nodo è dichiarata**: `resolve-logs.sh` emette `NODE_FALLBACK_FROM`
+   (sempre, anche vuoto — altrimenti in REPL il valore resterebbe appiccicato alle query
+   successive) e `chatbot.sh` stampa `⚠ nodo N non trovato in ENV: rispondo sul nodo M`
+   subito sotto la riga di contesto. Il valore è **sanitizzato**: arriva da input utente e
+   finisce in una stringa passata a `eval`. Questo punto non è cosmetico — il fallback muto
+   restituisce dati autentici del nodo sbagliato, indistinguibili da una risposta corretta,
+   ed è la ragione per cui il difetto è passato inosservato.
+
+**Esito**: `tests/test-node-resolve.sh`, 35 assert → **35 PASS / 0 FAIL**; suite completa
+**191 PASS / 0 FAIL**. Il test è stato validato reintroducendo il difetto nella funzione
+condivisa: **11 FAIL**, quindi cattura davvero la regressione invece di passare comunque.
+
+Il test che conta per il futuro è l'**idempotenza** (`canon(canon(x)) == canon(x)`): è la
+proprietà la cui assenza rendeva il bug a comparsa condizionata, visibile solo alla seconda
+risoluzione.
+
+**Verificato in produzione** prima del fix (nodo 08 + finestra 7gg → risolve 01; nodo 07 +
+finestra 7gg → risolve 07, controllo; `"nodo 9"` nel testo senza parametro + finestra → 01,
+che prova l'assenza di aggiramenti). La verifica end-to-end **dopo** il fix richiede il
+deploy: l'albero `/unipol/logs` non è raggiungibile dalla macchina di sviluppo.
+
+**Osservazione a margine, non corretta** (fuori ambito, preesistente): il percorso principale
+di `resolve-logs.sh` usa `BASE_DIR` (`$1`), mentre il fallback scopre i nodi con
+`list_env_node_dirs()` che legge `LOG_BASE_DIR`. Con `--base-dir` diverso dal default i due
+divergono e il fallback cercherebbe nell'albero sbagliato. Nessun chiamante reale lo fa oggi.
 
 ---
 

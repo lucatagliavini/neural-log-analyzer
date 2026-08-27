@@ -291,7 +291,16 @@ if [[ "$INTERACTIVE" -eq 0 && -z "$ACCESS_LOG" ]]; then
         source <("$LIB_DIR/normalize-query.sh" "$QUERY")
         export NORM_QUERY
         [[ -n "$DETECTED_ENV"  && "$DETECTED_ENV"  != "$ACTIVE_ENV"  ]] && ACTIVE_ENV="$DETECTED_ENV"
-        [[ -n "$DETECTED_NODE" && "$DETECTED_NODE" != "$ACTIVE_NODE" ]] && ACTIVE_NODE="$DETECTED_NODE"
+        # node_num_canonical() e non il valore grezzo: qui prima non c'era alcuna
+        # normalizzazione, gemello asimmetrico della riga in process_query che
+        # invece la faceva. Funzionava solo di rimbalzo, perché resolve-logs.sh
+        # impaginava un "9" nudo; con "nodo 09" scritto nella query passava "09"
+        # e faceva scattare lo stesso difetto ottale (principio 8).
+        if [[ -n "$DETECTED_NODE" ]]; then
+            _norm_node=$(node_num_canonical "$DETECTED_NODE") || _norm_node=""
+            if [[ -n "$_norm_node" ]]; then ACTIVE_NODE="$_norm_node"; fi
+            unset _norm_node
+        fi
         if [[ -n "$DETECTED_APP" && -z "$ACTIVE_APP" ]]; then
             ACTIVE_APP="${APP_CANONICAL[$DETECTED_APP]:-$DETECTED_APP}"
         fi
@@ -420,7 +429,10 @@ run_query() {
     local ctx_changed=0
     [[ -n "$DETECTED_ENV"  && "$DETECTED_ENV"  != "$ACTIVE_ENV"  ]] && { ACTIVE_ENV="$DETECTED_ENV";  ctx_changed=1; }
     if [[ -n "$DETECTED_NODE" ]]; then
-        local _norm_node; _norm_node=$(printf "%02d" "$((10#$DETECTED_NODE))" 2>/dev/null || echo "$DETECTED_NODE")
+        # Era una copia inline corretta (usava già `10#`) della logica che ora
+        # vive in node_num_canonical(): migrata per non lasciare in giro una
+        # quarta variante da tenere in parità a mano.
+        local _norm_node; _norm_node=$(node_num_canonical "$DETECTED_NODE") || _norm_node="$ACTIVE_NODE"
         [[ "$_norm_node" != "$ACTIVE_NODE" ]] && { ACTIVE_NODE="$_norm_node"; ctx_changed=1; }
     fi
     if [[ -n "$DETECTED_APP" ]]; then
@@ -656,6 +668,15 @@ context_line() {
             sep="${_D} · ${_X}"
         done
         printf "  ${_D}[${_X}${joined}${_D}]${_X}\n"
+        # Sostituzione di nodo dichiarata (NODE_FALLBACK_FROM da resolve-logs.sh).
+        # Sta subito sotto la riga di contesto perché è quella riga che va letta
+        # con sospetto: senza l'avviso l'utente vede "nodo 01" avendo chiesto il
+        # 9 e non ha modo di accorgersene — i dati sono autentici, solo di un
+        # altro nodo. È il motivo per cui il difetto ottale è passato inosservato.
+        if [[ -n "${NODE_FALLBACK_FROM:-}" ]]; then
+            printf "  ${_D}⚠ nodo${_X} ${_W}%s${_X} ${_D}non trovato in${_X} ${_W}%s${_X}${_D}: rispondo sul nodo${_X} ${_W}%s${_X}\n" \
+                "$NODE_FALLBACK_FROM" "${ACTIVE_ENV}" "${ACTIVE_NODE}"
+        fi
     else
         printf "  ${_D}[contesto non impostato — es: \"errori in coll\"]${_X}\n"
     fi

@@ -78,12 +78,25 @@ if [[ -z "$ENV_CODE" ]]; then
 fi
 
 # ─── Risoluzione nodo ─────────────────────────────────────────────────────────
-NODE_NUM=$(printf "%02d" "$NODE_NUM" 2>/dev/null || echo "$NODE_NUM")
-# NODE_NAME_TEMPLATE è definito in system.conf (es: 'lx${ENV_CODE}jbliq${NODE_NUM}')
-NODE_NAME=$(eval echo "${NODE_NAME_TEMPLATE}")
-NODE_DIR="$BASE_DIR/$ENV_NAME/$NODE_NAME"
+# La canonicalizzazione vive in node_num_canonical() (utils-nodes.sh), unico
+# punto di verità: vedi là perché `10#` è indispensabile e perché la vecchia
+# forma `$(printf "%02d" … || echo …)` mandava i nodi 08 e 09 sul nodo 01.
+NODE_REQUESTED="$NODE_NUM"
+NODE_DIR=""
+if NODE_NUM=$(node_num_canonical "$NODE_REQUESTED"); then
+    # NODE_NAME_TEMPLATE è definito in system.conf (es: 'lx${ENV_CODE}jbliq${NODE_NUM}')
+    NODE_NAME=$(eval echo "${NODE_NAME_TEMPLATE}")
+    NODE_DIR="$BASE_DIR/$ENV_NAME/$NODE_NAME"
+fi
 
-if [[ ! -d "$NODE_DIR" ]]; then
+# Nodo richiesto inesistente (o non numerico): si ripiega sul primo nodo
+# dell'ambiente, ma lo si DICHIARA. NODE_FALLBACK_FROM viene letto da chatbot.sh,
+# che avvisa l'utente. Prima la sostituzione era muta, e un dato del nodo 1
+# spacciato per nodo 9 è indistinguibile da una risposta corretta: è ciò che ha
+# reso il bug ottale invisibile. Stesso spirito degli skip espliciti dei named
+# log e dei coverage note — mai una risposta plausibile al posto di un limite.
+NODE_FALLBACK_FROM=""
+if [[ -z "$NODE_DIR" || ! -d "$NODE_DIR" ]]; then
     # Fallback: scoperta dinamica tramite utils-nodes.sh (unica fonte di verità)
     NODE_DIR=$(list_env_node_dirs "$ENV_NAME" | head -1)
     if [[ -z "$NODE_DIR" ]]; then
@@ -91,6 +104,10 @@ if [[ ! -d "$NODE_DIR" ]]; then
         exit 1
     fi
     NODE_NUM=$(node_num_from_dir "$NODE_DIR")
+    # Sanitizzato ai soli caratteri innocui: questo valore arriva da input utente
+    # e finisce in una stringa che chatbot.sh passa a `eval` (vedi il commento in
+    # testa al file sul contratto di stdout) — un apice singolo sarebbe iniezione.
+    NODE_FALLBACK_FROM="${NODE_REQUESTED//[^0-9A-Za-z_-]/}"
 fi
 
 # ─── Validazione *_LOG_BASE ────────────────────────────────────────────────────
@@ -183,6 +200,11 @@ echo "GC_LOG='${GC_LOG_PATH:-}'"
 echo "GC_LOG_DIR='${GC_LOG_DIR}'"
 echo "GC_LOG_BASE='${GC_LOG_BASE}'"
 echo "ACTIVE_NODE='${NODE_NUM}'"
+# Emesso SEMPRE, anche vuoto: in modalità interattiva resolve_session_logs viene
+# rieseguita a ogni cambio di contesto, e un valore emesso solo in caso di
+# fallback resterebbe appiccicato alle query successive facendo avvisare di una
+# sostituzione che non è più in corso.
+echo "NODE_FALLBACK_FROM='${NODE_FALLBACK_FROM}'"
 echo "ACTIVE_ENV='${ENV_NAME}'"
 echo "ACTIVE_APP='${APP}'"
 echo "CUSTOM_LOG_DIR='${CUSTOM_LOG_DIR}'"
