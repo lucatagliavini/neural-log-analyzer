@@ -2914,10 +2914,22 @@ finestra 7gg → risolve 07, controllo; `"nodo 9"` nel testo senza parametro + f
 che prova l'assenza di aggiramenti). La verifica end-to-end **dopo** il fix richiede il
 deploy: l'albero `/unipol/logs` non è raggiungibile dalla macchina di sviluppo.
 
-**Osservazione a margine, non corretta** (fuori ambito, preesistente): il percorso principale
-di `resolve-logs.sh` usa `BASE_DIR` (`$1`), mentre il fallback scopre i nodi con
-`list_env_node_dirs()` che legge `LOG_BASE_DIR`. Con `--base-dir` diverso dal default i due
-divergono e il fallback cercherebbe nell'albero sbagliato. Nessun chiamante reale lo fa oggi.
+**Osservazione a margine, non corretta** (fuori ambito, preesistente): `resolve-logs.sh` legge
+la radice dei log da **due variabili diverse a seconda del ramo**. Il percorso principale usa
+`BASE_DIR` (`$1`, riga 63); il fallback chiama `list_env_node_dirs()`, che legge `LOG_BASE_DIR`
+(`utils-nodes.sh:76`) e ignora l'argomento.
+
+**Non è raggiungibile dalla CLI**, e la prima formulazione di questa nota diceva il contrario:
+`--base-dir` imposta `LOG_BASE_DIR` (`chatbot.sh:228`) e chatbot.sh passa proprio
+`$LOG_BASE_DIR` come `$1` (riga 324), quindi attraverso il bot le due coincidono **sempre**. La
+divergenza si ottiene solo invocando `lib/resolve-logs.sh` direttamente con un `$1` diverso
+dal `LOG_BASE_DIR` dell'ambiente — cioè quello che fa `tests/test-node-resolve.sh`, che deve
+esportare `LOG_BASE_DIR` sulla fixture perché il ramo di fallback sia esercitabile. È
+documentato in un commento nel test, così il prossimo che scrive una fixture non ci ricasca.
+
+Vale come promemoria e non come difetto da correggere: un solo parametro per la radice sarebbe
+più chiaro, ma cambiare la firma di `list_env_node_dirs()` toccherebbe anche
+`search_all_logs.sh:173` senza risolvere un problema che nessun chiamante reale ha.
 
 ---
 
