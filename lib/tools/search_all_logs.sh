@@ -65,6 +65,16 @@ fi
 # pool non partirebbe affatto.
 jobs="${SEARCH_PARALLEL_JOBS:-1}"
 tmp_dir=$(mktemp -d)
+# Cleanup anche su interruzione, non solo sulle uscite normali (SCOPE-1).
+# Prima c'erano solo i `rm -rf "$tmp_dir"` sui percorsi di uscita, quindi un
+# Ctrl-C o un timeout del chiamante lasciava la directory: e le ricerche
+# multi-nodo sono i run più LUNGHI, cioè i più interrotti — misurato 18,6 s per
+# una ricerca su 13 nodi con finestra passata, oltre il timeout del wrapper MCP.
+# I `rm -rf` espliciti restano: sono no-op su una directory già rimossa e dicono
+# sul posto che il temporaneo finisce lì.
+# `bash search_all_logs.sh` è un PROCESSO separato (dispatch.sh:1228), non un
+# sorgiato: il trap EXIT vale solo qui e non tocca chatbot.sh.
+trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 _AWK_TOOL="$(dirname "${BASH_SOURCE[0]}")/search_all_logs.awk"
 # Il riconoscimento del timestamp è delegato a logline_parse() (utils-logline.awk,
 # che a sua volta richiede utils-time.awk per l'epoch) — non più regex proprie.
@@ -163,14 +173,24 @@ progress_show "selezione log..."
 if [[ -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]]; then
     _multi_node=1
     _scope_label="${ACTIVE_ENV} (tutti i nodi)"
-    # _node_dir da list_env_node_dirs È la directory del nodo — lo stesso
-    # oggetto che resolve-logs.sh esporta come LOG_SEARCH_ROOT per il nodo
-    # attivo. Quindi la scoperta parte da lì, senza APP_SUBPATH.
-    while IFS= read -r _node_dir; do
-        _nnum=$(node_num_from_dir "$_node_dir")
-        progress_show "selezione log: nodo ${_nnum}..."
+    # _node_dir da list_env_nodes È la directory del nodo — lo stesso oggetto
+    # che resolve-logs.sh esporta come LOG_SEARCH_ROOT per il nodo attivo.
+    # Quindi la scoperta parte da lì, senza APP_SUBPATH.
+    #
+    # L'appaiamento numero↔directory viene da list_env_nodes (utils-nodes.sh) e
+    # non più da una chiamata a node_num_from_dir scritta qui: dal momento in cui
+    # esiste un secondo consumatore dell'iterazione sui nodi (il motore
+    # multi-nodo di dispatch, SCOPE-1), due copie dello stesso appaiamento sono
+    # la premessa del principio 8 — ed è esattamente così che è nato NODE-1.
+    # Ordine dei campi DIR poi NUM: vedi list_env_nodes in utils-nodes.sh — con
+    # NUM per primo un nodo senza numero nel nome farebbe scivolare i campi e
+    # verrebbe saltato in silenzio. Un NUM vuoto qui è legittimo e la colonna
+    # NODO mostrerà "-", come già fa per un'app non attribuibile.
+    while IFS=$'\t' read -r _node_dir _nnum; do
+        [[ -z "$_node_dir" ]] && continue
+        progress_show "selezione log: nodo ${_nnum:-?}..."
         _sal_scan_root "$_node_dir" "$_nnum"
-    done < <(list_env_node_dirs "${ACTIVE_ENV}")
+    done < <(list_env_nodes "${ACTIVE_ENV}")
 else
     _multi_node=0
     _scope_label="nodo ${ACTIVE_NODE:-?}"

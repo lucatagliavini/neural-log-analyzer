@@ -98,6 +98,71 @@ assert_eq "lxprjbliq08 → 08"        "08" "$(node_num_from_dir /logs/prod/lxprj
 assert_eq "lxprjbliq5 → 05"         "05" "$(node_num_from_dir /logs/prod/lxprjbliq5)"
 assert_eq "senza cifre → vuoto"     ""   "$(node_num_from_dir /logs/prod/nodo-senza-numero)"
 
+# ─── list_env_nodes: l'appaiamento numero↔directory in un punto solo (SCOPE-1) ──
+#
+# Copre la funzione da cui passano ORA due consumatori — search_all_logs.sh e il
+# motore multi-nodo di dispatch — dopo che l'appaiamento è stato togliuto dal
+# tool. Senza queste asserzioni la suite passerebbe anche con la funzione rotta:
+# gli altri test la esercitano solo di rimbalzo, attraverso il fallback di
+# resolve-logs.sh, che guarda `| head -1` e quindi non noterebbe un numero
+# sbagliato sulle righe successive — cioè proprio il difetto di NODE-1.
+#
+# `list_env_node_dirs` (e quindi `list_env_nodes`) legge ENV_NODE_CODE e
+# NODE_NAME_TEMPLATE da system.conf. Sorgiarlo qui NON sovrascrive la fixture:
+# il profilo scrive `LOG_BASE_DIR="${LOG_BASE_DIR:-…}"`, quindi rispetta il
+# valore già esportato sopra — verificato, non assunto.
+source "$PROFILE_DIR/system.conf"
+
+section "list_env_nodes: coppie DIR<TAB>NUM appaiate correttamente"
+_pairs=$(list_env_nodes prod)
+assert_eq "una riga per nodo della fixture" "5" "$(wc -l <<< "$_pairs")"
+# L'appaiamento, nodo per nodo: è il contratto che NODE-1 ha violato in silenzio.
+while IFS= read -r _n; do
+    assert_eq "nodo $_n appaiato alla propria directory" \
+        "$FIX/prod/lxprjbliq$_n"$'\t'"$_n" \
+        "$(grep -F "lxprjbliq$_n" <<< "$_pairs")"
+done <<< $'01\n07\n08\n09\n12'
+# Coerenza col produttore: stessa cardinalità di list_env_node_dirs, altrimenti
+# la coppia sta perdendo o duplicando nodi.
+assert_eq "cardinalità uguale a list_env_node_dirs" \
+    "$(list_env_node_dirs prod | wc -l)" "$(wc -l <<< "$_pairs")"
+
+section "list_env_nodes: un nodo senza numero è emesso, non scartato"
+# Principio 5: escluderlo farebbe sparire i suoi log senza dirlo. Creata QUI e
+# non nella fixture in testa al file, così le asserzioni precedenti restano
+# esercitate sull'albero originale.
+mkdir -p "$FIX/prod/lxprjbliqBIS/ClaimCenter"
+_pairs2=$(list_env_nodes prod)
+assert_eq "emesso con NUM vuoto" "$FIX/prod/lxprjbliqBIS"$'\t' \
+    "$(grep -F "lxprjbliqBIS" <<< "$_pairs2")"
+assert_eq "il conteggio cresce di uno" "6" "$(wc -l <<< "$_pairs2")"
+
+# L'asserzione che cattura il difetto trovato al primo giro di questo test: con
+# l'ordine NUM<TAB>DIR il TAB iniziale di un NUM vuoto viene scartato da `read`
+# (TAB è IFS whitespace), il PATH finisce nel primo campo e il secondo resta
+# vuoto — quindi il chiamante, che salta le righe senza directory, ignorava il
+# nodo in SILENZIO. Qui si verifica la proprietà dal punto di vista di chi legge,
+# non della stringa emessa: è l'unico modo di accorgersene.
+_letto_dir="" _letto_num="sentinella"
+while IFS=$'\t' read -r _d _n; do
+    [[ "$_d" == *lxprjbliqBIS ]] && { _letto_dir="$_d"; _letto_num="$_n"; }
+done < <(list_env_nodes prod)
+assert_eq "chi legge riceve la directory nel primo campo" \
+    "$FIX/prod/lxprjbliqBIS" "$_letto_dir"
+assert_eq "chi legge riceve NUM vuoto, senza scivolamento" "" "$_letto_num"
+
+section "list_env_nodes: il separatore TAB regge un path con spazi"
+# Non è uno scenario realistico ma una PROPRIETÀ del contratto: il separatore non
+# deve poter essere rotto dal contenuto. Con lo spazio come separatore questa
+# riga si spezzerebbe in due campi e il path arriverebbe troncato al chiamante.
+mkdir -p "$FIX/prod/lxprjbliq20 bis/ClaimCenter"
+_dir_letto=""
+while IFS=$'\t' read -r _d _n; do
+    [[ "$_d" == *"20 bis" ]] && _dir_letto="$_d"
+done < <(list_env_nodes prod)
+assert_eq "path con spazio integro dopo la lettura" "$FIX/prod/lxprjbliq20 bis" "$_dir_letto"
+rm -rf "$FIX/prod/lxprjbliqBIS" "$FIX/prod/lxprjbliq20 bis"
+
 # ─── resolve-logs.sh end-to-end ───────────────────────────────────────────────
 _resolve_field() {
     local node="$1" field="$2" out
