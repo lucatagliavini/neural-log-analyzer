@@ -1,6 +1,6 @@
 # Backlog — neural-log-analyzer
 
-Aggiornato: 2026-08-27
+Aggiornato: 2026-08-28
 
 ---
 
@@ -8,6 +8,7 @@ Aggiornato: 2026-08-27
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
+| SCOPE-1 | **Il nodo 01 non è un default, è un ripiego** — con «tutti i nodi» ora possibile, il default va ribaltato: nessun nodo nella query = tutta la farm. Misurato il 2026-08-28 che il default attuale **nasconde il problema vero** (nodo 01: 28 warning innocui; nodo 04, mai mostrato: thread bloccati 300 s + `ORA-00936`). Decisioni prese, ordine di lavoro in 6 passi, passo 1 (oracolo esterno) fatto. Vedi la sezione dedicata sotto | **In corso** |
 | SRCHQ-1 | **La regola sugli apici singoli è ora in un punto solo, ma resta un'euristica** — `lib/utils-quoted.sh` (SRCH-5/D3-D4) tratta una coppia di apici come citazione **solo se delimitata da spazi**, perché in italiano `'` è anche l'apostrofo. Conseguenza dichiarata e coperta da test: una citazione fra apici singoli **non può contenere un apostrofo** (`trova 'errore nell'app'` non è riconosciuta come citazione; con le virgolette doppie sì). È lo stesso vincolo del quoting di shell e il messaggio d'aiuto del bot documenta entrambe le forme, quindi l'utente ha già la via d'uscita. **Non c'è nulla da correggere adesso**: la voce esiste perché se un giorno arrivasse una segnalazione su una ricerca fra apici che «non funziona», la causa è questa e sta scritta, invece di essere ridiagnosticata da zero | Promemoria |
 | FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
@@ -197,6 +198,282 @@ riaddestrato e verificato su entrambi i profili nella stessa sessione in cui è 
 segnalato. **SRCH-4 aperta lo stesso giorno**: secondo riscontro dal test manuale
 (nome di log di sistema quotato senza `*`), diagnosticato e documentato ma non
 implementato su richiesta esplicita dell'utente ("implementiamo domani").
+
+## SCOPE-1 — Il nodo 01 non è un default, è un ripiego — **IN CORSO** (dal 2026-08-28)
+
+Nata da una richiesta dell'utente: partendo da un problema in corso, il bot presuppone un
+nodo specifico, quindi manca il passo «trovare **dove**» prima di analizzare. L'utente ha
+formulato anche la diagnosi: `nodo 01` è stato fissato *perché* «tutti i nodi» non era
+possibile, non perché fosse la risposta giusta.
+
+**L'evidenza che la diagnosi è corretta è indiretta ma solida**: `chatbot.sh:51`
+(`ACTIVE_NODE="01"`) e `resolve-logs.sh:65` (`NODE_NUM="${3:-01}"`) sono **nudi, senza
+commento**, e questo backlog non ha una voce che li motivi. In un repository dove ogni
+scelta porta un paragrafo di razionale, l'assenza di motivazione è essa stessa la prova che
+non c'è stata una decisione.
+
+### Il default sbagliato costa il problema, non solo tempo — misurato 2026-08-28
+
+Tre nodi di produzione, stessa ora, stessa query (`errori nell'ultima ora`), via MCP:
+
+| nodo | server.log | esito | durata |
+|---|---|---|---|
+| 01 | 6,8 M | 28 × `Premature end of file` (parse XML, innocuo) | 1525 ms |
+| 04 | 1,4 M | **thread webcontainer bloccati 300 s** + `ORA-00936` + `Session is invalid` | 688 ms |
+| 09 | 1,5 M | nessun errore | 660 ms |
+
+«Errori su prod» oggi risponde **col nodo 01**: 28 warning innocui. I thread bloccati da
+cinque minuti sul nodo 04 non vengono mai visti. Non è un limite di ergonomia — è una
+risposta che **dirotta la diagnosi** ed è indistinguibile da una farm sana.
+
+**Dedotto**, non misurato: ~12 s in sequenza su 13 nodi (media 0,95 s/nodo), 1,5–2 s con un
+pool. I 13 mount NFSv4 sono indipendenti e il costo è CPU su 64 core (SALPERF-1), quindi il
+parallelismo *per nodo* dovrebbe scalare quasi linearmente. **Quel «dovrebbe» è la parte da
+misurare.** Riferimento misurato oggi: `search_all_logs` multi-nodo su 1 h = 373 file, 16
+worker, 15,0 s.
+
+### Due assi ortogonali, e finora ne era nominato uno solo
+
+- **quali sorgenti**: un log / tutti i log del nodo → `ovunque`, `in tutti i log` — *già
+  fatto, è `search_all_logs`*
+- **quali nodi**: un nodo / tutta la farm → *è quello che manca*
+
+`search_all_logs` è l'unico tool che aveva «tutto» nel nome e ha finito per assorbire
+**entrambi** i significati: le sorgenti per progetto, i nodi per accidente (UI-9,
+2026-07-31). Da qui l'asimmetria che ha generato la segnalazione: la stessa frase «errori su
+prod» significa *tutta la farm* per un tool e *nodo 01* per gli altri quattordici.
+
+**`ovunque`/`dappertutto` NON va riusato come keyword di scope nodale.** È già una feature
+addestrata sull'altro asse:
+
+```
+nlp/unigrams.txt:183   appare\b|ovunque\b                                    :: 1
+nlp/unigrams.txt:203   dove.appare|…|cerca.ovunque|in.tutti.i.log            :: 2
+queries_labeled.txt    search_all_logs  cerca ABContactSystemPlugin ovunque nel nodo 3
+```
+
+L'ultima riga è decisiva: `ovunque nel nodo 3` **è nel dataset**, quindi i due «tutto»
+convivono già nella stessa frase senza contraddizione. Riusare la parola cambierebbe il
+significato di 6 esempi labeled, spegnerebbe due feature (vettore diverso → **retrain
+obbligatorio**) e renderebbe `cerca X ovunque nel nodo 3` autocontraddittoria.
+
+**Collocazione della keyword nuova**: nel **framework**, non in `entities.conf`.
+`NODE_PATTERNS` sta nel profilo perché `worker1`/`nodo 3` sono alias del cliente; `tutti i
+nodi` è lingua italiana, e per il criterio NLP-1 duplicarla per profilo è l'errore che NLP-1
+ha già corretto una volta (tre symlink verso `liquido`).
+
+### La conseguenza sul giro `CONTEXT`, e perché il ribaltamento la risolve
+
+Misurato: la ricerca multi-nodo stampa in testa `[prod · tutti i nodi · …]` e in coda
+`context: … node=01`. **Header e footer già oggi si contraddicono** — `context_kv`
+(`chatbot.sh:694`) emette `ACTIVE_NODE`, che vale `01` anche durante una ricerca su 13 nodi.
+Le istruzioni MCP dicono all'agente di rimandare indietro quel footer: col default
+ribaltato, la prima query risponderebbe su tutta la farm e **tutte le successive si
+inchioderebbero al nodo 01**, in silenzio. Funzionerebbe in REPL e fallirebbe via MCP.
+
+La soluzione cade dal ribaltamento stesso: se «vuoto» significa «tutti i nodi», il footer
+emette `node=` vuoto e il contratto MCP dice già *«lascia vuoti i campi non noti»* — il
+round-trip funziona **senza toccare il wrapper**. Di più: il difetto noto del wrapper
+(scarta in silenzio un `node` non valido, visto con `node=77` in NODE-1) diventa
+**innocuo**, perché scartare produce vuoto e vuoto ora è la risposta giusta. Resta da
+correggere la sua docstring, che promette `nodo 01`.
+
+### Decisioni prese dall'utente (2026-08-28)
+
+1. **Default = tutti i nodi**, a meno che la query non nomini un nodo.
+2. **Forma della risposta**: classifica per nodo in testa (una riga per nodo), poi il
+   dettaglio dei **soli** nodi con esito, con tetto per nodo dichiarato. Il lavoro di
+   individuazione lo fa il bot, non l'occhio dell'utente su 13 tabelle (~260 righe misurate
+   estrapolando il solo nodo 04).
+3. **Allargamento dello scope**: `tutti i nodi`/`tutta la farm`, **e** nominare di nuovo
+   l'ambiente azzera il nodo — nominare una coordinata più ampia rilascia quella più
+   stretta. Una politica sola, formulabile in una frase (principio 6). È un cambio di
+   comportamento in REPL: oggi `su prod` dopo `nodo 4` non azzera nulla, ed è la trappola da
+   cui è nata la discussione.
+
+### Cosa NON si può fare (verificato, non dedotto)
+
+Aggregare più nodi dentro **una sola** invocazione `gawk` con attribuzione del nodo da
+`FILENAME` è impossibile per i log ruotati: `open_log()` apre i `.gz` come process
+substitution, quindi
+
+```
+$ gawk '{print "FILENAME=" FILENAME}' <(gunzip -c f1.txt.gz)
+FILENAME=/dev/fd/63
+```
+
+Resterebbe corretto solo sui log correnti non ruotati, cioè si romperebbe appena si chiede
+una finestra di ieri. La colonna NODO va costruita **fuori** da gawk.
+
+### Rischi, ordinati per severità
+
+| # | rischio | mitigazione |
+|---|---|---|
+| R1 | **Falso zero silenzioso** — su 13 nodi è 13× più probabile *e* meno visibile: una tabella di numeri invita a leggere `0` come «nodo sano», mentre può essere «log sotto un'altra app», «directory illeggibile», «nodo dismesso». Quarta ricorrenza della classe (NODE-1, LOGSEL-1, RETENT-1, LVLCNT-1) | tre stati per riga (`valore` / `0 misurato` / `n/d` + motivo) e piede obbligatorio `misurati N/M nodi`. Non negoziabile |
+| R2 | **Ranking che misura la retention, non la salute** — nodo A 7 giorni, nodo B 11 ore (misurato in RETENT-1): il confronto su «ieri» ordina i nodi per retention. Risposta sbagliata e plausibile | `logfiles_coverage_note` **per nodo**, marcatore `~`, e **nessun «nodo peggiore» dichiarato** se la copertura è disomogenea |
+| R3 | **Aggregazione semanticamente invalida** — una media di pause GC su due JVM è priva di senso (misurato: 127 vs 141 eventi sul nodo 4) | righe per-nodo sempre; riga TOTALE **solo** per quantità additive. Mai medie né percentili cross-nodo. Il tasso 5xx = Σ5xx/Σtot **è** legittimo sull'access log (una sola popolazione di richieste, distribuita dal bilanciatore), non sul GC. Dichiarato in `TOOL_SCOPE` |
+| R4 | **Il wrapper MCP scarta in silenzio un `node` non valido** — la feature nascerebbe rotta sul canale da cui la usa un agente | disinnescato dal ribaltamento (vuoto = tutti), più lo scope esprimibile dal **testo** della query, che passa sempre. Da verificare *all'inizio* |
+| R5 | **Duplicazione dell'iterazione** — `search_all_logs.sh:163-178` ha già il suo ciclo sui nodi; crearne un secondo lasciando l'inline è il principio 8, il modo in cui sono nati LOGDISC-3 e NODE-1 | la centralizzazione **migra anche `search_all_logs`**, nello stesso intervento |
+| R6 | **Costo e saturazione** | riusare `SEARCH_PARALLEL_JOBS`: una seconda manopola è *letteralmente* il bug SALPERF-1 (la costante `4` in tre copie → 6,4% di 64 core). Tetto dichiarato sopra N file stimati, mai troncamento muto (TRUNC-1) |
+| R7 | **Concorrenza e output** — 13 figli su stdout si interlacciano, 13 `progress_show` si sovrascrivono | output catturato per nodo e ristampato **in ordine di nodo** (riusare lo schema `%05d` di `search_all_logs`), progresso solo nel padre |
+| R8 | **Temporanei orfani** — `search_all_logs.sh` fa `rm -rf` sulle uscite normali ma **non ha `trap`** (verificato: l'unico `trap` del repo è `chatbot.sh:404`). I multi-nodo sono i run più lunghi, quindi i più interrotti | `trap` di cleanup, nello stesso intervento di R5 |
+| R9 | **Moltiplicazione fra tool** — `TOOL_THRESHOLD=0.25`: più tool possono attivarsi, scope ambiente × 2 tool = 26 esecuzioni | il tetto si applica alla **query**, non al singolo tool |
+
+### Sul retrain
+
+Se lo scope resta un **parametro** il retrain è probabilmente evitabile — e la cosa è
+**verificabile, non da assumere**: `<NODE>` e `<ENV>` non esistono come feature (verificato
+con grep su `nlp/unigrams.txt`/`bigrams.txt`), quindi il classificatore non vede mai un nodo.
+La prova è l'md5 di `nlp/dataset/queries.txt` prima e dopo, più `run-tests.sh --parity`
+(1171/1171) perché `normalize-query.sh` viene toccato. Se l'md5 cambia, il retrain è
+obbligatorio e **lo si sa prima** di dedurre nulla.
+
+Un **tool nuovo** (`env_overview`) costerebbe `NUM_TOOLS 16→17`, nuova topologia,
+`setup.sh` + `train.sh`, esempi labeled dedicati e il rischio di rubare attivazioni ai 968
+esistenti. Rinviato: parametro prima, misurare l'uso, poi decidere se la domanda «quale nodo
+sta male» merita un neurone.
+
+### Ordine di lavoro (scelto dall'utente: completo, oracolo per primo)
+
+1. **Oracolo esterno** — `tests/oracle-multinode.sh`. **FATTO** (2026-08-28).
+2. Iterazione sui nodi centralizzata + migrazione di `search_all_logs` + `trap`. **FATTO**
+   (2026-08-28), vedi sotto.
+3. Scope: `resolve-logs.sh:65`, `chatbot.sh:51`, keyword nel framework, `context_kv`.
+4. `TOOL_SCOPE` in `nlp/tools.conf` + `dispatch_tool_multinode`.
+5. Classifica: digest per-nodo (modello `BOT_PERF_FILE`), tre stati, coverage per nodo.
+6. Verifica in produzione: invariante di somma, marcatori di hostname, giro `CONTEXT` via MCP.
+
+### L'oracolo (passo 1) — fatto e verificato
+
+`tests/oracle-multinode.sh`, **sola lettura**, non sorgia **nulla** da `lib/`: se usasse
+`select_log_files_grouped` o `resolve_system_log_dir`, un difetto in quelle funzioni
+comparirebbe identico nei due conteggi e la verifica darebbe **verde su un bug** — lo stesso
+motivo per cui il pre-gate di `search_all_logs` usa `-F` e non un motore regex diverso da
+quello di analisi. Logica volutamente stupida: legge **tutto**, filtra dopo. Nessun pruning
+temporale, perché il pruning è l'ottimizzazione sotto esame e un oracolo che la replica non
+la può smentire. Il glob del nodo si passa **letterale** e non si ricava da
+`NODE_NAME_TEMPLATE`: quel template è l'input della funzione sotto esame — è la riga che ha
+prodotto `lxprjbliq0009` in NODE-1.
+
+Tre secchi, non due, anche sulle righe: quelle senza timestamp riconoscibile vanno in
+`match_undated`, **né incluse né escluse**. Se bot e oracolo differiscono di esattamente
+quel numero, la causa è il trattamento delle righe non databili (il bot le include per
+prudenza, principio 5, e lo dichiara col marcatore `!`) e non un difetto di selezione.
+
+Verificato su fixture con 4 nodi — live + rotazione `.gz`, riga fuori finestra, riga non
+databile, log presente solo sotto un'altra app, file illeggibile:
+
+```
+NODO  STATO  FILE  MATCH  MATCH_UNDATED  MOTIVO
+01    ok     2     3      1              -
+04    ok     1     1      0              -
+08    n/d    0     -      -              nessun file server* sotto il nodo (con /ClaimCenter/ nel path)
+09    n/d    1     -      -              file non leggibile: server.log
+# SOMMA match=4   # misurati 2/4 nodi (2 n/d)
+```
+
+I due casi che contano danno **`n/d` con motivo, non `0`**. Somma verificata a mano: 3 (nodo
+01: due nel live, uno dalla rotazione `.gz`) + 1 (nodo 04) = 4.
+
+**Un difetto trovato alla prima esecuzione**, che è la ragione per cui un oracolo va provato
+prima di fidarsene: un apostrofo italiano in un commento **dentro** il programma AWK a
+singoli apici chiude la stringa a metà (`renderebbe l'oracolo` → errore di sintassi bash).
+Vincolo ora scritto nel file, accanto al blocco.
+
+### Eseguito in produzione (2026-08-28) — e l'invariante regge
+
+Terreno rilevato su `lxprworkerlana01` (ppc64le, 64 core, bash 5.1.8, gawk 5.1.0): **13
+nodi `01`–`13` senza buchi**, tutti leggibili, tutti con **due app** (`ClaimCenter` *e*
+`ContactManager`) e 44 file `server.log*` a testa. La farm è **uniforme**, quindi in
+produzione il ramo `n/d` non si attiva da solo: è la ragione per cui la fixture a 4 nodi
+resta l'unico posto dove quel ramo è esercitabile, e va tenuta.
+
+**Il default costa il 97% del quadro.** Oracolo su finestra statica (27/08 09:00–10:00,
+ClaimCenter, `ERROR`):
+
+| nodo | 01 | 02 | 03 | 04 | 05 | 06 | 07 | 08 | 09 | 10 | 11 | 12 | 13 | Σ |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| ERROR | **33** | 0 | 10 | 0 | 0 | 71 | 0 | 255 | 0 | 10 | 34 | 1 | **643** | **1057** |
+
+Il nodo 01 — il default — vale **33 su 1057, il 3,1%**. Il nodo 13, col 61% degli errori,
+non viene mostrato mai. Costo della lettura **esaustiva** (286 file, 45 MB, 13 mount NFS,
+`gunzip`, nessun pruning, sequenziale): **11,4 s**. È il tetto superiore, non il costo del
+bot.
+
+**Invariante di somma verificata** su pattern raro (`ORA-00936`, stessa finestra statica),
+confrontando l'oracolo con `search_all_logs` del bot:
+
+| | oracolo | bot |
+|---|---|---|
+| nodo 08 | 2 | **2** |
+| nodo 13 | 10 | **10** |
+| Σ filtrate | 12 | 1936 − 1924 = **12** |
+
+Concordanza esatta, con due implementazioni indipendenti (decompressore diverso, pruning
+contro lettura totale, grammatiche di timestamp diverse). Valida in un colpo: enumerazione
+dei nodi, scoperta ricorsiva, selezione delle rotazioni `.gz`, filtro temporale,
+attribuzione per nodo. **Questi tre numeri sono ora il riferimento di regressione per il
+refactor del passo 2.**
+
+Il confronto va fatto sulle occorrenze **filtrate**: due esecuzioni a 5 minuti di distanza
+danno 1934 e 1936 occorrenze grezze, perché `console.log` è vivo. Sul totale grezzo una
+differenza sarebbe indistinguibile fra crescita e difetto — la lezione di SALPERF-1
+applicata. E il marcatore `!` si dimostra indispensabile: **1924 su 1936 (99,4%)** non sono
+filtrabili per data.
+
+### Due vincoli nuovi, misurati qui
+
+1. **Il timeout MCP è un tetto di progetto, non un dettaglio.** La stessa query via MCP è
+   andata in **timeout**, mentre eseguita direttamente sull'host costa **18,6 s** di wall
+   (70 s CPU su 64 core, quindi il pool lavora: ~3,8×). Un'altra ricerca multi-nodo misurata
+   a 15,0 s era invece passata: la soglia sta fra i due. **Conseguenza sul default
+   multi-nodo**: se la risposta di default sfonda quel tetto, il canale primario di un agente
+   si rompe — non lentamente, del tutto. Il budget dichiarato di R6 non è prudenza, è un
+   requisito, e va tarato **sotto** il timeout MCP con la classifica calcolata prima del
+   dettaglio.
+2. **`CONTEXT node=01` su run multi-nodo: confermato dal vivo**, non più dedotto. Output
+   reale di una ricerca su 13 nodi: `CONTEXT env=prod node=01 app=ClaimCenter …`, con
+   l'intestazione che diceva «tutti i nodi». Il difetto del giro `CONTEXT` esiste già oggi.
+
+### Passo 2 — `list_env_nodes()`, e il difetto che il test ha trovato subito (2026-08-28)
+
+`list_env_nodes ENV` in `lib/utils-nodes.sh` emette righe **`DIR<TAB>NUM`**: il nodo già
+appaiato al suo numero canonico. `search_all_logs.sh` è stato **migrato nello stesso
+intervento** (principio 8: non si lascia la copia inline preesistente) e non chiama più
+`node_num_from_dir` da sé. Aggiunto anche il `trap 'rm -rf "$tmp_dir"' EXIT INT TERM` che
+mancava: i run multi-nodo sono i più lunghi, quindi i più interrotti, e `bash
+search_all_logs.sh` è un processo separato (`dispatch.sh:1228`), quindi il trap non tocca
+`chatbot.sh`.
+
+**Coppie e non callback**: i chiamanti accumulano in array del proprio scope
+(`all_labels`/`all_paths`/… in `search_all_logs.sh`). Con `while … < <(funzione)` il
+produttore gira in subshell ma il **corpo** del ciclo resta nella shell chiamante, quindi
+gli append funzionano; una callback invocata dall'interno girerebbe nello scope sbagliato e
+gli append andrebbero perduti **in silenzio**. Una centralizzazione non deve introdurre
+quella classe di difetto proprio mentre riduce la duplicazione.
+
+**L'ordine dei campi è `DIR<TAB>NUM` e non il naturale `NUM<TAB>DIR`, per un difetto reale
+trovato alla prima esecuzione del test.** Il TAB è un carattere di IFS *whitespace*: bash
+collassa le sequenze e **scarta i separatori iniziali**. Su una riga `\t/path/del/nodo` —
+cioè un nodo il cui nome non espone un numero — `IFS=$'\t' read -r num dir` non assegna
+`num=""` e `dir=/path`: scarta il TAB, mette il **path** in `num` e lascia `dir` **vuoto**.
+Il chiamante, che salta le righe senza directory, avrebbe **ignorato quel nodo in silenzio**
+— il falso negativo che il commento appena scritto dichiarava di evitare. Il commento diceva
+il contrario del codice. Con DIR per primo, un NUM vuoto è un campo finale mancante (che
+`read` gestisce) e il campo con gli spazi arriva integro.
+
+**Test**: 12 asserzioni nuove in `tests/test-node-resolve.sh` (35 → **47 PASS**), fra cui
+due che verificano la proprietà **dal punto di vista di chi legge** e non della stringa
+emessa — l'unico modo di accorgersi dello scivolamento dei campi. Il test è stato
+**validato reintroducendo il difetto**: 6 FAIL con l'ordine sbagliato, 0 con quello giusto.
+Suite completa **191 PASS / 0 FAIL**; `--parity` non richiesto (`normalize-query.sh` non
+toccato), nessun retrain (vocabolario, dataset e iperparametri intatti).
+
+**Verifica in produzione a codice deployato**, sui numeri d'oro stabiliti *prima* del
+refactor: nodo 08 = **2**, nodo 13 = **10**, Σ filtrate = 1944 − 1932 = **12** — identici.
+Suite eseguita anche sull'host ppc64le: **47 PASS / 0 FAIL**. Il totale grezzo è passato da
+1936 a 1944 fra le due esecuzioni (`console.log` cresce), mentre l'invariante filtrata è
+rimasta 12: conferma che l'ancoraggio corretto era il numero filtrato.
 
 ## GCCORR-1 — `correlate_gc_slow`: da «c'è una pausa vicina» a «quanto conta davvero?» — **FATTO** (2026-08-25)
 
