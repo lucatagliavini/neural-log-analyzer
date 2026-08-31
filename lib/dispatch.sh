@@ -888,6 +888,9 @@ _dispatch_tool_multinode() {
     trap 'rm -rf "$tmp_dir"' INT TERM
 
     local i _running=0 jobs="${SEARCH_PARALLEL_JOBS:-1}"
+    # Non-local: dispatch_tool la legge dopo il ritorno per riportare in
+    # PERF_JOBS il parallelismo reale, non il letterale 1 (SCOPE-1 passo 5).
+    _MULTINODE_JOBS_USED=$(( jobs < n_nodes ? jobs : n_nodes ))
     for (( i = 0; i < n_nodes; i++ )); do
         (
             ACTIVE_NODE="${nodes_num[i]}"
@@ -1157,6 +1160,9 @@ dispatch_tool() {
     if [[ -n "${BOT_PERF_FILE:-}" && "$tool" != "search_all_logs" ]]; then
         _PERF_SELECT_FILE=$(mktemp 2>/dev/null) || _PERF_SELECT_FILE=""
     fi
+    # Azzerata qui: solo _dispatch_tool_multinode la imposta. Se il percorso
+    # single-node gira, resta vuota e PERF_JOBS riporta 1 più sotto.
+    _MULTINODE_JOBS_USED=""
 
     local _scope="${TOOL_SCOPE[$tool]%% *}"
     if [[ -z "${ACTIVE_NODE:-}" && "$_scope" == "multi" ]]; then
@@ -1189,7 +1195,7 @@ dispatch_tool() {
             echo "PERF_FILES=${_nf:-0}"
             echo "PERF_FILES_MATCHED=0"
             echo "PERF_BYTES=${_nb:-0}"
-            echo "PERF_JOBS=1"
+            echo "PERF_JOBS=${_MULTINODE_JOBS_USED:-1}"
             echo "PERF_HITS=0"
         } > "$BOT_PERF_FILE" 2>/dev/null || true
         log_debug "dispatch_tool $tool: totale=${_tot}ms select=${_sel}ms analisi=${_sea}ms file=${_nf}"

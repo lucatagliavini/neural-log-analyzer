@@ -742,6 +742,78 @@ assert_true "senza finestra temporale: la nota non compare" \
 
 rm -rf "$_FIX11"
 
+# ─── SCOPE-1 passo 4/5: coverage_note per nodo + best_node soppresso ──────────
+# La decomposizione per nodo di logfiles_coverage_note (passo 4, 2026-08-31) era
+# stata verificata solo a mano; qui si blinda con un'asserzione automatica.
+# Due nodi, retention diversa: nodo 04 ha PIÙ occorrenze di nodo 03 ma i suoi
+# dati iniziano DOPO l'inizio della finestra richiesta (copertura incompleta).
+# Senza il guard R2, nodo 04 vincerebbe il confronto "nodo con più occorrenze"
+# nonostante il numero non sia confrontabile con quello di nodo 03 (che copre
+# l'intera finestra) — la stessa distorsione misurata sul nodo 4 nel piano
+# (127 vs 141 eventi GC di due JVM diverse: medie non additive).
+section "Coverage_note per nodo: soppressione del confronto su copertura disuguale"
+
+_FIX12="$(mktemp -d)"
+_node12_03="$_FIX12/prod/lxprjbliq03"
+_node12_04="$_FIX12/prod/lxprjbliq04"
+mkdir -p "$_node12_03/ClaimCenter/Guidewire" "$_node12_04/ClaimCenter/Guidewire"
+
+# Nodo 03: copertura piena — il primo timestamp del log precede l'inizio della
+# finestra richiesta (00:00). Due sole occorrenze, deliberatamente meno di 04.
+{
+    echo "2026-08-24T00:00:00,000 INFO contesto senza match"
+    echo "2026-08-24T09:00:00,000 INFO searchHub uno"
+    echo "2026-08-24T09:05:00,000 INFO searchHub due"
+} > "$_node12_03/ClaimCenter/Guidewire/policysearch.log"
+
+# Nodo 04, caso A: copertura piena — anche qui una riga di contesto alle
+# 00:00 precede le quattro occorrenze (12:00-12:15). Più occorrenze di nodo
+# 03 (4 contro 2), quindi è il vero best-node quando il confronto è lecito.
+{
+    echo "2026-08-24T00:00:00,000 INFO contesto senza match"
+    echo "2026-08-24T12:00:00,000 INFO searchHub tre"
+    echo "2026-08-24T12:05:00,000 INFO searchHub quattro"
+    echo "2026-08-24T12:10:00,000 INFO searchHub cinque"
+    echo "2026-08-24T12:15:00,000 INFO searchHub sei"
+} > "$_node12_04/ClaimCenter/Guidewire/policysearch.log"
+
+export LOG_BASE_DIR="$_FIX12"
+export SEARCH_PATTERN="searchHub"
+unset DETECTED_NODE ACTIVE_NODE LOG_SEARCH_ROOT
+
+# Caso A: finestra che entrambi i nodi coprono per intero — nessun marcatore
+# "~", il confronto "nodo con più occorrenze" indica nodo 04 (il vero best).
+export TIME_FROM="2026-08-24T00:00" TIME_TO="2026-08-24T23:59"
+_out_covA=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+
+assert_true "copertura piena su entrambi: nessuna nota di copertura parziale" \
+    "$([[ "$_out_covA" != *"dati disponibili solo da"* ]] && echo 1 || echo 0)"
+assert_true "copertura piena: il confronto indica nodo 04 (più occorrenze, dato confrontabile)" \
+    "$([[ "$_out_covA" == *"Nodo con più occorrenze: nodo 04"* ]] && echo 1 || echo 0)"
+
+# Caso B: stessa fixture, ma nodo 04 perde la riga di contesto — il primo
+# timestamp torna a essere le 12:00, DOPO l'inizio della finestra. Le
+# occorrenze (e quindi il conteggio) restano identiche: cambia solo la
+# copertura. Il confronto va soppresso, non solo corretto.
+{
+    echo "2026-08-24T12:00:00,000 INFO searchHub tre"
+    echo "2026-08-24T12:05:00,000 INFO searchHub quattro"
+    echo "2026-08-24T12:10:00,000 INFO searchHub cinque"
+    echo "2026-08-24T12:15:00,000 INFO searchHub sei"
+} > "$_node12_04/ClaimCenter/Guidewire/policysearch.log"
+
+_out_covB=$(bash "$ROOT_DIR/lib/tools/search_all_logs.sh" 2>&1 | _strip_ansi)
+
+assert_true "copertura disuguale: marcatore '~' presente per nodo 04" \
+    "$([[ "$_out_covB" == *"nodo 04: dati disponibili solo da"* ]] && echo 1 || echo 0)"
+assert_true "copertura disuguale: nodo 03 (coperto per intero) NON porta il marcatore" \
+    "$([[ "$_out_covB" != *"nodo 03: dati disponibili solo da"* ]] && echo 1 || echo 0)"
+assert_true "copertura disuguale: il confronto 'nodo con più occorrenze' è SOPPRESSO" \
+    "$([[ "$_out_covB" != *"Nodo con più occorrenze"* ]] && echo 1 || echo 0)"
+
+unset TIME_FROM TIME_TO
+rm -rf "$_FIX12"
+
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"

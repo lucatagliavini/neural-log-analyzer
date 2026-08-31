@@ -8,7 +8,7 @@ Aggiornato: 2026-08-28
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
-| SCOPE-1 | **Il nodo 01 non è un default, è un ripiego** — con «tutti i nodi» ora possibile, il default va ribaltato: nessun nodo nella query = tutta la farm. Misurato il 2026-08-28 che il default attuale **nasconde il problema vero** (nodo 01: 28 warning innocui; nodo 04, mai mostrato: thread bloccati 300 s + `ORA-00936`). Passi 1-4 fatti (oracolo, iterazione centralizzata, default ribaltato, `TOOL_SCOPE`/`dispatch_tool_multinode` — deployato e verificato in produzione il 2026-08-31), restano il passo 5 (classifica/digest per nodo) e il passo 6 (verifica end-to-end completa). Vedi la sezione dedicata sotto | **In corso** |
+| SCOPE-1 | **Il nodo 01 non è un default, è un ripiego** — con «tutti i nodi» ora possibile, il default va ribaltato: nessun nodo nella query = tutta la farm. Misurato il 2026-08-28 che il default attuale **nasconde il problema vero** (nodo 01: 28 warning innocui; nodo 04, mai mostrato: thread bloccati 300 s + `ORA-00936`). Tutti i 6 passi fatti (oracolo, iterazione centralizzata, default ribaltato, `TOOL_SCOPE`/`dispatch_tool_multinode`, due difetti residui corretti e blindati da test, verifica end-to-end in produzione — invariante di somma e marcatori di hostname confermati il 2026-08-31). Resta un problema MCP segnalato ma non risolvibile da questo repo (timeout su ricerca full-farm senza nodo nominato). Vedi la sezione dedicata sotto | **Chiuso, un residuo fuori ambito** |
 | SRCHQ-1 | **La regola sugli apici singoli è ora in un punto solo, ma resta un'euristica** — `lib/utils-quoted.sh` (SRCH-5/D3-D4) tratta una coppia di apici come citazione **solo se delimitata da spazi**, perché in italiano `'` è anche l'apostrofo. Conseguenza dichiarata e coperta da test: una citazione fra apici singoli **non può contenere un apostrofo** (`trova 'errore nell'app'` non è riconosciuta come citazione; con le virgolette doppie sì). È lo stesso vincolo del quoting di shell e il messaggio d'aiuto del bot documenta entrambe le forme, quindi l'utente ha già la via d'uscita. **Non c'è nulla da correggere adesso**: la voce esiste perché se un giorno arrivasse una segnalazione su una ricerca fra apici che «non funziona», la causa è questa e sta scritta, invece di essere ridiagnosticata da zero | Promemoria |
 | FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
@@ -538,6 +538,81 @@ danno 1934 e 1936 occorrenze grezze, perché `console.log` è vivo. Sul totale g
 differenza sarebbe indistinguibile fra crescita e difetto — la lezione di SALPERF-1
 applicata. E il marcatore `!` si dimostra indispensabile: **1924 su 1936 (99,4%)** non sono
 filtrabili per data.
+
+### Passo 5 — due gap residui del passo 4, chiusi (2026-08-31)
+
+Il passo 4 aveva introdotto due difetti/lacune minori, entrambi identificati durante la
+propria verifica ma lasciati per un intervento separato (vedi i pendenti della sessione
+`2026-08-31-02`):
+
+1. **`PERF_JOBS` hardcodato a `1`** — il blocco `PERF_*` condiviso di `dispatch_tool()`
+   (`lib/dispatch.sh`) scriveva sempre il letterale `1`, anche dopo che
+   `_dispatch_tool_multinode()` aveva già girato con un parallelismo reale (fino a
+   `SEARCH_PARALLEL_JOBS`, capato al numero di nodi) — un tool «multi» su 4 nodi con
+   `SEARCH_PARALLEL_JOBS=2` riportava `PERF_JOBS=1`, un fallimento silenzioso per
+   `perf-report.sh`, che legge quella colonna per valutare il beneficio del parallelismo.
+   Corretto con una nuova variabile globale (non `local`) `_MULTINODE_JOBS_USED`, impostata
+   dentro `_dispatch_tool_multinode()` come `min(jobs, n_nodi)` e letta da `dispatch_tool()`
+   dopo il ritorno — nessun cambio all'architettura di trap/subshell già stabilita nel passo
+   4. Verificato end-to-end con un nuovo test in `tests/test-dispatch-perf.sh`: fixture a 4
+   nodi via `chatbot.sh --query`, colonna 13 del query log letta con
+   `awk -F'\t' 'END{print $13}'` — `SEARCH_PARALLEL_JOBS=2` → `PERF_JOBS=2`;
+   `SEARCH_PARALLEL_JOBS=99` → `PERF_JOBS=4` (capato al numero di nodi, non il valore
+   configurato).
+2. **`logfiles_coverage_note` per nodo, verificata solo a mano** — la decomposizione per
+   nodo della soppressione del confronto «nodo con più occorrenze» su copertura disomogenea
+   (terzo difetto del passo 4, R2) era stata validata con fixture ad-hoc in sessione, senza
+   un'asserzione automatica. Aggiunta una sezione dedicata a `tests/test-search-all-logs.sh`
+   con due nodi a copertura e conteggio diversi: nodo 04 ha più occorrenze di nodo 03 (4
+   contro 2) ma, in un secondo scenario, i suoi dati iniziano dopo l'inizio della finestra
+   richiesta. Cinque asserzioni: copertura piena su entrambi → nessun marcatore `~` e il
+   confronto indica correttamente nodo 04; copertura disuguale → marcatore `~` solo su nodo
+   04, nodo 03 (coperto per intero) non lo porta, e il confronto «nodo con più occorrenze» è
+   soppresso del tutto (non solo corretto).
+- Verifica: `bash tests/test-search-all-logs.sh` **65 PASS / 0 FAIL** (5 nuove);
+  `bash tests/test-dispatch-perf.sh` incluso nella suite con le 2 nuove asserzioni;
+  `bash tests/run-tests.sh` **192 PASS / 0 FAIL** — il totale non cambia perché il livello 2
+  del runner conta un PASS per **file** (non per asserzione interna), quindi le asserzioni
+  aggiunte non alterano il tally purché il file continui a uscire con `exit 0`.
+- Nessun retrain: nessuna delle due modifiche tocca vocabolario, dataset o dispatch delle
+  feature.
+
+### Passo 6 — verifica in produzione: invariante di somma, marcatori di hostname, CONTEXT (2026-08-31)
+
+**Invariante di somma — confermata sul sottoinsieme confrontabile con l'oracolo.**
+`cerca "ORA-00936" nel nodo 08/13 in prod`, finestra `2026-08-27T09:00→10:00` passata come
+**parametro MCP** (`time_from`/`time_to`), non nel testo: la frase italiana `"dal 27/08 09:00
+al 27/08 10:00"` non è stata riconosciuta dal parser NLP (`time_from`/`time_to` restavano
+vuoti nel footer `context:`, e il risultato includeva l'intera storia dei log — 1184 e 624
+occorrenze). Con il parametro esplicito, sul sottoinsieme filtrabile per data (`server.log`,
+escludendo le occorrenze marcate `!` su `console.log`, che non espone un timestamp
+riconoscibile): **nodo 08 = 2, nodo 13 = 10, Σ = 12** — identici ai numeri d'oro
+dell'oracolo (passo 4). Nessun retrain, nessun cambio di codice: `search_all_logs` ha
+`TOOL_SCOPE=native` e non passa dal motore `dispatch_tool_multinode` del passo 4/5.
+
+**Marcatori di hostname — due riscontri indipendenti.**
+1. `filter_errors` isolato sul nodo 01 (`3473 ERROR + 2 WARN = 3475`) coincide esattamente
+   col valore che la tabella multi-nodo di `errori in prod` attribuiva al nodo 01 —
+   nessuna attribuzione incrociata fra nodi nel nuovo `dispatch_tool_multinode`.
+2. `search_all_logs` sul nodo 08 mostra nomi file `prod1nssh-cc.log-...`: `prod1nssh` è
+   l'hostname reale, coerente con la mappa nodo08↔lxprjbliq08↔prod1nssh già stabilita in
+   NODE-1 (`docs/sessions/2026-08-27-01.md`). Nota tecnica: solo i log applicativi custom
+   (`*-cc.log`) portano l'hostname nel nome file — `server.log` (usato da `filter_errors`)
+   non lo fa (`server.log-DATA-EPOCH.gz`), quindi il marcatore in senso stretto è disponibile
+   solo per quella famiglia di log.
+
+**CONTEXT via MCP** — confermato coerente su più query in questa sessione (footer `context:`
+sempre risolto come atteso, query-wins rispettato).
+
+**Un problema segnalato, non corretto (istruzione esplicita dell'utente: componente fuori da
+questo repo).** `cerca "ORA-00936" in prod` (tutta la farm, con finestra) è andata in
+**timeout MCP due volte su due** — non transitorio. Isolato con una query di controllo:
+lo stesso pattern sul solo nodo 08 (senza filtro di finestra) ha impiegato 22-29 s per
+**220 file** — più file di quanti ne aveva l'**intera farm** (343) nella verifica del passo 4
+lo stesso giorno. Coerente con crescita organica dei log (la Σ di `errori in prod` è salita
+da 7654 a 7868 nella stessa giornata), non con una regressione del passo 4/5, per la stessa
+ragione di `TOOL_SCOPE=native` sopra. Il timeout è a livello di trasporto/wrapper MCP, fuori
+da questo repository — non tentata alcuna correzione qui, come richiesto.
 
 ### Due vincoli nuovi, misurati qui
 

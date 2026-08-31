@@ -161,6 +161,41 @@ assert_true "search_all_logs: byte scansionati > byte del solo server.log (costo
 
 rm -rf "$_FIX9"
 
+# ─── PERF_JOBS: dispatch_tool_multinode deve riportare il parallelismo VERO ──
+# (SCOPE-1 passo 5). Prima del fix, il blocco PERF_* condiviso di dispatch_tool
+# scriveva sempre il letterale 1 anche dopo un ciclo multi-nodo — un tool
+# "multi" su 4 nodi con SEARCH_PARALLEL_JOBS=2 riportava PERF_JOBS=1, un
+# fallimento silenzioso per perf-report.sh (che legge quella colonna per
+# valutare il beneficio del parallelismo).
+section "PERF_JOBS: dispatch_tool_multinode riporta il parallelismo reale"
+
+_FIX10="$(mktemp -d)"
+_TS10=$(date +%Y-%m-%d)
+for _n in 03 04 05 06; do
+    _d="$_FIX10/prod/lxprjbliq${_n}/ClaimCenter"
+    mkdir -p "$_d"
+    printf '%s 10:00:00,000 ERROR boom-%s\n' "$_TS10" "$_n" > "$_d/server.log"
+done
+
+_qlog10="$(mktemp -d)"
+_run10() {
+    local _jobs="$1"
+    SEARCH_PARALLEL_JOBS="$_jobs" QUERY_LOG_DIR="$_qlog10" \
+        bash "$ROOT_DIR/chatbot.sh" --profile "$ROOT_DIR/profiles/liquido" \
+        --base-dir "$_FIX10" --env prod --query "errori nel server log" > /dev/null 2>&1
+    awk -F'\t' 'END{print $13}' "$_qlog10/chatbot-$(date +%Y-%m-%d).log" 2>/dev/null
+}
+
+_pj10=$(_run10 2)
+assert_true "4 nodi, SEARCH_PARALLEL_JOBS=2: PERF_JOBS=2 (non il letterale 1)" \
+    "$([[ "$_pj10" == "2" ]] && echo 1 || echo 0)"
+
+_pj11=$(_run10 99)
+assert_true "4 nodi, SEARCH_PARALLEL_JOBS=99: PERF_JOBS=4 (capato al numero di nodi)" \
+    "$([[ "$_pj11" == "4" ]] && echo 1 || echo 0)"
+
+rm -rf "$_FIX10" "$_qlog10"
+
 # ─── Riepilogo ─────────────────────────────────────────────────────────────
 echo ""
 printf "${BOLD}%s${RESET}\n" "───────────────────────────────────────────"
