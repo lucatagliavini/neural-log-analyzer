@@ -322,6 +322,15 @@ specifico:
    automaticamente un bug nel codice — verificare sempre se è la fixture di
    test a violare un'invariante voluta (es. principio 5, pruning conservativo)
    prima di modificare la logica di produzione per farlo passare.
+9. **Backup prima di un cambio major** (deciso 2026-08-31, prima di SCOPE-1 passo
+   4): quando una modifica cambia un comportamento visibile e i test che la
+   validano davvero girano in **produzione** (non solo nella suite locale),
+   prima di procedere si fissa un punto noto-buono a cui tornare — un tag git
+   annotato sullo stato corrente, e uno separato sull'ultima versione
+   effettivamente **deployata**, se le due cose sono divergenti (`deploy.sh` è
+   rsync additivo: non versiona nulla lato server, quindi il tag è l'unico
+   riferimento per un rollback). Il costo di un tag è nullo; il costo di
+   scoprire a metà di un incidente che non si sa più cos'era "prima" non lo è.
 
 ## Dependencies
 
