@@ -169,6 +169,7 @@ function attribute_pause(epoch,    d) {
     if ((time_from != "" || time_to != "") && !in_range(req_epoch)) next
 
     total_requests++
+    _scope_n++
     if (req_min_epoch == 0 || req_epoch < req_min_epoch) req_min_epoch = req_epoch
     if (req_epoch > req_max_epoch) req_max_epoch = req_epoch
 

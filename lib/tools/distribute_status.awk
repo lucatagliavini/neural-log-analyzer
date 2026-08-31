@@ -38,6 +38,7 @@ BEGIN {
     endpoint_count[url][status]++
     endpoint_total[url]++
     total++
+    _scope_n++
 }
 
 END {

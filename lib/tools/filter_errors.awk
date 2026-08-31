@@ -27,13 +27,6 @@ function norm_key(msg,    k) {
 
 function flush_exception(    dk, full_msg, f) {
     if (!in_exc) return
-    # logline_count_level() invece di `if ERROR … else nwarn++` (LVLCNT-1): la
-    # classificazione binaria attribuiva ai WARN qualsiasi livello diverso da ERROR,
-    # e con il selettore per sottostringa di sotto ci finivano righe INFO. Ora la
-    # regola è una sola, condivisa con tail_log e tail_named_log.
-    logline_count_level(exc_level)
-    count++
-
     full_msg = exc_msg
     for (f = 1; f <= exc_frame_n && f <= 3; f++)
         full_msg = full_msg "\n    " exc_frame[f]
@@ -88,6 +81,22 @@ function flush_exception(    dk, full_msg, f) {
     if (msg == "") next
 
     flush_exception()
+
+    # Conteggio spostato qui (all'apertura del gruppo) invece che in
+    # flush_exception() (SCOPE-1 passo 4, 2026-08-31): `level` è già noto ora e
+    # non cambia più per questo gruppo, mentre full_msg/dedup_add restano in
+    # flush_exception() perché devono aspettare i frame successivi. Ogni
+    # gruppo aperto viene flushato esattamente una volta (dal prossimo
+    # flush_exception() o da quello in END), quindi il totale non cambia — ma
+    # l'incremento è sincrono col record invece che differito all'EOF. Prima
+    # di questo spostamento, l'ultimo gruppo pendente veniva contato solo nel
+    # flush_exception() chiamato dall'END proprio del tool (riga 102), che
+    # gawk esegue DOPO l'END condiviso di utils-scope.awk (caricato come -f
+    # precedente): la riga di sintesi multi-nodo leggeva `_scope_n` prima che
+    # l'ultimo gruppo fosse contato, sottostimando sempre di uno per nodo.
+    logline_count_level(level)
+    count++
+    _scope_n++
 
     in_exc      = 1
     exc_level   = level

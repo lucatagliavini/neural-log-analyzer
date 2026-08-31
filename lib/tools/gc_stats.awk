@@ -80,6 +80,7 @@ BEGIN {
     if (match($0, /\[([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2})/, tm)) ts = tm[1]
 
     gc_count++
+    _scope_n++
     idx = gc_count
     total_pause_ms  += pause_ms
     total_freed     += (heap_before - heap_after)

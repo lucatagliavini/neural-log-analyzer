@@ -350,15 +350,15 @@ select_log_files() {
 # TIME_FROM non parsabile equivale per il motore a "nessun limite", quindi non
 # c'è nulla da dichiarare.
 logfiles_coverage_note() {
-    local list="$1" tf_raw="${2:-}"
-    [[ -z "$tf_raw" || -z "$list" ]] && return
+    local list="$1" tf_raw="${2:-}" label="${3:-}"
+    [[ -z "$tf_raw" || -z "$list" ]] && return 0
     local tf_epoch
     tf_epoch=$(date -d "${tf_raw//T/ }" +%s 2>/dev/null || echo 0)
-    [[ "$tf_epoch" -eq 0 ]] && return
+    [[ "$tf_epoch" -eq 0 ]] && return 0
 
     local -a paths=()
     read -ra paths <<< "${list//|/ }"
-    [[ ${#paths[@]} -eq 0 ]] && return
+    [[ ${#paths[@]} -eq 0 ]] && return 0
 
     local -A seen=()
     local -a not_covered=() unverifiable=()
@@ -379,32 +379,47 @@ logfiles_coverage_note() {
         fi
     done
 
+    # label (SCOPE-1 passo 4, difetto 3): quando il chiamante decompone la
+    # verifica per nodo — perché nodi diversi possono avere retention diversa
+    # e "aggregato" sarebbe la copertura del PRIMO nodo nell'array, non di
+    # tutti — il prefisso dice a quale nodo appartiene ogni riga.
+    local _lbl_prefix=""
+    [[ -n "$label" ]] && _lbl_prefix="nodo ${label}: "
+    local _rc=0
+
     if [[ ${#not_covered[@]} -gt 0 ]]; then
         local _from _since _names
         _from=$(date -d "@$tf_epoch" '+%Y-%m-%d %H:%M')
         _since=$(date -d "@$worst_ts" '+%Y-%m-%d %H:%M')
         if [[ ${#not_covered[@]} -eq 1 ]]; then
-            printf "  ${C_PARTIAL}~ dati disponibili solo da %s: il risultato${C_RESET}\n" "$_since"
+            printf "  ${C_PARTIAL}~ %sdati disponibili solo da %s: il risultato${C_RESET}\n" "$_lbl_prefix" "$_since"
         else
             _names=$(printf '%s, ' "${not_covered[@]}"); _names="${_names%, }"
-            printf "  ${C_PARTIAL}~ dati disponibili solo da %s su %d log (%s): il risultato${C_RESET}\n" \
-                "$_since" "${#not_covered[@]}" "$_names"
+            printf "  ${C_PARTIAL}~ %sdati disponibili solo da %s su %d log (%s): il risultato${C_RESET}\n" \
+                "$_lbl_prefix" "$_since" "${#not_covered[@]}" "$_names"
         fi
         printf "  ${C_PARTIAL}  non copre l'intera finestra richiesta (da %s).${C_RESET}\n" "$_from"
+        _rc=1
     fi
 
     if [[ ${#unverifiable[@]} -gt 0 ]]; then
         local _names
         _names=$(printf '%s, ' "${unverifiable[@]}"); _names="${_names%, }"
         if [[ ${#unverifiable[@]} -eq 1 ]]; then
-            printf "  ${C_PARTIAL}? copertura non verificabile su %s: il file più vecchio${C_RESET}\n" "$_names"
+            printf "  ${C_PARTIAL}? %scopertura non verificabile su %s: il file più vecchio${C_RESET}\n" "$_lbl_prefix" "$_names"
             printf "  ${C_PARTIAL}  non espone un timestamp riconoscibile.${C_RESET}\n"
         else
-            printf "  ${C_PARTIAL}? copertura non verificabile su %d log (%s): i file più vecchi${C_RESET}\n" \
-                "${#unverifiable[@]}" "$_names"
+            printf "  ${C_PARTIAL}? %scopertura non verificabile su %d log (%s): i file più vecchi${C_RESET}\n" \
+                "$_lbl_prefix" "${#unverifiable[@]}" "$_names"
             printf "  ${C_PARTIAL}  non espongono un timestamp riconoscibile.${C_RESET}\n"
         fi
     fi
+
+    # Ritorna 1 quando la finestra richiesta NON è interamente coperta — è il
+    # segnale che il chiamante multi-nodo usa per sopprimere un confronto "nodo
+    # peggiore" fra nodi con copertura disuguale (principio 6, R2): un nodo con
+    # 7 giorni di retention e uno con 11 ore non sono confrontabili.
+    return "$_rc"
 }
 
 # Rimuove il suffisso di rotazione dal nome di un file di log, restituendo il

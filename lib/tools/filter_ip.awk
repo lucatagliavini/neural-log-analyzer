@@ -61,6 +61,7 @@ BEGIN {
         if (has_st) ip_status[ip, st]++
         if (has_ms) { ip_ms[ip] += ms; ip_ms_count[ip]++ }
     }
+    _scope_n++
 }
 
 END {

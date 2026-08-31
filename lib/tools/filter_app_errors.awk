@@ -76,6 +76,7 @@ function register_error(type, logger, cause, ts,    key) {
     # allineata.
     dedup_add(key, type, ellipsize(cause, 80), ts, logger)
     total++
+    _scope_n++
 }
 
 END {

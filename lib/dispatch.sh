@@ -446,19 +446,38 @@ suggest_available_logs() {
     _print_names_in_columns "${names[@]}"
 }
 
-# Elenco su richiesta esplicita (list_logs), non reattivo come suggest_available_logs().
-# Due sezioni perché le due famiglie si nominano con sintassi diversa: i log
-# applicativi custom via NAMED_LOG ("<nome>.log"), access/server/gc via
-# LOG_TYPE ("access log", ecc.) — mescolarli suggerirebbe una sintassi che per
-# i secondi non funziona.
+# list_available_logs — nodo singolo (comportamento del passo 3, inalterato)
+# o intero ambiente quando lo scope di sessione non fissa un nodo
+# (TOOL_SCOPE[list_logs]=native, SCOPE-1 passo 4): l'aggregazione utile qui è
+# "su quali nodi esiste questo log" (principio 6, "un tool che aggrega
+# dichiara la provenienza"), non una somma per nodo — per questo itera QUI,
+# non in dispatch_tool_multinode (che non saprebbe cosa sommare).
 list_available_logs() {
+    if [[ -z "${ACTIVE_NODE:-}" && -n "${ACTIVE_ENV:-}" ]]; then
+        _list_logs_all_nodes
+    else
+        _list_logs_one_node "${LOG_SEARCH_ROOT:-${CUSTOM_LOG_DIR:-}}" \
+            "${ACCESS_LOG_DIR:-$(dirname "${ACCESS_LOG:-.}" 2>/dev/null)}" \
+            "${SERVER_LOG_DIR:-$(dirname "${SERVER_LOG:-.}" 2>/dev/null)}" \
+            "${GC_LOG_DIR:-$(dirname "${GC_LOG:-.}" 2>/dev/null)}"
+    fi
+}
+
+# _list_logs_one_node SEARCH_ROOT ACCESS_DIR SERVER_DIR GC_DIR
+# Elenco su richiesta esplicita (list_logs) per UN nodo, non reattivo come
+# suggest_available_logs(). Due sezioni perché le due famiglie si nominano con
+# sintassi diversa: i log applicativi custom via NAMED_LOG ("<nome>.log"),
+# access/server/gc via LOG_TYPE ("access log", ecc.) — mescolarli
+# suggerirebbe una sintassi che per i secondi non funziona.
+_list_logs_one_node() {
+    local search_root="$1" access_dir="$2" server_dir="$3" gc_dir="$4"
     local _D="${C_LBL}" _B="${C_BOLD}" _X="${C_RESET}"
 
     printf "  ${_B}Log del nodo${_X}\n"
     local -a custom_names=()
     local -a _raw_names=()
     while IFS= read -r n; do [[ -n "$n" ]] && _raw_names+=("$n"); done \
-        < <(_log_names_in_dir "${LOG_SEARCH_ROOT:-${CUSTOM_LOG_DIR:-}}")
+        < <(_log_names_in_dir "$search_root")
     local n
     for n in "${_raw_names[@]}"; do
         _is_system_log_base "$n" || custom_names+=("$n")
@@ -474,25 +493,110 @@ list_available_logs() {
     printf "\n  ${_B}Log di sistema${_X}\n"
     local found=0
 
-    local access_dir="${ACCESS_LOG_DIR:-$(dirname "${ACCESS_LOG:-.}" 2>/dev/null)}"
     if [[ -n "${ACCESS_LOG_BASE:-}" ]] \
         && find "$access_dir" -maxdepth 1 -type f -name "${ACCESS_LOG_BASE}*" 2>/dev/null | grep -q .; then
         printf "  ${_D}presente — si chiede con: «access log»${_X}\n"
         found=1
     fi
-    local server_dir="${SERVER_LOG_DIR:-$(dirname "${SERVER_LOG:-.}" 2>/dev/null)}"
     if [[ -n "${SERVER_LOG_BASE:-}" ]] \
         && find "$server_dir" -maxdepth 1 -type f -name "${SERVER_LOG_BASE}*" 2>/dev/null | grep -q .; then
         printf "  ${_D}presente — si chiede con: «server log»${_X}\n"
         found=1
     fi
-    local gc_dir="${GC_LOG_DIR:-$(dirname "${GC_LOG:-.}" 2>/dev/null)}"
     if [[ -n "${GC_LOG_BASE:-}" ]] \
         && find "$gc_dir" -maxdepth 1 -type f -name "${GC_LOG_BASE}*" 2>/dev/null | grep -q .; then
         printf "  ${_D}presente — si chiede con: «statistiche gc»${_X}\n"
         found=1
     fi
     [[ "$found" -eq 0 ]] && printf "  ${_D}Nessuno trovato sul nodo.${_X}\n"
+}
+
+# _fmt_node_coverage N M NODES_SPACE_SEPARATED
+# "N/M nodi", con l'elenco dei nodi fra parentesi solo se la copertura non è
+# totale — su copertura piena l'elenco di 13 numeri non aggiunge nulla e
+# appesantisce la riga; su copertura parziale è l'informazione che risponde a
+# "quali nodi hanno questo log" (decisione utente #6).
+_fmt_node_coverage() {
+    local n="$1" m="$2" nodes="${3%% }"
+    if [[ "$n" -ge "$m" ]]; then
+        printf "%d/%d nodi" "$n" "$m"
+    else
+        printf "%d/%d nodi (%s)" "$n" "$m" "$(sed -E 's/ +/, /g' <<< "$nodes")"
+    fi
+}
+
+# _list_logs_all_nodes — elenco su tutto ACTIVE_ENV con provenienza (SCOPE-1
+# passo 4, decisione utente #6): ogni nome compare UNA volta, con su quanti
+# nodi esiste. Riusa list_env_nodes (utils-nodes.sh), non list_env_node_dirs a
+# mano: è lo stesso appaiamento dir↔numero di dispatch_tool_multinode e
+# search_all_logs — due copie divergenti dello stesso appaiamento sono
+# esattamente come è nato NODE-1 (principio 8).
+_list_logs_all_nodes() {
+    local _D="${C_LBL}" _B="${C_BOLD}" _X="${C_RESET}"
+
+    local -A custom_n=() custom_nodes=()
+    local access_n=0 server_n=0 gc_n=0
+    local access_nodes="" server_nodes="" gc_nodes=""
+    local total_nodes=0
+
+    local _node_dir _nnum _lbl n
+    while IFS=$'\t' read -r _node_dir _nnum; do
+        [[ -z "$_node_dir" ]] && continue
+        total_nodes=$(( total_nodes + 1 ))
+        _lbl="${_nnum:-?}"
+
+        while IFS= read -r n; do
+            [[ -z "$n" ]] && continue
+            _is_system_log_base "$n" && continue
+            custom_n[$n]=$(( ${custom_n[$n]:-0} + 1 ))
+            custom_nodes[$n]+="$_lbl "
+        done < <(_log_names_in_dir "$_node_dir")
+
+        if [[ -n "${ACCESS_LOG_BASE:-}" ]] \
+            && find "$_node_dir" -name "${ACCESS_LOG_BASE}*" 2>/dev/null | grep -q .; then
+            access_n=$(( access_n + 1 )); access_nodes+="$_lbl "
+        fi
+        if [[ -n "${SERVER_LOG_BASE:-}" ]] \
+            && find "$_node_dir" -name "${SERVER_LOG_BASE}*" 2>/dev/null | grep -q .; then
+            server_n=$(( server_n + 1 )); server_nodes+="$_lbl "
+        fi
+        if [[ -n "${GC_LOG_BASE:-}" ]] \
+            && find "$_node_dir" -name "${GC_LOG_BASE}*" 2>/dev/null | grep -q .; then
+            gc_n=$(( gc_n + 1 )); gc_nodes+="$_lbl "
+        fi
+    done < <(list_env_nodes "${ACTIVE_ENV}")
+
+    printf "  ${_B}Log applicativi su %s (%d nodi)${_X}\n" "${ACTIVE_ENV}" "$total_nodes"
+    if [[ "${#custom_n[@]}" -eq 0 ]]; then
+        printf "  ${_D}Nessun log applicativo trovato su alcun nodo di %s.${_X}\n" "${ACTIVE_ENV}"
+    else
+        printf "  ${_D}si nominano con l'estensione (es: «ultime righe del <nome>.log sul nodo N»):${_X}\n"
+        local -a sorted_names=()
+        mapfile -t sorted_names < <(printf '%s\n' "${!custom_n[@]}" | sort)
+        for n in "${sorted_names[@]}"; do
+            printf "  ${_D}%-28s %s${_X}\n" "$n" \
+                "$(_fmt_node_coverage "${custom_n[$n]}" "$total_nodes" "${custom_nodes[$n]}")"
+        done
+    fi
+
+    printf "\n  ${_B}Log di sistema${_X}\n"
+    local sys_found=0
+    if [[ "$access_n" -gt 0 ]]; then
+        printf "  ${_D}access log   — si chiede con «access log» — %s${_X}\n" \
+            "$(_fmt_node_coverage "$access_n" "$total_nodes" "$access_nodes")"
+        sys_found=1
+    fi
+    if [[ "$server_n" -gt 0 ]]; then
+        printf "  ${_D}server log   — si chiede con «server log» — %s${_X}\n" \
+            "$(_fmt_node_coverage "$server_n" "$total_nodes" "$server_nodes")"
+        sys_found=1
+    fi
+    if [[ "$gc_n" -gt 0 ]]; then
+        printf "  ${_D}gc log       — si chiede con «statistiche gc» — %s${_X}\n" \
+            "$(_fmt_node_coverage "$gc_n" "$total_nodes" "$gc_nodes")"
+        sys_found=1
+    fi
+    [[ "$sys_found" -eq 0 ]] && printf "  ${_D}Nessuno trovato su alcun nodo di %s.${_X}\n" "${ACTIVE_ENV}"
 }
 
 # Dimensione in byte -> stringa leggibile (B/K/M/G), scala automatica.
@@ -698,22 +802,19 @@ print_help() {
 }
 
 # _require_node_scope TOOL
-# Guard che dichiara il limite dei tool single-source quando lo scope di sessione
-# è "tutti i nodi" (ACTIVE_NODE vuoto — SCOPE-1 passo 3, 2026-08-31): questi 14
-# tool leggono da variabili di sessione risolte per UN nodo, quindi con lo scope
-# allargato non hanno un log da apire. La scelta è dichiarare il limite
-# (skip_msg), mai scegliere un nodo in silenzio — è esattamente il default nudo
-# su "01" che questo passo rimuove, misurato al 3,1% degli errori di una
-# finestra reale mentre il nodo con più errori (61%) non veniva mai mostrato.
-# La capacità di girare su N nodi arriva al passo 4 (TOOL_SCOPE); qui si ferma.
+# Guard che dichiara il limite dei tool "single" quando lo scope di sessione è
+# "tutti i nodi" (ACTIVE_NODE vuoto — SCOPE-1 passo 3, 2026-08-31). Da questo
+# passo (SCOPE-1 passo 4) legge TOOL_SCOPE (nlp/tools.conf): solo i tool con
+# scope "single" restano fermati qui — è la decisione utente che un tail è per
+# natura una domanda su UN nodo. I tool "multi" ricevono invece la capacità di
+# girare su N nodi (dispatch_tool_multinode, sotto), "native" la fanno già da
+# sé (search_all_logs, list_logs), "none" non legge log (show_help).
 #
-# Esenzioni:
-#   - TOOL_SOURCES[$tool]="none" (show_help): per DATO, non legge alcun log.
-#   - search_all_logs: per NOME, non per dato — condivide la spec "all" con
-#     list_logs, che invece va fermato (elenca i log DI UN nodo, non aggrega).
-#     Non è quindi derivabile da TOOL_SOURCES senza fermare anche list_logs;
-#     il nome in chiaro è lo stopgap di questo passo, il passo 4 lo sostituirà
-#     con una tabella dichiarata (TOOL_SCOPE).
+# Prima di questo passo, due esenzioni per NOME (search_all_logs) e per DATO
+# (TOOL_SOURCES="none") facevano lo stesso lavoro come stopgap dichiarato —
+# TOOL_SCOPE le sostituisce con una tabella unica, evitando che una futura
+# divergenza fra "chi è fermato qui" e "chi sa aggregare" produca misrouting
+# silenzioso (stessa ragione di TOOL_SOURCES per HELP-1).
 #
 # Chiamata da dispatch_tool(), non nel case di _dispatch_tool_run: un punto
 # comune invece di 14 copie (principio 2). Non chiama require_system_log
@@ -722,10 +823,308 @@ print_help() {
 _require_node_scope() {
     local tool="$1"
     [[ -n "${ACTIVE_NODE:-}" ]] && return 0
-    [[ "${TOOL_SOURCES[$tool]:-}" == "none" ]] && return 0
-    [[ "$tool" == "search_all_logs" ]] && return 0
+    local scope="${TOOL_SCOPE[$tool]%% *}"
+    [[ "$scope" != "single" ]] && return 0
     skip_msg "$tool richiede un nodo specifico — nomina un nodo (es. \"nodo 4\") o chiedi una ricerca su tutti i nodi (es. \"cerca ... in tutti i log\")"
     return 1
+}
+
+# _dispatch_tool_multinode TOOL [ARGS...]
+# Cicla TOOL su tutti i nodi dell'ambiente attivo. Attivata da dispatch_tool()
+# solo quando ACTIVE_NODE è vuoto (scope "tutti i nodi", passo 3) e
+# TOOL_SCOPE[$tool] è "multi" (passo 4) — native/single/none restano sulla
+# chiamata singola a _dispatch_tool_run, invariata carattere per carattere.
+#
+# Ogni nodo gira in una SUBSHELL propria che imposta le proprie coordinate
+# (ACTIVE_NODE, LOG_SEARCH_ROOT, ACCESS_LOG_DIR/SERVER_LOG_DIR/GC_LOG_DIR) e
+# chiama _dispatch_tool_run esattamente come il percorso single-node: ogni
+# ramo del case, require_tool_sources, print_log_source restano quelli di
+# oggi — cambiano solo QUANTE VOLTE e con QUALI coordinate vengono invocati.
+# Una subshell non fa leakare stato modificato al padre, quindi qui non serve
+# salvare/ripristinare nulla (a differenza del padre, che cicla — vedi trap
+# sotto).
+#
+# Coordinate per nodo via list_env_nodes + resolve_system_log_dir (R5): MAI
+# resolve-logs.sh per nodo — costerebbe un processo bash e 3-6 find ricorsivi
+# in più a ogni iterazione, e ha il fallback silenzioso al primo nodo su un
+# nodo inesistente (piano SCOPE-1 passo 4).
+#
+# _SCOPE_NODE è l'INDICE nell'array, non il numero di nodo: list_env_nodes può
+# emettere un nodo con numero non riconoscibile (NUM vuoto, principio 5), e più
+# nodi così collisionerebbero su una chiave vuota nel file di sintesi.
+# L'indice è unico per costruzione; il numero (nodes_num) serve solo per la
+# resa (colonna NODO), non per l'aggancio dei dati.
+#
+# Parallelismo: SEARCH_PARALLEL_JOBS, stesso schema di search_all_logs.sh
+# (contatore _running, "wait -n" e non "wait ${pids[0]}" — evita l'head-of-line
+# blocking, misurato 104,2s → 39,7s a 4 worker su 120 file reali).
+#
+# Trap solo INT/TERM, mai EXIT: chatbot.sh:415 possiede già l'EXIT del processo
+# (rotazione query log) — un trap EXIT scritto qui lo sovrascriverebbe in
+# silenzio. Il percorso normale rimuove tmp_dir con codice esplicito a fine
+# funzione (R8).
+_dispatch_tool_multinode() {
+    local tool="$1"; shift
+
+    local -a nodes_dir=() nodes_num=()
+    local _d _n
+    while IFS=$'\t' read -r _d _n; do
+        [[ -z "$_d" ]] && continue
+        nodes_dir+=("$_d")
+        nodes_num+=("$_n")
+    done < <(list_env_nodes "${ACTIVE_ENV:-}")
+
+    local n_nodes="${#nodes_dir[@]}"
+    if [[ "$n_nodes" -eq 0 ]]; then
+        skip_msg "$tool: nessun nodo trovato per l'ambiente ${ACTIVE_ENV:-?}"
+        return 1
+    fi
+
+    local tmp_dir
+    tmp_dir=$(mktemp -d) || { skip_msg "$tool: impossibile creare una directory temporanea"; return 1; }
+    local summary_file="$tmp_dir/summary"
+    : > "$summary_file"
+
+    trap 'rm -rf "$tmp_dir"' INT TERM
+
+    local i _running=0 jobs="${SEARCH_PARALLEL_JOBS:-1}"
+    for (( i = 0; i < n_nodes; i++ )); do
+        (
+            ACTIVE_NODE="${nodes_num[i]}"
+            LOG_SEARCH_ROOT="${nodes_dir[i]}"
+            ACCESS_LOG_DIR=$(resolve_system_log_dir "$LOG_SEARCH_ROOT" "${ACCESS_LOG_BASE:-}" 1) || ACCESS_LOG_DIR=""
+            SERVER_LOG_DIR=$(resolve_system_log_dir "$LOG_SEARCH_ROOT" "${SERVER_LOG_BASE:-}" 1) || SERVER_LOG_DIR=""
+            GC_LOG_DIR=$(resolve_system_log_dir "$LOG_SEARCH_ROOT" "${GC_LOG_BASE:-}" 1) || GC_LOG_DIR=""
+            export ACTIVE_NODE LOG_SEARCH_ROOT ACCESS_LOG_DIR SERVER_LOG_DIR GC_LOG_DIR
+            export BOT_PROGRESS=off
+            export _SCOPE_NODE="$i"
+            export _SCOPE_SUMMARY_FILE="$summary_file"
+            _dispatch_tool_run "$tool" "$@" > "$tmp_dir/$(printf '%05d' "$i")" 2>&1
+        ) &
+        _running=$(( _running + 1 ))
+        if [[ "$_running" -ge "$jobs" ]]; then
+            wait -n 2>/dev/null || true
+            _running=$(( _running - 1 ))
+        fi
+    done
+    wait
+
+    trap - INT TERM
+
+    _render_multinode_result "$tool" "$n_nodes" nodes_num "$summary_file" "$tmp_dir"
+    local _rc=$?
+
+    rm -rf "$tmp_dir"
+    return "$_rc"
+}
+
+# _estimate_multinode_bytes TOOLS_LINES
+# Fase 1 del tetto di budget (piano SCOPE-1 passo 4, punto 6): stima quanti
+# byte leggerebbero, su TUTTI i nodi dell'ambiente attivo, i tool "multi" fra
+# quelli attivati da infer.sh. TOOLS_LINES è nello stesso formato "tool prob\n"
+# che chatbot.sh passa a dispatch_tool. I tool single/native/none non ciclano
+# sui nodi (dispatch_tool), quindi il loro costo non dipende dal numero di
+# nodi e non entrano nella stima.
+#
+# Riusa GLI STESSI shorthand della dispatch reale (open_logs/open_server_logs/
+# open_gc_logs/open_current_*/resolve_named_log_path/open_glob_logs) invece di
+# duplicare select_log_files_grouped (principio 2): sotto quegli shorthand è
+# find+stat, senza gawk né decompressione — la stessa selezione che girerebbe
+# davvero in _dispatch_tool_run, ripetuta lì una seconda volta (costo accettato
+# deliberatamente, vedi piano: evitarlo richiederebbe riscrivere il case).
+#
+# tool_source_kinds() decide quali shorthand chiamare per i tool "normali",
+# selettore vuoto — nessuno di essi è un gruppo OR (quello, tail_log, è scope
+# "single" ed è escluso). grep_named_log è l'unica eccezione: la sua
+# precedenza a tre vie (glob → SYSLOG_KIND/TIME_EXPLICIT → NAMED_LOG) è
+# replicata esplicitamente, mirror del case dispatch_tool grep_named_log
+# (dispatch.sh, sopra) — è l'unico tool multi-scope con questa complessità
+# (confermato leggendo tutti i rami del case: gli altri dieci chiamano sempre
+# la variante "piena", mai open_current_*).
+#
+# Stesso schema di coordinate/parallelismo di _dispatch_tool_multinode, ma
+# SENZA _dispatch_tool_run: qui non gira alcun tool, solo la selezione file.
+#
+# Stdout: "<byte_totali> <file_totali> <n_nodi>". "0 0 0" se non c'è nulla da
+# stimare (nessun tool multi attivato, o nessun nodo nell'ambiente).
+_estimate_multinode_bytes() {
+    local tools_lines="$1"
+
+    local -a est_tools=()
+    local _t _p
+    while IFS=' ' read -r _t _p; do
+        [[ -z "$_t" ]] && continue
+        [[ "${TOOL_SCOPE[$_t]%% *}" == "multi" ]] && est_tools+=("$_t")
+    done <<< "$tools_lines"
+    if [[ "${#est_tools[@]}" -eq 0 ]]; then
+        echo "0 0 0"
+        return 0
+    fi
+
+    local -a nodes_dir=() nodes_num=()
+    local _d _n
+    while IFS=$'\t' read -r _d _n; do
+        [[ -z "$_d" ]] && continue
+        nodes_dir+=("$_d")
+        nodes_num+=("$_n")
+    done < <(list_env_nodes "${ACTIVE_ENV:-}")
+
+    local n_nodes="${#nodes_dir[@]}"
+    if [[ "$n_nodes" -eq 0 ]]; then
+        echo "0 0 0"
+        return 0
+    fi
+
+    local est_file
+    est_file=$(mktemp 2>/dev/null) || { echo "0 0 0"; return 0; }
+    trap 'rm -f "$est_file"' INT TERM
+
+    local i _running=0 jobs="${SEARCH_PARALLEL_JOBS:-1}"
+    for (( i = 0; i < n_nodes; i++ )); do
+        (
+            ACTIVE_NODE="${nodes_num[i]}"
+            LOG_SEARCH_ROOT="${nodes_dir[i]}"
+            ACCESS_LOG_DIR=$(resolve_system_log_dir "$LOG_SEARCH_ROOT" "${ACCESS_LOG_BASE:-}" 1) || ACCESS_LOG_DIR=""
+            SERVER_LOG_DIR=$(resolve_system_log_dir "$LOG_SEARCH_ROOT" "${SERVER_LOG_BASE:-}" 1) || SERVER_LOG_DIR=""
+            GC_LOG_DIR=$(resolve_system_log_dir "$LOG_SEARCH_ROOT" "${GC_LOG_BASE:-}" 1) || GC_LOG_DIR=""
+            export ACTIVE_NODE LOG_SEARCH_ROOT ACCESS_LOG_DIR SERVER_LOG_DIR GC_LOG_DIR
+            export _PERF_SELECT_FILE="$est_file"
+
+            local _et _k
+            for _et in "${est_tools[@]}"; do
+                if [[ "$_et" == "grep_named_log" ]]; then
+                    if [[ -n "${NAMED_LOG_GLOB:-}" ]]; then
+                        open_glob_logs "$LOG_SEARCH_ROOT" "$NAMED_LOG_GLOB" >/dev/null
+                    elif [[ -n "${SYSLOG_KIND:-}" ]]; then
+                        if [[ "${TIME_EXPLICIT:-0}" == "1" ]]; then
+                            case "$SYSLOG_KIND" in
+                                server) open_server_logs >/dev/null ;;
+                                access) open_logs        >/dev/null ;;
+                                gc)     open_gc_logs     >/dev/null ;;
+                            esac
+                        else
+                            case "$SYSLOG_KIND" in
+                                server) open_current_server_logs >/dev/null ;;
+                                access) open_current_logs        >/dev/null ;;
+                                gc)     open_current_gc_logs     >/dev/null ;;
+                            esac
+                        fi
+                    elif [[ -n "${NAMED_LOG:-}" ]]; then
+                        resolve_named_log_path "$LOG_SEARCH_ROOT" "$NAMED_LOG" >/dev/null
+                    fi
+                    continue
+                fi
+
+                local -a _kinds=()
+                while IFS= read -r _k; do
+                    [[ -n "$_k" ]] && _kinds+=("$_k")
+                done < <(tool_source_kinds "$_et" "")
+                for _k in "${_kinds[@]}"; do
+                    case "$_k" in
+                        access) open_logs        >/dev/null ;;
+                        server) open_server_logs >/dev/null ;;
+                        gc)     open_gc_logs     >/dev/null ;;
+                    esac
+                done
+            done
+        ) &
+        _running=$(( _running + 1 ))
+        if [[ "$_running" -ge "$jobs" ]]; then
+            wait -n 2>/dev/null || true
+            _running=$(( _running - 1 ))
+        fi
+    done
+    wait
+
+    trap - INT TERM
+
+    local _bytes=0 _files=0
+    if [[ -s "$est_file" ]]; then
+        read -r _files _bytes < <(awk '{f+=$2; b+=$3} END{print f+0, b+0}' "$est_file")
+    fi
+    rm -f "$est_file"
+
+    echo "${_bytes:-0} ${_files:-0} $n_nodes"
+}
+
+# _render_multinode_result TOOL N_NODES NODES_NUM_ARRAYNAME SUMMARY_FILE TMP_DIR
+# Ricompone l'output di _dispatch_tool_multinode: tabella di sintesi per nodo,
+# poi dettaglio nativo solo per i nodi con risultati (decisione utente #1).
+# Tre stati per riga, mai due (R1 — quarta ricorrenza della classe dopo NODE-1,
+# LOGSEL-1, RETENT-1, LVLCNT-1): un valore ("ok"/"0 misurato"), oppure "n/d" e
+# il motivo. La distinzione sta QUI, non nell'awk: solo il padre sa se un
+# worker ha scritto la riga di sintesi o non l'ha scritta affatto (log
+# assente, NR=0 su file vuoto/illeggibile) — il motivo per il caso senza riga
+# è preso dalla prima riga dell'output catturato, che sul ramo "manca il log"
+# è esattamente skip_msg (dispatch.sh sopra).
+#
+# Il marcatore R2 (~) si applica a un nodo VALORE solo se tsbad=1 E il tool
+# legge davvero l'access log (TOOL_SOURCES contiene "access"): tsbad è un
+# segnale grezzo di utils-scope.awk (vedi il commento in quel file), non
+# un'interpretazione già decisa lì.
+#
+# La riga Σ compare solo per aggr=sum (R3): una media di pause GC o di tempi
+# di risposta fra nodi diversi non ha senso, un conteggio di occorrenze sì.
+# Il footer "misurati N/M nodi" è sempre emesso, anche quando N=M.
+_render_multinode_result() {
+    local tool="$1" n_nodes="$2"
+    local -n _nodes_num_ref="$3"
+    local summary_file="$4" tmp_dir="$5"
+
+    local -A sum_n=() sum_nr=() sum_tsbad=() sum_seen=()
+    local _idx _n _nr _tsbad
+    while IFS='|' read -r _idx _n _nr _tsbad; do
+        [[ -z "$_idx" ]] && continue
+        sum_n[$_idx]="$_n"; sum_nr[$_idx]="$_nr"; sum_tsbad[$_idx]="$_tsbad"
+        sum_seen[$_idx]=1
+    done < "$summary_file"
+
+    local aggr="${TOOL_SCOPE[$tool]#* }"
+    local show_tilde=0
+    [[ "${TOOL_SOURCES[$tool]:-}" == *access* ]] && show_tilde=1
+
+    printf "%-6s  %8s  %s\n" "NODO" "N" "STATO"
+    printf "%-6s  %8s  %s\n" "──────" "────────" "──────────────────────"
+
+    local i measured=0 total_sum=0 node_lbl nval nrval reason stato
+    for (( i = 0; i < n_nodes; i++ )); do
+        node_lbl="${_nodes_num_ref[i]:-?}"
+        if [[ -n "${sum_seen[$i]:-}" ]]; then
+            nval="${sum_n[$i]:-0}"; nrval="${sum_nr[$i]:-0}"
+            if [[ "$nrval" -eq 0 ]]; then
+                # La riga di sintesi esiste ma NR=0: il gawk non ha letto
+                # alcuna riga (file vuoto o illeggibile), non che abbia letto
+                # e scartato tutto — non è uno zero misurato.
+                printf "%-6s  %8s  %sn/d — file vuoto o illeggibile%s\n" "$node_lbl" "-" "$C_WARN" "$C_RESET"
+                continue
+            fi
+            measured=$(( measured + 1 ))
+            total_sum=$(( total_sum + nval ))
+            stato="ok"
+            [[ "$nval" -eq 0 ]] && stato="0 misurato"
+            [[ "$show_tilde" -eq 1 && "${sum_tsbad[$i]:-0}" -eq 1 ]] && stato="$stato ~"
+            printf "%-6s  %s%8s%s  %s\n" "$node_lbl" "$C_VAL" "$nval" "$C_RESET" "$stato"
+        else
+            reason=$(sed -E 's/\x1b\[[0-9;]*m//g' "$tmp_dir/$(printf '%05d' "$i")" 2>/dev/null | head -1)
+            [[ -z "$reason" ]] && reason="nessun dato"
+            printf "%-6s  %8s  %sn/d — %s%s\n" "$node_lbl" "-" "$C_WARN" "$reason" "$C_RESET"
+        fi
+    done
+
+    if [[ "$aggr" == "sum" ]]; then
+        printf "%-6s  %s%8s%s\n" "Σ" "$C_BOLD" "$total_sum" "$C_RESET"
+    fi
+    printf "%smisurati %d/%d nodi%s\n" "$C_LBL" "$measured" "$n_nodes" "$C_RESET"
+
+    for (( i = 0; i < n_nodes; i++ )); do
+        [[ -n "${sum_seen[$i]:-}" ]] || continue
+        [[ "${sum_nr[$i]:-0}" -gt 0 ]] || continue
+        [[ "${sum_n[$i]:-0}" -gt 0 ]] || continue
+        printf "\n${C_BOLD}── nodo %s ─────────────────────────────${C_RESET}\n" "${_nodes_num_ref[i]:-?}"
+        cat "$tmp_dir/$(printf '%05d' "$i")"
+    done
+
+    return 0
 }
 
 # dispatch_tool TOOL — wrapper che misura le fasi e scrive le metriche su
@@ -759,7 +1158,17 @@ dispatch_tool() {
         _PERF_SELECT_FILE=$(mktemp 2>/dev/null) || _PERF_SELECT_FILE=""
     fi
 
-    _dispatch_tool_run "$@"
+    local _scope="${TOOL_SCOPE[$tool]%% *}"
+    if [[ -z "${ACTIVE_NODE:-}" && "$_scope" == "multi" ]]; then
+        # Nessun nodo nominato + tool capace di ciclare: dispatch_tool_multinode
+        # invoca _dispatch_tool_run una volta per nodo (SCOPE-1 passo 4). Il
+        # ciclo sta DENTRO dispatch_tool, non attorno: _PERF_SELECT_FILE è
+        # append-only, quindi le metriche dei worker si accumulano qui sotto
+        # esattamente come nel percorso a un nodo.
+        _dispatch_tool_multinode "$@"
+    else
+        _dispatch_tool_run "$@"
+    fi
     _rc=$?
 
     _t1=$(date +%s%3N 2>/dev/null || echo 0)
@@ -861,7 +1270,7 @@ _dispatch_tool_run() {
             "access_status(), access_time_ms(), access_method(), access_url(), access_url_root(), access_url_service(), access_ip() (vedi utils-access-undertow.awk)"; then
         return 1
     fi
-    local common_f="-f '$LIB_DIR/utils-time.awk' -f '$LIB_DIR/utils-logline.awk' -f '$LIB_DIR/utils-colors.awk' -f '$LIB_DIR/utils-${fmt}.awk' -f '$LIB_DIR/utils-access-${afmt}.awk' -f '$LIB_DIR/utils-dedup.awk'"
+    local common_f="-f '$LIB_DIR/utils-time.awk' -f '$LIB_DIR/utils-scope.awk' -f '$LIB_DIR/utils-logline.awk' -f '$LIB_DIR/utils-colors.awk' -f '$LIB_DIR/utils-${fmt}.awk' -f '$LIB_DIR/utils-access-${afmt}.awk' -f '$LIB_DIR/utils-dedup.awk'"
     # Tema colore: i valori arrivano da lib/utils-theme.sh (già caricato da
     # chatbot.sh) e vengono passati a gawk come -v. utils-colors.awk li mappa
     # sulle costanti storiche (RED, YELLOW, …), così i tool non cambiano.
@@ -900,6 +1309,10 @@ _dispatch_tool_run() {
     [[ "${BOT_LOG_LEVEL:-warn}" == "debug" ]] && ats_dbg="${BOT_LOG_FILE:-/dev/stderr}"
     local tw_args="$common_f $theme_v $thr_v -v time_from='${TIME_FROM:-}' -v time_to='${TIME_TO:-}'"
     tw_args+=" -v ats_debug_file='${ats_dbg}'"
+    # Riga di sintesi per nodo (SCOPE-1 passo 4, lib/utils-scope.awk): vuoto per
+    # default, quindi il percorso single-node non scrive nulla — lo stesso gate
+    # di ats_debug_file. dispatch_tool_multinode li imposta per ogni worker.
+    tw_args+=" -v scope_node='${_SCOPE_NODE:-}' -v scope_summary_file='${_SCOPE_SUMMARY_FILE:-}'"
 
     case "$tool" in
         count_status)

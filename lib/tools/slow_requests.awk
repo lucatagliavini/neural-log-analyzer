@@ -44,6 +44,7 @@ BEGIN {
     status = _st
 
     count++
+    _scope_n++
     total_time += resp_time
     if (resp_time > max_time) { max_time = resp_time; max_url = url }
 

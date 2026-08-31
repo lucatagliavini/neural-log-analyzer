@@ -8,7 +8,7 @@ Aggiornato: 2026-08-28
 
 | ID | Descrizione | Priorità |
 |----|-------------|----------|
-| SCOPE-1 | **Il nodo 01 non è un default, è un ripiego** — con «tutti i nodi» ora possibile, il default va ribaltato: nessun nodo nella query = tutta la farm. Misurato il 2026-08-28 che il default attuale **nasconde il problema vero** (nodo 01: 28 warning innocui; nodo 04, mai mostrato: thread bloccati 300 s + `ORA-00936`). Decisioni prese, ordine di lavoro in 6 passi, passo 1 (oracolo esterno) fatto. Vedi la sezione dedicata sotto | **In corso** |
+| SCOPE-1 | **Il nodo 01 non è un default, è un ripiego** — con «tutti i nodi» ora possibile, il default va ribaltato: nessun nodo nella query = tutta la farm. Misurato il 2026-08-28 che il default attuale **nasconde il problema vero** (nodo 01: 28 warning innocui; nodo 04, mai mostrato: thread bloccati 300 s + `ORA-00936`). Passi 1-4 fatti (oracolo, iterazione centralizzata, default ribaltato, `TOOL_SCOPE`/`dispatch_tool_multinode` — deployato e verificato in produzione il 2026-08-31), restano il passo 5 (classifica/digest per nodo) e il passo 6 (verifica end-to-end completa). Vedi la sezione dedicata sotto | **In corso** |
 | SRCHQ-1 | **La regola sugli apici singoli è ora in un punto solo, ma resta un'euristica** — `lib/utils-quoted.sh` (SRCH-5/D3-D4) tratta una coppia di apici come citazione **solo se delimitata da spazi**, perché in italiano `'` è anche l'apostrofo. Conseguenza dichiarata e coperta da test: una citazione fra apici singoli **non può contenere un apostrofo** (`trova 'errore nell'app'` non è riconosciuta come citazione; con le virgolette doppie sì). È lo stesso vincolo del quoting di shell e il messaggio d'aiuto del bot documenta entrambe le forme, quindi l'utente ha già la via d'uscita. **Non c'è nulla da correggere adesso**: la voce esiste perché se un giorno arrivasse una segnalazione su una ricerca fra apici che «non funziona», la causa è questa e sta scritta, invece di essere ridiagnosticata da zero | Promemoria |
 | FLEX-1 | **Passata sistematica sulle classi di caratteri flesse** — chiusa nella sostanza il 2026-08-20, resta come **promemoria** con il comando da rieseguire quando si aggiunge un pattern flesso nuovo. Vedi la sezione dedicata sotto | Promemoria |
 | GCFMT-1 | **Un tool GC per tecnologia, non un parser astratto** (proposta utente 2026-08-17, adottata). `gc_stats.awk` ha 6 regole specifiche di G1 (`Eden regions`, `Survivor regions`, `Old regions`, `Humongous regions`, `Metaspace`, `Pause (Young\|Full\|Mixed)`). La strada del plugin di *funzioni* — quella usata per `SERVER_LOG_FORMAT` e `ACCESS_LOG_FORMAT` — **qui non si applica**: in quei due casi cambia l'estrazione ma l'analisi è la stessa (contare i 500 è identico in Undertow e in Apache), mentre l'analisi generazionale di G1 non ha senso in ZGC, che non ha Eden né Survivor. Astrarre ora significherebbe inventare un'interfaccia modellata su G1 e poi forzare ZGC a fingere di averla. La strada è **sostituire il tool intero**: `GC_LOG_FORMAT` seleziona `gc_stats.awk` (G1) o un futuro `gc_stats_zgc.awk` che parsa *e* analizza secondo i propri concetti. Precedente nel progetto: `dispatch.sh` ha già rami diversi per lo stesso tool (`tail_log` su access vs server secondo `LOG_TYPE`). **Da fare quando esiste un secondo formato GC reale da supportare**, non prima: con un solo caso l'interfaccia non è validabile | Quando serve |
@@ -340,7 +340,8 @@ sta male» merita un neurone.
    (2026-08-28), vedi sotto.
 3. Scope: `resolve-logs.sh:65`, `chatbot.sh:51`, keyword nel framework, `context_kv`.
    **FATTO** (2026-08-31), vedi sotto.
-4. `TOOL_SCOPE` in `nlp/tools.conf` + `dispatch_tool_multinode`.
+4. `TOOL_SCOPE` in `nlp/tools.conf` + `dispatch_tool_multinode`. **FATTO** (2026-08-31),
+   vedi sotto.
 5. Classifica: digest per-nodo (modello `BOT_PERF_FILE`), tre stati, coverage per nodo.
 6. Verifica in produzione: invariante di somma, marcatori di hostname, giro `CONTEXT` via MCP.
 
@@ -450,6 +451,81 @@ Piano eseguito integralmente: `/home/uga04128/.claude/plans/nifty-tickling-seaho
   produzione**, perché il codice di questo passo non è deployato (`./deploy.sh`
   esplicitamente rimandato al passo 4, per policy) — resta un pendente per la sessione
   che porta il passo 4 in produzione, non un test saltato per trascuratezza.
+
+### Passo 4 — `TOOL_SCOPE` + `dispatch_tool_multinode` (2026-08-31)
+
+Piano eseguito integralmente:
+`/home/uga04128/.claude/plans/nifty-tickling-seahorse.md`. È il **cambio major**: dà ai 14
+tool single-source la capacità che il passo 3 li aveva limitati a *dichiarare* di non
+avere (`[SKIP]`). Backup in posizione prima di iniziare (principio 9): tag `deployed-2026-08-28`
+sulla versione in produzione, tag `pre-scope1-step4` sull'ultimo commit prima di questo passo.
+
+- `nlp/tools.conf`: nuova `declare -A TOOL_SCOPE`, due assi (`scope` = se ciclare —
+  `multi`/`native`/`single`/`none`; `aggr` = cosa si può sommare — `sum`/`nosum`). Sta nel
+  framework, non nel profilo, per la stessa ragione di `TOOL_SOURCES` (righe 99-112): una
+  tabella tool→proprietà duplicata produrrebbe misrouting silenzioso. Nessun retrain:
+  nessun percorso di training legge questa tabella.
+- `lib/utils-scope.awk`: nuovo settimo `-f` di `common_f`, gated da `-v
+  scope_summary_file=` — vuoto non fa nulla, i 191 test preesistenti restano intatti.
+  Scrive `node|n|nr|tsbad` su file, mai su stdout (principio 3). 14 modifiche di una riga
+  nei tool (`_scope_n++` accanto al proprio contatore).
+- `lib/dispatch.sh`: `dispatch_tool_multinode`, innestata in `dispatch_tool` dove
+  `_require_node_scope` è già valutata. Ciclo *interno* (dentro `dispatch_tool`, attorno a
+  `_dispatch_tool_run`), non esterno — altrimenti `_PERF_SELECT_FILE` (append-only)
+  perderebbe i nodi precedenti. Coordinate per nodo via `list_env_nodes` +
+  `resolve_system_log_dir`, non `resolve-logs.sh` per nodo (costerebbe un processo bash e
+  3-6 `find` ricorsivi a vuoto per nodo, e il suo fallback sul primo nodo attribuirebbe dati
+  al nodo sbagliato). Parallelismo: riuso di `SEARCH_PARALLEL_JOBS`, `wait -n` (non
+  head-of-line blocking), nessuna manopola nuova (sarebbe il bug SALPERF-1 di nuovo). Stato
+  di sessione salvato/ripristinato con codice esplicito a fine funzione, mai `trap ... EXIT`
+  (che sovrascriverebbe silenziosamente `chatbot.sh:415`, perdendo la rotazione dei query
+  log) — solo `trap ... INT TERM` per l'interruzione a metà ciclo.
+- Output: tabella di sintesi per nodo (tre stati per riga, mai due — R1), riga `Σ` solo per
+  `aggr=sum`, footer `misurati N/M nodi` sempre presente, dettaglio nativo solo per i nodi
+  con risultati. `logfiles_coverage_note` per nodo (R2): «nodo con più occorrenze» si
+  sopprime se la copertura è disomogenea fra nodi.
+- `list_logs`: multi-nodo con provenienza (`TOOL_SCOPE=native`, già cicla da sé).
+- Tetto di budget: valutato a livello di **query**, non di singolo tool (R9 — più tool
+  possono attivarsi sulla stessa query).
+- **Tre difetti preesistenti corretti nello stesso intervento** (principio 8):
+  1. `search_all_logs.sh`: un worker morto produceva `rh=0`, indistinguibile da uno zero
+     vero (R1) — introdotto lo stato `n/d` con motivo via `res_missing`/`missing_files`.
+  2. Commento che dichiarava il timeout MCP a ~18,6 s: falso (il timeout server è 120 s,
+     misurata una query da 24,0 s senza andare in timeout) — corretto.
+  3. `logfiles_coverage_note` era aggregata su tutti i nodi in un'unica chiamata; R2 chiede
+     la decomposizione per nodo — ora chiamata per nodo con parametro `label`, e
+     `best_node` si sopprime se una qualunque copertura è disomogenea.
+- Test nuovi: `tests/test-tool-scope.sh` (completezza/esclusività statica di `TOOL_SCOPE` +
+  verifica comportamentale che `nosum` non emette mai `Σ` e `sum` la emette sempre),
+  estensioni a `test-node-resolve.sh` e `test-repl-state.sh`.
+- Verifica: `run-tests.sh` **192 PASS / 0 FAIL**; `--parity` **193 PASS / 0 FAIL**, 1171/1171
+  identiche; `md5sum nlp/dataset/queries.txt` invariato (nessun retrain); oracolo esterno
+  riverificato su `lxprworkerlana01` **prima** del deploy (stessi numeri d'oro: nodo 08=2,
+  nodo 13=10, Σ filtrate=12 — nessuna deriva di dati/retention).
+- **Deploy eseguito** (`./deploy.sh`, additivo, nessun `--delete`) verso
+  `root@lxprworkerlana01:/product/lana-bot/` — passo 3 e passo 4 sono andati in produzione
+  **insieme**, come deciso nel passo 3.
+- **Verifica in produzione, via `mcp__lana-bot`**:
+  - `errori in prod` (nessun nodo nominato) → tabella su **13/13 nodi**, Σ=7654,
+    `context: node=` **vuoto** (chiude il pendente che il passo 3 non poteva verificare
+    perché non deployato). Durata interna dichiarata dal bot: **3279 ms** — più alta dei
+    ~1-2 s dedotti nel piano (quel numero era la sola fase di ricerca parallela; l'overhead
+    misurato qui include anche la risoluzione delle coordinate per nodo e la
+    ricomposizione dell'output nel padre, non isolati separatamente in questa sessione).
+  - `cerca "ORA-00936" in prod` senza nodo → `search_all_logs` su **tutti i nodi** (343
+    file, 16 worker, 24853 ms). Sul sottoinsieme comparabile con l'oracolo (`server.log`,
+    righe datate): **nodo 08=2, nodo 13=10, Σ=12** — identico ai numeri d'oro. Le altre 1352
+    occorrenze sono su `console.log` (fuori dallo scope dell'oracolo, che interrogava solo
+    `server.log`) e senza timestamp riconoscibile (marcatore `!`), quindi non sono un
+    disaccordo ma un dominio diverso.
+  - **Nota operativa, non un difetto**: una query MCP che non nomina l'ambiente nel testo
+    (es. `cerca "ORA-00936"` con `env=prod` passato solo come argomento, non nella frase)
+    **non** azzera il nodo — resta quello ereditato dallo stato di sessione precedente
+    (contratto CTX-4, query-wins: solo una menzione **nella query** allarga lo scope). Per
+    ottenere «tutti i nodi» da MCP senza fissare prima il contesto, l'ambiente va nominato
+    nel testo (`… in prod`) o va usata la keyword «tutti i nodi». Da tenere a mente
+    scrivendo la docstring del wrapper MCP (fuori da questo repo, ancora ferma su «default
+    nodo 01» — pendente noto, fuori ambito).
 
 Concordanza esatta, con due implementazioni indipendenti (decompressore diverso, pruning
 contro lettura totale, grammatiche di timestamp diverse). Valida in un colpo: enumerazione

@@ -34,6 +34,7 @@ BEGIN {
 
     count[status]++
     total++
+    _scope_n++
 }
 
 END {

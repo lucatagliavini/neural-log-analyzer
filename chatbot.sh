@@ -612,6 +612,33 @@ run_query() {
 
     printf "${C_BOLD}│${C_RESET}\n"
 
+    # Tetto di budget (SCOPE-1 passo 4, punto 6): stima PRIMA di eseguire,
+    # sulla QUERY intera — non tool per tool, perché con più tool "multi"
+    # attivati insieme (TOOL_THRESHOLD=0.25 spesso ne attiva più di uno) le
+    # esecuzioni sui nodi si moltiplicano. _estimate_multinode_bytes riusa gli
+    # stessi shorthand di apertura log della dispatch reale (dispatch.sh),
+    # quindi qui non c'è selezione duplicata — solo un secondo giro dello
+    # stesso find+stat, costo accettato deliberatamente (vedi piano).
+    #
+    # Sopra soglia: rifiuta e basta — mai un troncamento silenzioso, mai un
+    # risultato parziale presentato come completo (TRUNC-1). Il `return` qui
+    # salta l'intero ciclo di dispatch sotto, non solo il tool corrente.
+    local _est_bytes _est_files _est_nodes
+    read -r _est_bytes _est_files _est_nodes < <(_estimate_multinode_bytes "$tools")
+    if [[ "${_est_bytes:-0}" -gt "${MULTINODE_BUDGET_BYTES:-0}" ]]; then
+        local _est_mb=$(( _est_bytes / 1048576 ))
+        local _budget_mb=$(( MULTINODE_BUDGET_BYTES / 1048576 ))
+        printf "${C_BOLD}│${C_RESET}  ${C_CRIT}⚠ Stima %s MB su %s file, %s nodi — sopra il tetto di %s MB.${C_RESET}\n" \
+            "$_est_mb" "$_est_files" "$_est_nodes" "$_budget_mb"
+        printf "${C_BOLD}│${C_RESET}    ${C_LBL}Restringi la ricerca, per esempio:${C_RESET}\n"
+        printf "${C_BOLD}│${C_RESET}    ${C_LBL}·${C_RESET} nomina un nodo specifico (es. \"sul nodo 4\")\n"
+        printf "${C_BOLD}│${C_RESET}    ${C_LBL}·${C_RESET} restringi la finestra temporale (es. \"nell'ultima ora\")\n"
+        log_query "$query" "${tools_log}:refused-budget" \
+            "$(( $(date +%s%3N 2>/dev/null || echo 0) - _t_query_start ))"
+        printf "${C_BOLD}└──────────────────────────────────────────${C_RESET}\n"
+        return
+    fi
+
     # BOT_PERF_FILE: canale con cui i tool (processi figli) restituiscono le
     # proprie metriche di fase. Creato solo se il query log è attivo — senza
     # di esso le metriche non avrebbero destinazione.

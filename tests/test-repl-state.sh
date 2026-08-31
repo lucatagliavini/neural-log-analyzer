@@ -365,22 +365,38 @@ _ctx_call "quanti errori 500" --named-log "server"
 _assert_in "7. --named-log su log di sistema: messaggio" "$CTX_OUT" "è un log di sistema"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# H. Scope multi-nodo — nodo vuoto è "tutti i nodi" (SCOPE-1 passo 3, 2026-08-31)
+# H. Scope multi-nodo — nodo vuoto è "tutti i nodi" (SCOPE-1 passi 3 e 4, 2026-08-31)
 #
 # Qui NON si fissa --node all'avvio (_session_no_node/_ctx_call_no_node): è lo
-# scenario che prima di questo passo non poteva esistere, perché ogni
-# invocazione arrivava già con --node esplicito e il default nudo "01" copriva
-# il caso. L'asserzione 2 è quella che intercetta un guard troppo largo — il
-# livello 2 di run-tests.sh classifica ogni [SKIP] come WARN, non FAIL, quindi
-# senza questo test la suite resterebbe verde anche se _require_node_scope
-# fermasse per errore search_all_logs o show_help.
+# scenario che prima del passo 3 non poteva esistere, perché ogni invocazione
+# arrivava già con --node esplicito e il default nudo "01" copriva il caso.
+#
+# Dal passo 4 un tool TOOL_SCOPE=multi senza nodo non si limita più a
+# dichiarare il limite: CICLA su tutti i nodi (dispatch_tool_multinode) e
+# produce tabella NODO/Σ/footer "misurati N/M". Solo i tool TOOL_SCOPE=single
+# (tail_log, tail_named_log — decisione utente: un tail è per natura una
+# domanda su un nodo) restano [SKIP]. L'asserzione 1b è quella che intercetta
+# un guard allargato per errore nella direzione OPPOSTA a quella che il passo 3
+# temeva: se TOOL_SCOPE classificasse tail_log come "multi" invece di
+# "single", il livello 2 di run-tests.sh non lo vedrebbe (un [SKIP] mancante
+# non genera output "[SKIP]" da classificare, quindi neanche un WARN) — solo
+# un assert esplicito lo scopre.
 section "H. Scope multi-nodo — nodo vuoto è \"tutti i nodi\""
 
-# 1. Un tool single-source dichiara il limite, non sceglie un nodo in silenzio.
+# 1. Un tool multi-scope senza nodo ORA esegue su tutti i nodi (passo 4): niente
+# più [SKIP], tabella per nodo e Σ (filter_errors è aggr=sum).
 _out=$(_session_no_node "errori nel server log")
-_assert_in "1. filter_errors senza nodo → [SKIP]" "$_out" "[SKIP]"
-_assert_in "1. il messaggio nomina il tool e la via d'uscita" "$_out" \
-    "filter_errors richiede un nodo specifico"
+_assert_not_in "1. filter_errors senza nodo NON è più skippato" "$_out" "[SKIP]"
+_assert_line   "1. tabella riga nodo 03"           "$_out" '^03 +[0-9]+ +ok'
+_assert_line   "1. tabella riga nodo 04"           "$_out" '^04 +[0-9]+ +ok'
+_assert_in     "1. footer misurati su entrambi i nodi" "$_out" "misurati 2/2 nodi"
+
+# 1b. Un tool single-scope resta [SKIP] senza nodo — il guard non deve essersi
+# allargato per errore nella direzione multi.
+_out=$(_session_no_node "ultime 5 righe del server log")
+_assert_in "1b. tail_log senza nodo → [SKIP] (resta single)" "$_out" "[SKIP]"
+_assert_in "1b. il messaggio nomina il tool e la via d'uscita" "$_out" \
+    "tail_log richiede un nodo specifico"
 
 # 2. search_all_logs e show_help NON sono soggetti al guard nello stesso stato.
 _out=$(_session_no_node "cerca NullPointerException nei log")
@@ -390,7 +406,11 @@ _assert_not_in "2. show_help senza nodo → NON skippato" "$_out" "[SKIP]"
 
 # 3. context_line dichiara lo scope per QUALSIASI tool, non solo search_all_logs
 # (il caso speciale che lo faceva era esattamente ridondante, rimosso al passo 7).
+# Il banner non dipende da cosa il tool poi fa con quello scope: vale identico
+# per un tool multi-scope ora eseguito e per uno single-scope ancora skippato.
 _out=$(_session_no_node "errori nel server log")
+_assert_in "3. banner mostra \"tutti i nodi\" per un tool multi-scope" "$_out" "tutti i nodi"
+_out=$(_session_no_node "ultime 5 righe del server log")
 _assert_in "3. banner mostra \"tutti i nodi\" anche per un tool skippato" "$_out" "tutti i nodi"
 _out=$(_session_no_node "cerca NullPointerException nei log")
 _assert_in "3. banner mostra \"tutti i nodi\" anche per search_all_logs" "$_out" "tutti i nodi"
@@ -415,11 +435,23 @@ unset _kv_h
 # 5. La regola di allargamento (passo 6): un nodo fissato con --node 4 viene
 # azzerato non appena una query successiva nomina un ambiente — ANCHE quello
 # già attivo (decisione esplicita dell'utente: la regola non fa eccezioni).
+# Dal passo 4 l'azzeramento non significa più "dichiara il limite" per un tool
+# multi-scope: significa "esegui su tutti i nodi dell'ambiente".
 _out=$(_session "errori nel server log del nodo 4" "errori in prod nel server log")
 _assert_in "5. q1 usa il nodo 4 come fissato all'avvio" "$(_block 1 "$_out")" "nodo 04"
 _assert_in "5. q2 nomina l'ambiente (stesso già attivo) → azzera il nodo" \
     "$(_block 2 "$_out")" "tutti i nodi"
-_assert_in "5. q2 dichiara il limite (nodo azzerato, tool single-source)" \
+_assert_not_in "5. q2 NON dichiara più il limite (tool multi-scope, nodo azzerato)" \
+    "$(_block 2 "$_out")" "[SKIP]"
+_assert_in "5. q2 esegue su entrambi i nodi (footer misurati)" \
+    "$(_block 2 "$_out")" "misurati 2/2 nodi"
+
+# 5b. Lo stesso azzeramento con un tool single-scope: qui il limite va ancora
+# dichiarato — la regola di allargamento cambia il NODO, non lo SCOPE del tool.
+_out=$(_session "ultime 5 righe del server log del nodo 4" "ultime 5 righe del server log in prod")
+_assert_in "5b. q2 nomina l'ambiente → azzera il nodo" \
+    "$(_block 2 "$_out")" "tutti i nodi"
+_assert_in "5b. q2 dichiara il limite (nodo azzerato, tool single-scope)" \
     "$(_block 2 "$_out")" "[SKIP]"
 
 # ─── Esito ────────────────────────────────────────────────────────────────────

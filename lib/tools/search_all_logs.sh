@@ -67,8 +67,12 @@ tmp_dir=$(mktemp -d)
 # Cleanup anche su interruzione, non solo sulle uscite normali (SCOPE-1).
 # Prima c'erano solo i `rm -rf "$tmp_dir"` sui percorsi di uscita, quindi un
 # Ctrl-C o un timeout del chiamante lasciava la directory: e le ricerche
-# multi-nodo sono i run più LUNGHI, cioè i più interrotti — misurato 18,6 s per
-# una ricerca su 13 nodi con finestra passata, oltre il timeout del wrapper MCP.
+# multi-nodo sono i run più LUNGHI, cioè i più interrotti. Il tetto MCP reale è
+# 120 s (server) / 180 s (gunicorn) — un 18,6 s citato in una stima precedente
+# del backlog era il timeout CLIENT-SIDE di un singolo chiamante, non un
+# vincolo del progetto (misurata in produzione una query da 24,0 s che non è
+# andata in timeout). Resta vero che più nodi allungano il run e quindi la
+# probabilità di essere interrotti a metà.
 # I `rm -rf` espliciti restano: sono no-op su una directory già rimossa e dicono
 # sul posto che il temporaneo finisce lì.
 # `bash search_all_logs.sh` è un PROCESSO separato (dispatch.sh:1228), non un
@@ -353,15 +357,24 @@ progress_clear
 _t_search_ms=$(( $(date +%s%3N 2>/dev/null || echo 0) - _t_search_start ))
 
 # ── Raccoglie e analizza risultati ────────────────────────────────────────────
-res_labels=() res_hits=() res_ts=() res_last=() res_nodes=() res_apps=() res_partial=() res_unfilt=()
-max_hits=0 max_lbl=8 total_hits=0 matched_files=0 total_unfiltered=0
+res_labels=() res_hits=() res_ts=() res_last=() res_nodes=() res_apps=() res_partial=() res_unfilt=() res_missing=()
+max_hits=0 max_lbl=8 total_hits=0 matched_files=0 total_unfiltered=0 missing_files=0
 
 for (( i=0; i<total_files; i++ )); do
     _f="$tmp_dir/$(printf '%05d' "$i")"
     if [[ -f "$_f" ]]; then
         IFS='|' read -r rl rh rt rlast rn ra rp ru < "$_f"
+        rmiss=0
     else
+        # Il worker doveva scrivere qui e non l'ha fatto (morto, ucciso, wait -n
+        # che non l'ha mai raccolto): rh=0 qui NON è un conteggio, è un buco di
+        # misura. Confonderlo con "il worker ha guardato e non ha trovato nulla"
+        # è esattamente la classe R1 — nascondere un worker perso dentro il
+        # totale "senza match" produrrebbe un sottoconteggio silenzioso su
+        # esattamente il file che sarebbe servito a spiegare la discrepanza con
+        # l'oracolo esterno.
         rl="${all_labels[$i]}" rh=0 rt="" rlast="" rn="${all_nodes[$i]:-}" ra="${all_apps[$i]:-}" rp=0 ru=0
+        rmiss=1
     fi
     res_labels+=("${rl:-?}")
     res_hits+=("${rh:-0}")
@@ -371,11 +384,13 @@ for (( i=0; i<total_files; i++ )); do
     res_apps+=("${ra:-}")
     res_partial+=("${rp:-0}")
     res_unfilt+=("${ru:-0}")
+    res_missing+=("$rmiss")
     [[ "${rh:-0}" -gt "$max_hits" ]] && max_hits="${rh:-0}"
     [[ "${#rl}"   -gt "$max_lbl"  ]] && max_lbl="${#rl}"
     total_hits=$(( total_hits + ${rh:-0} ))
     total_unfiltered=$(( total_unfiltered + ${ru:-0} ))
     [[ "${rh:-0}" -gt 0 ]] && matched_files=$(( matched_files + 1 ))
+    [[ "$rmiss" -eq 1 ]] && missing_files=$(( missing_files + 1 ))
 done
 
 # Metriche di performance per l'analisi offline. Scritte su BOT_PERF_FILE (un
@@ -597,10 +612,19 @@ done
 
 printf "  ${_D}%s${_X}\n" "$(printf '─%.0s' $(seq 1 "$_sep_w"))"
 
-skipped=$(( total_files - matched_files ))
+# "senza match" e "non misurato" sono due esiti diversi (R1): il primo è un
+# file letto che non conteneva il pattern, il secondo è un worker che non ha
+# prodotto risultato — un buco di misura, non uno zero. missing_files va
+# sottratto da skipped perché non è "senza match", altrimenti un worker perso
+# scompare dentro un totale che sembra completo.
+skipped=$(( total_files - matched_files - missing_files ))
 printf "  ${_B}Totale:${_X} %d occorrenze in %d log" "$total_hits" "$matched_files"
 [[ "$skipped" -gt 0 ]] && printf "${_D}  (%d senza match)${_X}" "$skipped"
 printf "\n"
+if [[ "$missing_files" -gt 0 ]]; then
+    printf "  ${C_WARN}n/d: %d log non misurati (nessun risultato dal worker di ricerca)${C_RESET}\n" \
+        "$missing_files"
+fi
 
 # "*" = il file non registra una data (es. console.log logga solo l'ora): il
 # min/max è sul solo orario, quindi su un file che attraversa la mezzanotte
@@ -635,15 +659,38 @@ if [[ "$total_unfiltered" -gt 0 ]]; then
     printf "  ${C_PARTIAL}  finestra richiesta.${_X}\n"
 fi
 
-# RETENT-1: dichiara se all_paths (i file EFFETTIVAMENTE aggregati, su tutti i
-# nodi/app scandagliati) non copre TIME_FROM per retention, o se non è
-# verificabile. Stessa funzione condivisa usata da print_log_source in
-# dispatch.sh (lib/utils-logfiles.sh, già sourciato sopra) — un solo punto di
-# verità per il calcolo, due punti di stampa per i due percorsi che non
-# convergono mai in un unico chiamante (RETENT-1).
-logfiles_coverage_note "${all_paths[*]}" "${TIME_FROM:-}"
+# RETENT-1 + difetto 3 del passo 4 SCOPE-1: dichiara se i file EFFETTIVAMENTE
+# aggregati non coprono TIME_FROM per retention, o se non è verificabile.
+# PER NODO (R2), non su all_paths aggregato: logfiles_coverage_note deduplica
+# per NOME LOGICO, quindi una chiamata unica su path di nodi diversi verifica
+# la copertura solo del PRIMO nodo che possiede ciascun nome — gli altri nodi
+# restano non controllati, non "coperti". Nodi diversi possono avere retention
+# diversa (misurato: un nodo con 7 giorni, un altro con 11 ore), quindi
+# l'aggregazione qui sarebbe silenziosamente parziale. Stessa funzione
+# condivisa usata da print_log_source in dispatch.sh (lib/utils-logfiles.sh,
+# già sourciato sopra) — un solo punto di verità per il calcolo, due punti di
+# stampa che non convergono mai in un unico chiamante (RETENT-1).
+_coverage_uneven=0
+if [[ "$_multi_node" -eq 1 ]]; then
+    declare -A _cov_seen=()
+    for _cn in "${all_nodes[@]}"; do
+        [[ -z "$_cn" || -n "${_cov_seen[$_cn]:-}" ]] && continue
+        _cov_seen[$_cn]=1
+        _cov_paths=""
+        for _ci in "${!all_nodes[@]}"; do
+            [[ "${all_nodes[$_ci]}" == "$_cn" ]] && _cov_paths="$_cov_paths ${all_paths[$_ci]}"
+        done
+        logfiles_coverage_note "${_cov_paths# }" "${TIME_FROM:-}" "$_cn" || _coverage_uneven=1
+    done
+else
+    logfiles_coverage_note "${all_paths[*]}" "${TIME_FROM:-}" || true
+fi
 
-if [[ -z "${ACTIVE_NODE:-}" && -n "$best_node" ]]; then
+# Se la copertura è disuguale fra nodi, "nodo con più occorrenze" confronterebbe
+# un nodo con dati completi e uno con dati parziali — una classifica che misura
+# la retention, non la salute (principio 6, R2). Nessun "nodo peggiore/migliore"
+# quando il confronto stesso non è valido.
+if [[ -z "${ACTIVE_NODE:-}" && -n "$best_node" && "$_coverage_uneven" -eq 0 ]]; then
     printf "  ${_D}→ Nodo con più occorrenze: nodo %s — es: \"errori sul nodo %s\"${_X}\n" \
         "$best_node" "$best_node"
 fi

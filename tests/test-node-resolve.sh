@@ -222,6 +222,65 @@ assert_eq "nessun apice nel valore emesso" "" \
 assert_eq "l'eval non ha eseguito nulla" "assente" \
     "$([[ -e "$FIX/PWNED" ]] && echo presente || echo assente)"
 
+# ─── dispatch_tool_multinode end-to-end (SCOPE-1 passo 4) ─────────────────────
+# Riusa la fixture a 5 nodi di testa (01, 07, 08, 09, 12): tre stati distinti
+# per riga (R1, quarta ricorrenza della classe dopo NODE-1/LOGSEL-1/RETENT-1/
+# LVLCNT-1) — un valore misurato, "0 misurato", "n/d" con motivo — più il nodo
+# senza log affatto, che deve restare "n/d" senza fermare il ciclo sugli altri
+# quattro.
+#
+# Verifica via chatbot.sh, non sourciando dispatch.sh a mano:
+# _dispatch_tool_multinode dipende da una dozzina di file (theme, log, tempo)
+# che chatbot.sh sourcia già nell'ordine giusto — duplicare quel sourcing qui
+# violerebbe il principio 2 senza guadagno, e testerebbe un percorso che nessun
+# utente usa davvero.
+section "dispatch_tool_multinode: 5 nodi, tre stati distinti (SCOPE-1 passo 4)"
+
+_T5=$(date +%Y-%m-%d)
+
+# 01: due ERROR misurati.
+printf '%s 10:00:00,000 ERROR boom-01a\n' "$_T5"  > "$FIX/prod/lxprjbliq01/ClaimCenter/server.log"
+printf '%s 10:00:01,000 ERROR boom-01b\n' "$_T5" >> "$FIX/prod/lxprjbliq01/ClaimCenter/server.log"
+
+# 07: un ERROR misurato — controllo ottale, come in testa al file.
+printf '%s 10:00:00,000 ERROR boom-07\n' "$_T5" > "$FIX/prod/lxprjbliq07/ClaimCenter/server.log"
+
+# 08: file presente e non vuoto (NR>0) ma zero ERROR/WARN → "0 misurato",
+# NON "n/d": lo zero è stato osservato, non è un buco di misura.
+printf '%s 10:00:00,000 INFO  tutto-ok-08\n' "$_T5" > "$FIX/prod/lxprjbliq08/ClaimCenter/server.log"
+
+# 09: file presente ma VUOTO → NR=0 in utils-scope.awk → "n/d — file vuoto o
+# illeggibile" (dispatch.sh:1098), distinto dal caso 08 pur avendo entrambi
+# nval=0.
+: > "$FIX/prod/lxprjbliq09/ClaimCenter/server.log"
+
+# 12: nessun server.log affatto — il tool salta PRIMA di aprire un file
+# (require_system_log/skip_system_log_not_found), quindi nessuna riga di
+# sintesi arriva per questo indice: ramo "n/d — <motivo>" preso dalla prima
+# riga dell'output catturato (dispatch.sh:1108-1110).
+
+_out5=$(QUERY_LOG_DIR= bash "$ROOT_DIR/chatbot.sh" \
+    --profile "$PROFILE_DIR" --base-dir "$FIX" --env prod \
+    --query "errori nel server log" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+
+assert_eq "nodo 01 misurato: 2 ERROR"               "1" "$(grep -cE '^01 +2 +ok' <<< "$_out5")"
+assert_eq "nodo 07 misurato: 1 ERROR"               "1" "$(grep -cE '^07 +1 +ok' <<< "$_out5")"
+assert_eq "nodo 08: zero ERROR è MISURATO, non n/d" "1" \
+    "$(grep -cE '^08 +0 +0 misurato' <<< "$_out5")"
+assert_eq "nodo 09: file vuoto → n/d, non zero silenzioso" "1" \
+    "$(grep -cE '^09 +- +n/d' <<< "$_out5")"
+assert_eq "nodo 12: nessun log → n/d con un motivo dichiarato" "1" \
+    "$(grep -cE '^12 +- +n/d — .+' <<< "$_out5")"
+assert_eq "footer: solo i nodi con NR>0 contano come misurati" "1" \
+    "$(grep -c 'misurati 3/5 nodi' <<< "$_out5")"
+assert_eq "Σ somma solo i nodi misurati (2+1+0=3)" "1" \
+    "$(grep -cE '^Σ +3' <<< "$_out5")"
+
+section "dispatch_tool_multinode: ordine di stampa = ordine di nodo"
+_order5=$(grep -oE '^(01|07|08|09|12) ' <<< "$_out5" | tr -d ' ')
+assert_eq "righe in ordine 01,07,08,09,12, nessuno saltato" \
+    $'01\n07\n08\n09\n12' "$_order5"
+
 printf "\n${BOLD}Risultato:${RESET} ${GREEN}%d PASS${RESET}, " "$pass"
 if [[ "$fail" -gt 0 ]]; then
     printf "${RED}${BOLD}%d FAIL${RESET}\n" "$fail"; exit 1

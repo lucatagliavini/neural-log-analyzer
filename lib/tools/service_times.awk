@@ -36,6 +36,7 @@ BEGIN {
     svc = _svc
 
     svc_count[svc]++
+    _scope_n++
     svc_total[svc] += ms
     if (ms > svc_max[svc]) svc_max[svc] = ms
     if (svc_min[svc] == "" || ms < svc_min[svc]) svc_min[svc] = ms

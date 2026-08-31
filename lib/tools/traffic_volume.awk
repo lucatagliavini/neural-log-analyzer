@@ -21,6 +21,7 @@ BEGIN {
         else if (substr(st, 1, 1) == "3") errors3xx[bucket]++
     }
     total++
+    _scope_n++
 }
 
 END {

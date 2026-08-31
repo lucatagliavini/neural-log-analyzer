@@ -61,6 +61,7 @@ BEGIN {
     buf_msg[count % n]    = row_msg
     buf_thread[count % n] = thread
     count++
+    _scope_n++
 }
 
 END {
