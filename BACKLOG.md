@@ -576,6 +576,15 @@ propria verifica ma lasciati per un intervento separato (vedi i pendenti della s
   aggiunte non alterano il tally purché il file continui a uscire con `exit 0`.
 - Nessun retrain: nessuna delle due modifiche tocca vocabolario, dataset o dispatch delle
   feature.
+- **Commit, push, deploy** (stessa sessione, dopo autorizzazione esplicita dell'utente):
+  commit `6c7120e`, push su `origin/master`, `./deploy.sh` (dry-run con `--checksum` prima,
+  per escludere un retrain nascosto — `nlp/dataset/queries.txt` e
+  `nlp/models/intent_classifier/dataset.txt` comparivano come «da trasferire» per mtime, ma a
+  contenuto identico). **Verificato in produzione** via SSH (autorizzazione utente,
+  `project_accesso_host_produzione.md`): query multi-nodo reale su tutta la farm
+  (`errori in prod`, `filter_errors`, 13 nodi) → `PERF_JOBS=13` nel query log di produzione
+  (colonna 13, l'ultimo campo di `log_query()`, `chatbot.sh:395-404`) — prima del fix sarebbe
+  stato sempre il letterale `1`. Fix confermato live, non solo in suite locale.
 
 ### Passo 6 — verifica in produzione: invariante di somma, marcatori di hostname, CONTEXT (2026-08-31)
 
