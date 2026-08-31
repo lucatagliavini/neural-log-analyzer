@@ -5,7 +5,6 @@
 # Riceve il contesto via variabili d'ambiente (impostate da chatbot.sh / dispatch.sh):
 #   SEARCH_PATTERN, TIME_FROM, TIME_TO,
 #   ACTIVE_ENV, ACTIVE_NODE, ACTIVE_APP,
-#   DETECTED_NODE,
 #   LOG_SEARCH_ROOT (directory del nodo — vedi sotto),
 #   SEARCH_PARALLEL_JOBS,
 #   LIB_DIR (per utils-logfiles.sh e utils-nodes.sh)
@@ -153,24 +152,30 @@ _sal_scan_root() {
 }
 
 # ── Costruisce la lista log ───────────────────────────────────────────────────
-# Multi-nodo: se la query non specifica un nodo esplicito (DETECTED_NODE vuoto)
-# e l'ambiente è noto, itera su tutti i nodi trovati su disco via
-# list_env_node_dirs() (utils-nodes.sh).
+# Multi-nodo: se lo SCOPE DI SESSIONE non ha un nodo fissato (ACTIVE_NODE vuoto,
+# SCOPE-1 passo 3) e l'ambiente è noto, itera su tutti i nodi trovati su disco
+# via list_env_node_dirs() (utils-nodes.sh). Prima si guardava DETECTED_NODE —
+# la rilevazione DI QUESTA query — invece dello scope di sessione: nel REPL,
+# dopo "nodo 4", un "cerca X" successivo scandagliava comunque tutti i nodi
+# perché DETECTED_NODE (della nuova query, senza menzione di nodo) era vuoto,
+# ignorando il nodo fissato in ACTIVE_NODE (principio 8: due variabili con
+# assunzioni parallele sullo stesso concetto, una delle due dimenticata).
 # Nodo singolo: usa le variabili di contesto già risolte dalla sessione.
 # _multi_node: unica fonte di verità per "la tabella mostra la colonna nodo" —
 # riusata sotto per header, separatore, righe e alternanza colore. Prima erano
 # decisioni ripetute con criteri diversi (l'header guardava DETECTED_NODE, le
 # righe guardavano "$_n non vuoto") e potevano disallinearsi: bug reale
-# (2026-08-05) — in nodo singolo $_n è SEMPRE popolato (ACTIVE_NODE ha default
-# "01" in chatbot.sh), quindi le righe mostravano comunque "nodo NN  " mentre
-# l'header, guardando DETECTED_NODE, non riservava quello spazio.
+# (2026-08-05) — in nodo singolo $_n era SEMPRE popolato (ACTIVE_NODE aveva
+# default "01" in chatbot.sh, rimosso in SCOPE-1 passo 3), quindi le righe
+# mostravano comunque "nodo NN  " mentre l'header, guardando DETECTED_NODE, non
+# riservava quello spazio.
 # Timing delle due fasi, per il log di performance (vedi log_query in
 # chatbot.sh): la selezione e la ricerca hanno costi di natura diversa
 # (I/O sui primi byte di molti file vs CPU su pochi file grandi) e vanno
 # misurate separatamente, altrimenti un rallentamento non è attribuibile.
 _t_select_start=$(date +%s%3N 2>/dev/null || echo 0)
 progress_show "selezione log..."
-if [[ -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]]; then
+if [[ -z "${ACTIVE_NODE:-}" && -n "${ACTIVE_ENV:-}" ]]; then
     _multi_node=1
     _scope_label="${ACTIVE_ENV} (tutti i nodi)"
     # _node_dir da list_env_nodes È la directory del nodo — lo stesso oggetto
@@ -638,7 +643,7 @@ fi
 # convergono mai in un unico chiamante (RETENT-1).
 logfiles_coverage_note "${all_paths[*]}" "${TIME_FROM:-}"
 
-if [[ -z "${DETECTED_NODE:-}" && -n "$best_node" ]]; then
+if [[ -z "${ACTIVE_NODE:-}" && -n "$best_node" ]]; then
     printf "  ${_D}→ Nodo con più occorrenze: nodo %s — es: \"errori sul nodo %s\"${_X}\n" \
         "$best_node" "$best_node"
 fi

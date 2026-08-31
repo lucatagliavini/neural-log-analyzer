@@ -22,7 +22,7 @@ _run() {
     local query="$1"
     "$LIB_DIR/normalize-query.sh" "$query" 2>/dev/null > "$_NORM_TMP"
     # Unset prima per evitare che un run precedente inquini il successivo
-    unset NORM_QUERY DETECTED_APP DETECTED_ENV DETECTED_NODE
+    unset NORM_QUERY DETECTED_APP DETECTED_ENV DETECTED_NODE DETECTED_NODE_ALL
     source "$_NORM_TMP"
 }
 
@@ -119,6 +119,37 @@ assert_eq "worker1 → DETECTED_NODE=1" "$DETECTED_NODE" "1"
 
 _run "sul nodo numero 12"
 assert_eq "nodo numero 12 → DETECTED_NODE=12" "$DETECTED_NODE" "12"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "── NODE: keyword \"tutti i nodi\" (SCOPE-1 passo 3) ────────────────────────"
+# DETECTED_NODE_ALL è il segnale, non DETECTED_NODE: quest'ultimo resta vuoto
+# di proposito (vedi normalize-query.sh, sezione 3-bis) — è ACTIVE_NODE vuoto,
+# non un valore rilevato, a portare "tutti i nodi" a valle in chatbot.sh.
+# La sostituzione con <NODE> non è cosmetica: "tutti"/"tutte" sono anche
+# feature allenate sull'asse "tutte le sorgenti" (nlp/unigrams.txt) e
+# lasciarle intatte sposterebbe la confidenza del classificatore verso il
+# tool sbagliato (misurato con lib/infer-dry.sh, vedi il plan di questo passo).
+
+_run "errori su tutti i nodi"
+assert_eq "tutti i nodi → DETECTED_NODE_ALL=1" "$DETECTED_NODE_ALL" "1"
+assert_eq "tutti i nodi → DETECTED_NODE vuoto" "$DETECTED_NODE" ""
+assert_contains "tutti i nodi → NORM_QUERY contiene <NODE>" "$NORM_QUERY" "<NODE>"
+
+_run "cerca ORA-00936 su tutta la farm"
+assert_eq "tutta la farm → DETECTED_NODE_ALL=1" "$DETECTED_NODE_ALL" "1"
+assert_eq "tutta la farm → DETECTED_NODE vuoto" "$DETECTED_NODE" ""
+assert_contains "tutta la farm → NORM_QUERY contiene <NODE>" "$NORM_QUERY" "<NODE>"
+
+_run "controlla tutte le macchine"
+assert_eq "tutte le macchine → DETECTED_NODE_ALL=1" "$DETECTED_NODE_ALL" "1"
+
+_run "errori nodo 4"
+assert_eq "nodo 4 (nominato) → DETECTED_NODE_ALL=0" "$DETECTED_NODE_ALL" "0"
+assert_eq "nodo 4 (nominato) → DETECTED_NODE=4"     "$DETECTED_NODE" "4"
+
+_run "errori di stamattina"
+assert_eq "nessuna keyword → DETECTED_NODE_ALL=0" "$DETECTED_NODE_ALL" "0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""

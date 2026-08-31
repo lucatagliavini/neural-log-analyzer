@@ -48,7 +48,12 @@ LIB_DIR="$SCRIPT_DIR/lib"
 # ─── Parsing CLI ─────────────────────────────────────────────────────────────
 PROFILE_DIR=""
 ACTIVE_ENV=""
-ACTIVE_NODE="01"
+# Vuoto = "tutti i nodi" (SCOPE-1 passo 3, 2026-08-31), non un valore mancante.
+# Prima era "01": un default silenzioso, misurato al 3,1% degli errori di una
+# finestra reale mentre il nodo con più errori (61%) non veniva mai mostrato —
+# dirottava la diagnosi, non la semplificava. resolve-logs.sh tratta il vuoto
+# come scope esplicito, non come nodo da risolvere.
+ACTIVE_NODE=""
 ACTIVE_APP=""
 BASE_DIR_OVERRIDE=""
 ACCESS_LOG=""
@@ -300,6 +305,12 @@ if [[ "$INTERACTIVE" -eq 0 && -z "$ACCESS_LOG" ]]; then
             _norm_node=$(node_num_canonical "$DETECTED_NODE") || _norm_node=""
             if [[ -n "$_norm_node" ]]; then ACTIVE_NODE="$_norm_node"; fi
             unset _norm_node
+        elif [[ -n "$DETECTED_ENV" || "${DETECTED_NODE_ALL:-0}" -eq 1 ]]; then
+            # Allargamento dello scope (SCOPE-1 passo 3): nominare l'ambiente —
+            # anche lo stesso — o "tutti i nodi" azzera il nodo, anche quello
+            # passato con --node/node= da MCP: vince sempre la query (stesso
+            # contratto query-wins di --time-from/--named-log, CTX-4).
+            ACTIVE_NODE=""
         fi
         if [[ -n "$DETECTED_APP" && -z "$ACTIVE_APP" ]]; then
             ACTIVE_APP="${APP_CANONICAL[$DETECTED_APP]:-$DETECTED_APP}"
@@ -434,6 +445,15 @@ run_query() {
         # quarta variante da tenere in parità a mano.
         local _norm_node; _norm_node=$(node_num_canonical "$DETECTED_NODE") || _norm_node="$ACTIVE_NODE"
         [[ "$_norm_node" != "$ACTIVE_NODE" ]] && { ACTIVE_NODE="$_norm_node"; ctx_changed=1; }
+    elif [[ -n "$DETECTED_ENV" || "${DETECTED_NODE_ALL:-0}" -eq 1 ]]; then
+        # Allargamento dello scope (SCOPE-1 passo 3): nominare di nuovo
+        # l'ambiente — anche lo stesso già attivo — o la keyword "tutti i
+        # nodi" azzera il nodo: una coordinata più ampia rilascia quella più
+        # stretta (principio 6, una sola politica). Vince sempre, anche su un
+        # --node/node= esplicito passato da MCP (query-wins, stesso contratto
+        # di --time-from/--named-log, CTX-4): la query di questo turno È lo
+        # stato di sessione.
+        [[ -n "$ACTIVE_NODE" ]] && { ACTIVE_NODE=""; ctx_changed=1; }
     fi
     if [[ -n "$DETECTED_APP" ]]; then
         local _canonical="${APP_CANONICAL[$DETECTED_APP]:-$DETECTED_APP}"
@@ -603,11 +623,7 @@ run_query() {
 
     while IFS=' ' read -r tool _prob; do
         printf "${C_BOLD}├─── %s${C_RESET} ─────────────────────────────\n" "$tool"
-        if [[ "$tool" == "search_all_logs" && -z "${DETECTED_NODE:-}" && -n "${ACTIVE_ENV:-}" ]]; then
-            context_line "no_node"
-        else
-            context_line
-        fi
+        context_line
         echo ""
         dispatch_tool "$tool" || true
         echo ""
@@ -633,10 +649,7 @@ run_query() {
 # Stampa il contesto attivo su stderr in formato leggibile.
 # Colori: DIM per le etichette, WHT (bianco puro) per i valori — coerente con UI-8.
 # Viene chiamata in cima ad ogni risposta (CTX-2).
-# context_line [no_node]
-# Con argomento "no_node": omette il nodo dal contesto (es. ricerca multi-nodo).
 context_line() {
-    local _hide_node="${1:-}"
     local _D="${C_LBL}" _W="${C_VAL}" _B="${C_BOLD}" _X="${C_RESET}"
     local parts=()
 
@@ -650,10 +663,14 @@ context_line() {
         fi
         local _NA="${_D}N/A${_X}"
         parts+=("${_W}${ACTIVE_ENV:-${_NA}}${_X}")
-        if [[ "$_hide_node" == "no_node" ]]; then
-            parts+=("${_D}tutti i nodi${_X}")
+        # Vuoto = "tutti i nodi" per costruzione (SCOPE-1 passo 3): un solo stato,
+        # non un caso speciale per search_all_logs — prima era l'unico tool a
+        # ricevere "no_node", quindi ogni altro tool con ACTIVE_NODE vuoto
+        # mostrava "nodo N/A" anche quando lo scope era deliberato.
+        if [[ -n "$ACTIVE_NODE" ]]; then
+            parts+=("${_D}nodo${_X} ${_W}${ACTIVE_NODE}${_X}")
         else
-            parts+=("${_D}nodo${_X} ${_W}${ACTIVE_NODE:-${_NA}}${_X}")
+            parts+=("${_D}tutti i nodi${_X}")
         fi
         [[ -n "$ACTIVE_APP"       ]] && parts+=("${_W}${ACTIVE_APP}${_X}")
         [[ -n "$ACTIVE_NAMED_LOG" ]] && parts+=("${_D}log${_X} ${_W}${ACTIVE_NAMED_LOG}${_X}")

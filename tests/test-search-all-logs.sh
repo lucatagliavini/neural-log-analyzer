@@ -6,7 +6,8 @@
 # indipendenti (bug reale, 2026-08-05):
 #   1. Nodo singolo: la colonna "NODO" non era prevista dall'header (guardava
 #      DETECTED_NODE) ma le righe la stampavano comunque (guardavano "$_n non
-#      vuoto" — sempre vero, perché ACTIVE_NODE ha un default in chatbot.sh).
+#      vuoto" — sempre vero, perché ACTIVE_NODE aveva allora un default "01"
+#      in chatbot.sh, rimosso in SCOPE-1 passo 3, 2026-08-31).
 #   2. Multi-nodo: l'header usava una larghezza fissa (9 char) che si sarebbe
 #      disallineata con numeri di nodo a 3+ cifre.
 # Il fix introduce _multi_node come unica fonte di verità e una larghezza
@@ -74,7 +75,7 @@ export PROFILE_DIR="$ROOT_DIR/profiles/liquido"
 _strip_ansi() { sed 's/\x1b\[[0-9;]*m//g'; }
 
 # ─── Nodo singolo: nessuna colonna nodo, nessun DIM permanente ────────────────
-section "Nodo singolo (DETECTED_NODE impostato)"
+section "Nodo singolo (ACTIVE_NODE impostato)"
 
 unset DETECTED_NODE
 export DETECTED_NODE="04" ACTIVE_NODE="04"
@@ -100,7 +101,7 @@ echo "$_out_single" | grep -qE '^\s*LOG\s+MATCH' && _log_col_ok=1
 assert_true "nodo singolo: 'LOG' è la prima colonna dell'header" "$_log_col_ok"
 
 # ─── Multi-nodo: colonna NODO presente e allineata alle righe ─────────────────
-section "Multi-nodo (DETECTED_NODE vuoto, ACTIVE_ENV noto)"
+section "Multi-nodo (ACTIVE_NODE vuoto, ACTIVE_ENV noto)"
 
 # In multi-nodo la scoperta parte da ogni NODE_DIR trovato da list_env_node_dirs,
 # quindi LOG_SEARCH_ROOT (che è del nodo attivo) non serve e va rimossa.

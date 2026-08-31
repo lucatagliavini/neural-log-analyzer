@@ -8,7 +8,7 @@
 # da passare a query-to-features.sh per la vectorizzazione.
 #
 # Uso:   eval "$(./lib/normalize-query.sh "errori jboss prod nodo 3")"
-# Emette: NORM_QUERY  DETECTED_APP  DETECTED_ENV  DETECTED_NODE
+# Emette: NORM_QUERY  DETECTED_APP  DETECTED_ENV  DETECTED_NODE  DETECTED_NODE_ALL
 #
 # Richiede: PROFILE_DIR esportata dal chiamante.
 #
@@ -45,6 +45,10 @@ norm_query="$query"
 DETECTED_APP=""
 DETECTED_ENV=""
 DETECTED_NODE=""
+# Distinto da DETECTED_NODE vuoto: 1 significa "nodo vuoto CHIESTO
+# esplicitamente" (SCOPE-1 passo 3), non "nodo non nominato". Vedi sezione
+# 3-bis sotto per il perché della sostituzione con <NODE>.
+DETECTED_NODE_ALL=0
 
 # ─── SRCH-5: la regione quotata si SOTTRAE al rilevamento entità ──────────────
 #
@@ -176,6 +180,31 @@ if [[ -z "$DETECTED_ENV" || -z "$DETECTED_NODE" ]]; then
         fi
         norm_query=$(echo "$norm_query" | sed -E "s/${_hostname}/<ENV> <NODE>/g")
     fi
+fi
+
+# ─── 3-bis. Normalizzazione "tutti i nodi" ───────────────────────────────────
+# Framework, non profilo (criterio NLP-1): "tutti i nodi"/"tutte le
+# macchine"/"tutta la farm" sono lingua naturale italiana, non un alias del
+# cliente — a differenza di NODE_PATTERNS (sezione 3 sotto), che vive in
+# entities.conf perché "worker1" è un nome che dipende dall'installazione.
+#
+# Sostituita con <NODE> e non lasciata intatta: "tutt[ie]" (nlp/unigrams.txt)
+# è già una feature addestrata sull'asse SORGENTI ("in tutti i log"), non
+# sull'asse NODI. Misurato con lib/infer-dry.sh (2026-08-31): lasciare "tutti"
+# nel testo sposta filter_errors da 69,0% a 58,0% e search_all_logs da 65,6% a
+# 81,1% — la parola tira l'intent verso "tutte le sorgenti" anche quando
+# l'utente intende "tutti i nodi". Sostituendo con <NODE> (come "nodo 4") la
+# query torna identica alla forma senza scope esplicito nel testo, che è
+# l'intent giusto.
+#
+# DETECTED_NODE resta vuoto: è DETECTED_NODE_ALL il segnale che porta "vuoto
+# perché richiesto", non "vuoto perché non nominato". chatbot.sh lo usa per la
+# stessa regola di allargamento dello scope che vale per un ambiente nominato
+# di nuovo (principio 6, una sola politica).
+_ALL_NODES_PATTERN='tutti[[:space:]]+i[[:space:]]+nodi|tutte[[:space:]]+le[[:space:]]+macchine|tutta[[:space:]]+la[[:space:]]+farm'
+if [[ -z "$DETECTED_NODE" ]] && echo "$norm_query" | grep -qiE "$_ALL_NODES_PATTERN"; then
+    DETECTED_NODE_ALL=1
+    norm_query=$(echo "$norm_query" | sed -E "s/${_ALL_NODES_PATTERN}/<NODE>/g")
 fi
 
 # ─── 3. Normalizzazione NODE ──────────────────────────────────────────────────
@@ -370,7 +399,8 @@ if [[ -z "$DETECTED_APP" ]] && declare -p APP_SHORT_ALIASES &>/dev/null; then
 fi
 
 # ─── Output ───────────────────────────────────────────────────────────────────
-printf "NORM_QUERY=%q\n"     "$norm_query"
-printf "DETECTED_APP=%q\n"   "$DETECTED_APP"
-printf "DETECTED_ENV=%q\n"   "$DETECTED_ENV"
-printf "DETECTED_NODE=%q\n"  "$DETECTED_NODE"
+printf "NORM_QUERY=%q\n"        "$norm_query"
+printf "DETECTED_APP=%q\n"      "$DETECTED_APP"
+printf "DETECTED_ENV=%q\n"      "$DETECTED_ENV"
+printf "DETECTED_NODE=%q\n"     "$DETECTED_NODE"
+printf "DETECTED_NODE_ALL=%q\n" "$DETECTED_NODE_ALL"

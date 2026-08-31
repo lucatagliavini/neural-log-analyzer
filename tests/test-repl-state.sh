@@ -110,6 +110,23 @@ _ctx_call() {
 # _ctx_line QUERY [FLAG…] — come sopra, ma restituisce SOLO la riga CONTEXT.
 _ctx_line() { _ctx_call "$@"; printf '%s\n' "$CTX_OUT" | grep '^CONTEXT'; }
 
+# _session_no_node / _ctx_call_no_node — come _session/_ctx_call, ma SENZA
+# --node all'avvio: lo scope di sessione resta "tutti i nodi" (default di
+# chatbot.sh dopo SCOPE-1 passo 3) finché una query non nomina un nodo.
+_session_no_node() {
+    printf '%s\n' "$@" | QUERY_LOG_DIR= bash "$ROOT_DIR/chatbot.sh" \
+        --profile "$PROFILE_DIR" --base-dir "$_FIX" --env prod 2>&1 \
+        | sed 's/\x1b\[[0-9;]*m//g'
+}
+_ctx_call_no_node() {
+    local _q="$1"; shift
+    CTX_OUT=$(QUERY_LOG_DIR= bash "$ROOT_DIR/chatbot.sh" \
+        --profile "$PROFILE_DIR" --base-dir "$_FIX" --env prod \
+        --query "$_q" "$@" 2>&1)
+    CTX_RC=$?
+}
+_ctx_line_no_node() { _ctx_call_no_node "$@"; printf '%s\n' "$CTX_OUT" | grep '^CONTEXT'; }
+
 # _block N OUTPUT — il blocco della N-esima query (delimitato da "┌─ Query:").
 _block() {
     printf '%s\n' "$2" | awk -v want="$1" '
@@ -346,6 +363,64 @@ _ctx_call "quanti errori 500" --named-log "server"
 [[ "$CTX_RC" -ne 0 ]] && _ok "7. --named-log su log di sistema: exit non-zero" \
     || _ko "7. --named-log su log di sistema: exit non-zero" "!=0" "$CTX_RC"
 _assert_in "7. --named-log su log di sistema: messaggio" "$CTX_OUT" "è un log di sistema"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# H. Scope multi-nodo — nodo vuoto è "tutti i nodi" (SCOPE-1 passo 3, 2026-08-31)
+#
+# Qui NON si fissa --node all'avvio (_session_no_node/_ctx_call_no_node): è lo
+# scenario che prima di questo passo non poteva esistere, perché ogni
+# invocazione arrivava già con --node esplicito e il default nudo "01" copriva
+# il caso. L'asserzione 2 è quella che intercetta un guard troppo largo — il
+# livello 2 di run-tests.sh classifica ogni [SKIP] come WARN, non FAIL, quindi
+# senza questo test la suite resterebbe verde anche se _require_node_scope
+# fermasse per errore search_all_logs o show_help.
+section "H. Scope multi-nodo — nodo vuoto è \"tutti i nodi\""
+
+# 1. Un tool single-source dichiara il limite, non sceglie un nodo in silenzio.
+_out=$(_session_no_node "errori nel server log")
+_assert_in "1. filter_errors senza nodo → [SKIP]" "$_out" "[SKIP]"
+_assert_in "1. il messaggio nomina il tool e la via d'uscita" "$_out" \
+    "filter_errors richiede un nodo specifico"
+
+# 2. search_all_logs e show_help NON sono soggetti al guard nello stesso stato.
+_out=$(_session_no_node "cerca NullPointerException nei log")
+_assert_not_in "2. search_all_logs senza nodo → NON skippato" "$_out" "[SKIP]"
+_out=$(_session_no_node "aiuto")
+_assert_not_in "2. show_help senza nodo → NON skippato" "$_out" "[SKIP]"
+
+# 3. context_line dichiara lo scope per QUALSIASI tool, non solo search_all_logs
+# (il caso speciale che lo faceva era esattamente ridondante, rimosso al passo 7).
+_out=$(_session_no_node "errori nel server log")
+_assert_in "3. banner mostra \"tutti i nodi\" anche per un tool skippato" "$_out" "tutti i nodi"
+_out=$(_session_no_node "cerca NullPointerException nei log")
+_assert_in "3. banner mostra \"tutti i nodi\" anche per search_all_logs" "$_out" "tutti i nodi"
+
+# 4. CONTEXT (--query, CTX-4): node= vuoto, e round-trip riga → flag → riga
+# identico — lo stesso standard di idempotenza della sezione G, qui sul valore
+# vuoto invece che su un nodo valorizzato.
+_line=$(_ctx_line_no_node "quanti errori 500")
+_assert_line "4. CONTEXT con node= vuoto" "$_line" '^CONTEXT env=[^ ]* node= app=[^ ]* named_log=[^ ]* time_from=[^ ]* time_to=[^ ]*$'
+
+declare -A _kv_h
+while IFS='=' read -r _k _v; do _kv_h["$_k"]="$_v"; done \
+    < <(printf '%s\n' "$_line" | sed 's/^CONTEXT //' | tr ' ' '\n')
+_line2=$(_ctx_line "quanti errori 500" \
+    --env "${_kv_h[env]}" --node "${_kv_h[node]}" --app "${_kv_h[app]}" \
+    --named-log "${_kv_h[named_log]}" \
+    --time-from "${_kv_h[time_from]}" --time-to "${_kv_h[time_to]}")
+if [[ "$_line" == "$_line2" ]]; then _ok "4. idempotenza: riga (node vuoto) → flag → riga identica"
+else _ko "4. idempotenza: riga (node vuoto) → flag → riga identica" "$_line" "$_line2"; fi
+unset _kv_h
+
+# 5. La regola di allargamento (passo 6): un nodo fissato con --node 4 viene
+# azzerato non appena una query successiva nomina un ambiente — ANCHE quello
+# già attivo (decisione esplicita dell'utente: la regola non fa eccezioni).
+_out=$(_session "errori nel server log del nodo 4" "errori in prod nel server log")
+_assert_in "5. q1 usa il nodo 4 come fissato all'avvio" "$(_block 1 "$_out")" "nodo 04"
+_assert_in "5. q2 nomina l'ambiente (stesso già attivo) → azzera il nodo" \
+    "$(_block 2 "$_out")" "tutti i nodi"
+_assert_in "5. q2 dichiara il limite (nodo azzerato, tool single-source)" \
+    "$(_block 2 "$_out")" "[SKIP]"
 
 # ─── Esito ────────────────────────────────────────────────────────────────────
 printf "\n────────────────────────────────────────────────────────\n"

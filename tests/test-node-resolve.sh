@@ -190,6 +190,27 @@ assert_eq "nodo inesistente → ripiega sul primo"  "01"   "$(_resolve_field 99 
 assert_eq "non numerico → avviso col valore"      "abc"  "$(_resolve_field abc NODE_FALLBACK_FROM)"
 assert_eq "non numerico → ripiega sul primo"      "01"   "$(_resolve_field abc ACTIVE_NODE)"
 
+# Nodo vuoto (SCOPE-1 passo 3, 2026-08-31): è uno SCOPE deliberato ("tutti i
+# nodi"), non un valore mancante. Va tenuto separato dal caso sopra (99/abc,
+# righe 189-191): lì il nodo richiesto non è vuoto ma irrisolvibile, e
+# resolve-logs.sh ripiega sul primo nodo dichiarandolo (NODE_FALLBACK_FROM).
+# Qui non c'è nulla da dichiarare: NODE_DIR resta vuota per costruzione e
+# nessun ramo di fallback deve scattare. Le due semantiche condividono lo
+# stesso "$3 assente o irrisolvibile" solo in apparenza — la controprova sopra
+# (99/abc → fallback CON avviso) è ciò che le distingue da questa (vuoto →
+# nessun fallback, nessun avviso).
+section "resolve-logs.sh: nodo vuoto è uno scope legittimo, non un errore"
+_out_empty=$("$LIB/resolve-logs.sh" "$FIX" prod "" ClaimCenter 2>/dev/null)
+_rc_empty=$?
+assert_eq "nodo vuoto → exit 0"                 "0" "$_rc_empty"
+assert_eq "nodo vuoto → ACTIVE_NODE vuota"       "" "$(grep "^ACTIVE_NODE=" <<< "$_out_empty" | cut -d"'" -f2)"
+assert_eq "nodo vuoto → LOG_SEARCH_ROOT vuota"   "" "$(grep "^LOG_SEARCH_ROOT=" <<< "$_out_empty" | cut -d"'" -f2)"
+assert_eq "nodo vuoto → ACCESS_LOG_DIR vuota"    "" "$(grep "^ACCESS_LOG_DIR=" <<< "$_out_empty" | cut -d"'" -f2)"
+assert_eq "nodo vuoto → SERVER_LOG_DIR vuota"    "" "$(grep "^SERVER_LOG_DIR=" <<< "$_out_empty" | cut -d"'" -f2)"
+assert_eq "nodo vuoto → GC_LOG_DIR vuota"        "" "$(grep "^GC_LOG_DIR=" <<< "$_out_empty" | cut -d"'" -f2)"
+assert_eq "nodo vuoto → NODE_FALLBACK_FROM vuoto (niente da dichiarare)" \
+    "" "$(grep "^NODE_FALLBACK_FROM=" <<< "$_out_empty" | cut -d"'" -f2)"
+
 # L'avviso finisce in una stringa che chatbot.sh passa a `eval`: un apice
 # singolo non sanitizzato romperebbe l'eval (o eseguirebbe codice).
 section "resolve-logs.sh: il valore dell'avviso è sanitizzato per l'eval"

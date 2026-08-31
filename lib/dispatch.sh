@@ -697,6 +697,37 @@ print_help() {
     printf "  ${DIM}Digita ${RESET}${BOLD}aiuto${RESET}${DIM} in qualsiasi momento per rivedere questa lista.${RESET}\n\n"
 }
 
+# _require_node_scope TOOL
+# Guard che dichiara il limite dei tool single-source quando lo scope di sessione
+# è "tutti i nodi" (ACTIVE_NODE vuoto — SCOPE-1 passo 3, 2026-08-31): questi 14
+# tool leggono da variabili di sessione risolte per UN nodo, quindi con lo scope
+# allargato non hanno un log da apire. La scelta è dichiarare il limite
+# (skip_msg), mai scegliere un nodo in silenzio — è esattamente il default nudo
+# su "01" che questo passo rimuove, misurato al 3,1% degli errori di una
+# finestra reale mentre il nodo con più errori (61%) non veniva mai mostrato.
+# La capacità di girare su N nodi arriva al passo 4 (TOOL_SCOPE); qui si ferma.
+#
+# Esenzioni:
+#   - TOOL_SOURCES[$tool]="none" (show_help): per DATO, non legge alcun log.
+#   - search_all_logs: per NOME, non per dato — condivide la spec "all" con
+#     list_logs, che invece va fermato (elenca i log DI UN nodo, non aggrega).
+#     Non è quindi derivabile da TOOL_SOURCES senza fermare anche list_logs;
+#     il nome in chiaro è lo stopgap di questo passo, il passo 4 lo sostituirà
+#     con una tabella dichiarata (TOOL_SCOPE).
+#
+# Chiamata da dispatch_tool(), non nel case di _dispatch_tool_run: un punto
+# comune invece di 14 copie (principio 2). Non chiama require_system_log
+# direttamente — usa solo skip_msg, come richiesto dal test sulle chiamate
+# dirette in tests/test-help-sources.sh.
+_require_node_scope() {
+    local tool="$1"
+    [[ -n "${ACTIVE_NODE:-}" ]] && return 0
+    [[ "${TOOL_SOURCES[$tool]:-}" == "none" ]] && return 0
+    [[ "$tool" == "search_all_logs" ]] && return 0
+    skip_msg "$tool richiede un nodo specifico — nomina un nodo (es. \"nodo 4\") o chiedi una ricerca su tutti i nodi (es. \"cerca ... in tutti i log\")"
+    return 1
+}
+
 # dispatch_tool TOOL — wrapper che misura le fasi e scrive le metriche su
 # BOT_PERF_FILE, poi delega a _dispatch_tool_run per l'esecuzione vera.
 #
@@ -714,6 +745,9 @@ print_help() {
 # "il tempo va nella scelta dei file o nell'analisi?".
 dispatch_tool() {
     local tool="$1"
+
+    _require_node_scope "$tool" || return 1
+
     local _t0 _t1 _rc
     _t0=$(date +%s%3N 2>/dev/null || echo 0)
 

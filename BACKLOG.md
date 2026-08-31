@@ -339,6 +339,7 @@ sta male» merita un neurone.
 2. Iterazione sui nodi centralizzata + migrazione di `search_all_logs` + `trap`. **FATTO**
    (2026-08-28), vedi sotto.
 3. Scope: `resolve-logs.sh:65`, `chatbot.sh:51`, keyword nel framework, `context_kv`.
+   **FATTO** (2026-08-31), vedi sotto.
 4. `TOOL_SCOPE` in `nlp/tools.conf` + `dispatch_tool_multinode`.
 5. Classifica: digest per-nodo (modello `BOT_PERF_FILE`), tre stati, coverage per nodo.
 6. Verifica in produzione: invariante di somma, marcatori di hostname, giro `CONTEXT` via MCP.
@@ -408,6 +409,47 @@ confrontando l'oracolo con `search_all_logs` del bot:
 | nodo 08 | 2 | **2** |
 | nodo 13 | 10 | **10** |
 | Σ filtrate | 12 | 1936 − 1924 = **12** |
+
+### Passo 3 — lo scope di default diventa «tutti i nodi» (2026-08-31)
+
+Piano eseguito integralmente: `/home/uga04128/.claude/plans/nifty-tickling-seahorse.md`.
+
+- `resolve-logs.sh:65` e `chatbot.sh:51`: `NODE_NUM`/`ACTIVE_NODE` vuoti per default,
+  ramo distinto dal fallback su nodo inesistente (che resta invariato, con
+  `NODE_FALLBACK_FROM` dichiarato).
+- `normalize-query.sh` + `build_dataset.py`: nuova keyword «tutti i nodi» / «tutte le
+  macchine» / «tutta la farm», sostituita con `<NODE>` (non lasciata in chiaro: la
+  misura con `infer-dry.sh` aveva mostrato −11 punti su `filter_errors` e +15,5 su
+  `search_all_logs` per lo stesso motivo per cui `<APP>` sostituisce i nomi applicativi).
+  `DETECTED_NODE_ALL` nuova quinta riga di output.
+- `dispatch.sh`: guard `_require_node_scope()` in `dispatch_tool()`, un solo punto per i
+  14 tool single-source — dichiara il limite (`[SKIP]`) invece di un default silenzioso,
+  esenta `search_all_logs` (per nome) e `show_help` (per `TOOL_SOURCES=none`).
+- `chatbot.sh`: regola di allargamento in entrambi i punti (REPL e `--query`) — nominare
+  un ambiente, anche lo stesso già attivo, o la keyword «tutti i nodi», azzera
+  `ACTIVE_NODE` anche contro un `--node`/`node=` esplicito (query-wins, contratto CTX-4).
+- `context_line()`/`context_kv()`: «tutti i nodi» come stato di prima classe per
+  qualunque tool, non solo `search_all_logs` — rimosso il caso speciale ridondante.
+- `search_all_logs.sh`: multi-nodo e nodo suggerito ora leggono `ACTIVE_NODE` (scope di
+  sessione) invece di `DETECTED_NODE` (rilevazione della singola query) — chiudeva
+  l'asimmetria per cui, dopo `nodo 4` in REPL, una `cerca X` successiva ignorava il nodo
+  fissato.
+- Test nuovi: `tests/test-node-resolve.sh` (sezione nodo vuoto, righe 193-212, con
+  controprova sui nodi 99/abc che continuano a dichiarare il fallback) e
+  `tests/test-repl-state.sh` (sezione H, 5 controlli: guard su tool single-source,
+  esenzione di `search_all_logs`/`show_help`, banner «tutti i nodi», round-trip
+  `CONTEXT node=` vuoto, regola di allargamento sullo stesso ambiente).
+- Verifica: `run-tests.sh` **191 PASS / 0 FAIL**; `--parity` **192 PASS / 0 FAIL**
+  (191 + il controllo di parità stesso), 1171/1171 identiche;
+  `md5sum nlp/dataset/queries.txt` invariato (nessun retrain);
+  `infer-dry.sh` confermato: `errori su tutti i nodi` torna a 69,0% `filter_errors`
+  (era 58,0%), `cerca ORA-00936 su tutti i nodi` torna a 65,6% `search_all_logs` (era
+  81,1%); prodotti gli stessi tre numeri d'oro su `lxprworkerlana01` (nodo 08=2,
+  nodo 13=10, Σ filtrate=12), retention delle rotazioni `.gz` ancora intatta.
+- **Non verificabile in questa sessione**: il giro `CONTEXT node=` vuoto **in
+  produzione**, perché il codice di questo passo non è deployato (`./deploy.sh`
+  esplicitamente rimandato al passo 4, per policy) — resta un pendente per la sessione
+  che porta il passo 4 in produzione, non un test saltato per trascuratezza.
 
 Concordanza esatta, con due implementazioni indipendenti (decompressore diverso, pruning
 contro lettura totale, grammatiche di timestamp diverse). Valida in un colpo: enumerazione

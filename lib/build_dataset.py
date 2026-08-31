@@ -366,6 +366,16 @@ def normalize_query(query, cfg):
                 detected_node = node_num
             norm = norm.replace(hostname, '<ENV> <NODE>')
 
+    # 3-bis. "tutti i nodi" / "tutta la farm" — mirror di normalize-query.sh sezione
+    # 3-bis (SCOPE-1 passo 3, 2026-08-31). Qui non serve un DETECTED_NODE_ALL: questa
+    # funzione restituisce solo `norm` (build_dataset.py non emette contesto di
+    # sessione, solo il testo che alimenta vectorize()) — ma la sostituzione testuale
+    # deve restare bit-identica al gemello bash, altrimenti diverge il dataset e
+    # run-tests.sh --parity fallisce.
+    if not detected_node:
+        _all_nodes_pattern = r'tutti\s+i\s+nodi|tutte\s+le\s+macchine|tutta\s+la\s+farm'
+        norm = re.sub(_all_nodes_pattern, '<NODE>', norm, flags=re.IGNORECASE)
+
     # 3. NODE dai pattern (nodo 5, worker3, ...)
     if not detected_node:
         for pat in cfg['node_patterns']:

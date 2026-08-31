@@ -62,7 +62,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/utils-logfiles.sh"
 
 BASE_DIR="${1:-$LOG_BASE_DIR}"
 ENV_NAME="${2:-}"
-NODE_NUM="${3:-01}"
+# Vuoto è uno stato LEGITTIMO, non un valore mancante: significa "tutti i nodi"
+# (SCOPE-1 passo 3, 2026-08-31). Prima era "${3:-01}": un default silenzioso sul
+# nodo 01, misurato (oracolo esterno) al 3,1% degli errori di una finestra reale
+# — dirottava la diagnosi verso il nodo meno rilevante, non verso "nessun nodo".
+NODE_NUM="${3:-}"
 APP="${4:-$DEFAULT_APP}"
 
 # ─── Validazione ─────────────────────────────────────────────────────────────
@@ -83,7 +87,14 @@ fi
 # forma `$(printf "%02d" … || echo …)` mandava i nodi 08 e 09 sul nodo 01.
 NODE_REQUESTED="$NODE_NUM"
 NODE_DIR=""
-if NODE_NUM=$(node_num_canonical "$NODE_REQUESTED"); then
+NODE_FALLBACK_FROM=""
+if [[ -z "$NODE_REQUESTED" ]]; then
+    # Nodo deliberatamente vuoto ("tutti i nodi"): NIENTE canonicalizzazione,
+    # NIENTE fallback. NODE_DIR resta vuota — è la differenza con il ramo
+    # sotto, dove un nodo NON vuoto ma irrisolvibile ripiega sul primo nodo
+    # e lo dichiara. Qui non c'è nulla da dichiarare: è lo scope richiesto.
+    :
+elif NODE_NUM=$(node_num_canonical "$NODE_REQUESTED"); then
     # NODE_NAME_TEMPLATE è definito in system.conf (es: 'lx${ENV_CODE}jbliq${NODE_NUM}')
     NODE_NAME=$(eval echo "${NODE_NAME_TEMPLATE}")
     NODE_DIR="$BASE_DIR/$ENV_NAME/$NODE_NAME"
@@ -95,8 +106,8 @@ fi
 # spacciato per nodo 9 è indistinguibile da una risposta corretta: è ciò che ha
 # reso il bug ottale invisibile. Stesso spirito degli skip espliciti dei named
 # log e dei coverage note — mai una risposta plausibile al posto di un limite.
-NODE_FALLBACK_FROM=""
-if [[ -z "$NODE_DIR" || ! -d "$NODE_DIR" ]]; then
+# NON scatta per nodo vuoto (ramo sopra): quello è uno scope, non un errore.
+if [[ -n "$NODE_REQUESTED" ]] && [[ -z "$NODE_DIR" || ! -d "$NODE_DIR" ]]; then
     # Fallback: scoperta dinamica tramite utils-nodes.sh (unica fonte di verità)
     NODE_DIR=$(list_env_node_dirs "$ENV_NAME" | head -1)
     if [[ -z "$NODE_DIR" ]]; then
