@@ -119,18 +119,24 @@ open_current_gc_logs()     { open_current_log_for "${GC_LOG_DIR:-$(dirname "$GC_
 # corrente, non sparse sotto il nodo).
 #
 # Uso: logs_expr=$(open_glob_logs DIR GLOB)  → espressione per `eval gawk ...`
-open_glob_logs() {
-    local dir="$1" glob="$2"
+#
+# Apre un file già risolto PIÙ le sue rotazioni (stesso nome logico), con
+# fallback al solo file se la finestra temporale non produce candidati.
+# Misura da sé il proprio tempo/volume su _PERF_SELECT_FILE (se impostato,
+# scrittura su file: valida anche dentro la subshell di un `$(...)`, a
+# differenza di una variabile bash — stesso motivo per cui open_logs_for può
+# farlo pur girando sempre in $(...)). Chi risolve CHOSEN a monte (qui
+# open_glob_logs via resolve_log_glob, o resolve_named_log_path nel ramo
+# NAMED_LOG di grep_named_log) misura la propria fase per conto suo: la somma
+# in dispatch_tool (awk '{s+=$1;f+=$2;b+=$3}') resta corretta con più righe
+# per chiamata, non serve un'unica riga combinata. Estratta da open_glob_logs
+# (principio 2): stesso nucleo, usato anche dal ramo NAMED_LOG quando
+# WINDOW_NON_DEFAULT=1 (chatbot.sh) — prima quel ramo apriva sempre e solo il
+# file scelto, ignorando qualunque finestra.
+open_rotations_of() {
+    local chosen="$1"
     local _t0 _t1
     _t0=$(date +%s%3N 2>/dev/null || echo 0)
-    local chosen
-    # require_app=1: stessa politica del ramo named (resolve_named_log_path,
-    # sopra) — se il glob esiste solo sotto un'altra app, non va aperto
-    # senza dirlo (principio 6, una sola politica cross-app per il tool).
-    # Condivisa da tail_named_log e grep_named_log: il fix vale per entrambi.
-    chosen=$(resolve_log_glob "$dir" "$glob" "$glob" 1) || return 1
-    [[ -z "$chosen" ]] && return 1
-
     local base
     base=$(logfile_logical_name "$chosen")
 
@@ -156,18 +162,45 @@ open_glob_logs() {
         _nb=$(stat -c %s "$chosen" 2>/dev/null || echo 0)
     fi
     _t1=$(date +%s%3N 2>/dev/null || echo 0)
-    # Stessa strumentazione di open_logs_for (vedi commento lì): girando in
-    # subshell via $(...), le metriche vanno passate per file. tail_named_log/
-    # grep_named_log via escape hatch glob passavano prima da qui senza mai
-    # emettere selezione/byte — OBS-3.
     if [[ -n "${_PERF_SELECT_FILE:-}" ]]; then
         printf '%s %s %s\n' "$(( _t1 - _t0 ))" "$_nf" "$_nb" >> "$_PERF_SELECT_FILE" 2>/dev/null || true
     fi
     echo "$expr"
 }
 
+open_glob_logs() {
+    local dir="$1" glob="$2"
+    local _t0 _t1
+    _t0=$(date +%s%3N 2>/dev/null || echo 0)
+    local chosen
+    # require_app=1: stessa politica del ramo named (resolve_named_log_path,
+    # sopra) — se il glob esiste solo sotto un'altra app, non va aperto
+    # senza dirlo (principio 6, una sola politica cross-app per il tool).
+    # Condivisa da tail_named_log e grep_named_log: il fix vale per entrambi.
+    chosen=$(resolve_log_glob "$dir" "$glob" "$glob" 1) || return 1
+    [[ -z "$chosen" ]] && return 1
+    _t1=$(date +%s%3N 2>/dev/null || echo 0)
+    # Riga propria per la sola risoluzione (nf/nb=0: resolve_log_glob trova un
+    # path, non legge byte — il volume lo dichiara open_rotations_of, che apre
+    # davvero i file). tail_named_log/grep_named_log via escape hatch glob
+    # passavano prima da qui senza mai emettere selezione/byte — OBS-3.
+    if [[ -n "${_PERF_SELECT_FILE:-}" ]]; then
+        printf '%s %s %s\n' "$(( _t1 - _t0 ))" 0 0 >> "$_PERF_SELECT_FILE" 2>/dev/null || true
+    fi
+    open_rotations_of "$chosen"
+}
+
 # Risolve NAMED_LOG a un singolo path su disco, provando in ordine: match
-# esatto "*-<nome>.log", poi "*<nome>.log(.gz)", poi "*<nome>*.log(.gz)" fuzzy.
+# esatto "*-<nome>.log*", poi "*<nome>.log*", poi "*<nome>*.log*" fuzzy. Il
+# `*` finale (aggiunto dopo un bug prod 2026-09-03) ammette rotazioni
+# "-DATE-EPOCH.gz"/".N.gz" dopo l'ancora ".log": senza, un log presente SOLO
+# come rotazione .gz era strutturalmente introvabile, anche quando esisteva
+# davvero sul nodo — stesso difetto già risolto per resolve_system_log_dir
+# (utils-logfiles.sh, principio 5) e non migrato qui (principio 8). L'ancora
+# ".log" resta: un `*<nome>*` nudo matcherebbe anche "access.log" per il nome
+# "cc" ("access" contiene "cc"). Non serve una quarta cascata "senza .log":
+# il tie-break di resolve_log_glob preferisce già il file non ruotato (sotto),
+# quindi una rotazione non può vincere sul live.
 # Unica fonte di verità per tail_named_log e grep_named_log (prima erano due
 # copie identiche della stessa catena find, OBS-3 — principio 2 di CLAUDE.md).
 # Non passa da select_log_files: qui si vuole UN file rappresentativo per
@@ -184,8 +217,15 @@ open_glob_logs() {
 # solo stat sul file scelto, stesso pattern di open_current_log_for. Prima
 # questo ramo non passava da nessuna funzione open_*, quindi selezione/byte
 # restavano sempre a 0 anche quando un file veniva letto per intero.
+#
+# SKIP_VOLUME (3° parametro, default 0): quando il chiamante raggrupperà le
+# rotazioni con open_rotations_of dopo questa risoluzione (grep_named_log,
+# WINDOW_NON_DEFAULT=1), il volume dei file letti lo dichiara quella funzione
+# — questa riga emetterebbe altrimenti un file/byte fantasma, contato una
+# seconda volta insieme a quelli reali del raggruppamento. Il tempo di
+# risoluzione resta misurato in ogni caso.
 resolve_named_log_path() {
-    local search_root="$1" named_log="$2"
+    local search_root="$1" named_log="$2" skip_volume="${3:-0}"
     local _t0 _t1
     _t0=$(date +%s%3N 2>/dev/null || echo 0)
     local log_path=""
@@ -196,18 +236,18 @@ resolve_named_log_path() {
     # sembrare la shell ferma.
     progress_show "ricerca log ${named_log}..."
     if [[ -n "$search_root" ]]; then
-        log_path=$(resolve_log_glob "$search_root" "*-${named_log}.log" "$named_log" 1) || true
+        log_path=$(resolve_log_glob "$search_root" "*-${named_log}.log*" "$named_log" 1) || true
         if [[ -z "$log_path" ]]; then
-            log_path=$(resolve_log_glob "$search_root" "*${named_log}.log" "$named_log" 1) || true
+            log_path=$(resolve_log_glob "$search_root" "*${named_log}.log*" "$named_log" 1) || true
         fi
         if [[ -z "$log_path" ]]; then
-            log_path=$(resolve_log_glob "$search_root" "*${named_log}*.log" "$named_log" 1) || true
+            log_path=$(resolve_log_glob "$search_root" "*${named_log}*.log*" "$named_log" 1) || true
         fi
     fi
     _t1=$(date +%s%3N 2>/dev/null || echo 0)
     if [[ -n "${_PERF_SELECT_FILE:-}" ]]; then
         local _nf=0 _nb=0
-        if [[ -n "$log_path" ]]; then
+        if [[ -n "$log_path" && "$skip_volume" != "1" ]]; then
             _nf=1
             _nb=$(stat -c %s "$log_path" 2>/dev/null || echo 0)
         fi
@@ -282,9 +322,13 @@ _find_named_log_elsewhere() {
     local search_root="$1" named_log="$2"
     [[ -z "$search_root" ]] && return 1
     local found
-    found=$(resolve_log_glob "$search_root" "*-${named_log}.log" "$named_log") || true
-    [[ -z "$found" ]] && found=$(resolve_log_glob "$search_root" "*${named_log}.log" "$named_log") || true
-    [[ -z "$found" ]] && found=$(resolve_log_glob "$search_root" "*${named_log}*.log" "$named_log") || true
+    # Stesse tre cascate (e stesso `*` finale) di resolve_named_log_path,
+    # sopra: un log presente solo come rotazione .gz sotto un'altra app va
+    # comunque trovato, altrimenti il messaggio di skip direbbe "non trovato"
+    # invece di indirizzare all'app giusta (stesso bug, stesso fix, principio 8).
+    found=$(resolve_log_glob "$search_root" "*-${named_log}.log*" "$named_log") || true
+    [[ -z "$found" ]] && found=$(resolve_log_glob "$search_root" "*${named_log}.log*" "$named_log") || true
+    [[ -z "$found" ]] && found=$(resolve_log_glob "$search_root" "*${named_log}*.log*" "$named_log") || true
     [[ -z "$found" ]] && return 1
     # resolve_app_from_path (utils-logfiles.sh) — prima questa iterazione su
     # AVAILABLE_APPS era inline qui; migrata alla funzione condivisa quando
@@ -950,6 +994,13 @@ _dispatch_tool_multinode() {
 #
 # Stdout: "<byte_totali> <file_totali> <n_nodi>". "0 0 0" se non c'è nulla da
 # stimare (nessun tool multi attivato, o nessun nodo nell'ambiente).
+#
+# Rispetta ACTIVE_NODE come dispatch_tool() (:1221): se l'utente ha già
+# scelto un nodo (--node, o normalizzato dalla query), la stima si limita a
+# quel nodo — altrimenti divergerebbe dalla dispatch reale (principio 6, una
+# sola politica), gonfiando artificialmente la stima di un tool a scope
+# "multi" che in realtà girerebbe su un solo nodo e respingendo query valide
+# per un tetto di budget calcolato su nodi che non verranno mai letti.
 _estimate_multinode_bytes() {
     local tools_lines="$1"
 
@@ -968,6 +1019,7 @@ _estimate_multinode_bytes() {
     local _d _n
     while IFS=$'\t' read -r _d _n; do
         [[ -z "$_d" ]] && continue
+        [[ -n "${ACTIVE_NODE:-}" && "$_n" != "$ACTIVE_NODE" ]] && continue
         nodes_dir+=("$_d")
         nodes_num+=("$_n")
     done < <(list_env_nodes "${ACTIVE_ENV:-}")
@@ -996,10 +1048,15 @@ _estimate_multinode_bytes() {
             local _et _k
             for _et in "${est_tools[@]}"; do
                 if [[ "$_et" == "grep_named_log" ]]; then
+                    # Stessa alberatura di rami del dispatch reale sotto
+                    # (grep_named_log) — allineata a WINDOW_NON_DEFAULT invece di
+                    # TIME_EXPLICIT per lo stesso motivo (principio 8: una stima
+                    # che seguisse ancora TIME_EXPLICIT divergerebbe dalla
+                    # lettura reale su ogni finestra ereditata o da CTX-4).
                     if [[ -n "${NAMED_LOG_GLOB:-}" ]]; then
                         open_glob_logs "$LOG_SEARCH_ROOT" "$NAMED_LOG_GLOB" >/dev/null
                     elif [[ -n "${SYSLOG_KIND:-}" ]]; then
-                        if [[ "${TIME_EXPLICIT:-0}" == "1" ]]; then
+                        if [[ "${WINDOW_NON_DEFAULT:-0}" == "1" ]]; then
                             case "$SYSLOG_KIND" in
                                 server) open_server_logs >/dev/null ;;
                                 access) open_logs        >/dev/null ;;
@@ -1013,7 +1070,11 @@ _estimate_multinode_bytes() {
                             esac
                         fi
                     elif [[ -n "${NAMED_LOG:-}" ]]; then
-                        resolve_named_log_path "$LOG_SEARCH_ROOT" "$NAMED_LOG" >/dev/null
+                        local _est_np
+                        _est_np=$(resolve_named_log_path "$LOG_SEARCH_ROOT" "$NAMED_LOG" "${WINDOW_NON_DEFAULT:-0}")
+                        if [[ -n "$_est_np" && "${WINDOW_NON_DEFAULT:-0}" == "1" ]]; then
+                            open_rotations_of "$_est_np" >/dev/null
+                        fi
                     fi
                     continue
                 fi
@@ -1615,9 +1676,14 @@ _dispatch_tool_run() {
             # resta il fallback storico su NAMED_LOG.
             #
             # Rotazioni: solo il file corrente per default, storico completo
-            # solo con range temporale esplicito (decisione utente) — stessa
-            # convenzione di tail_log (:924/:946, TIME_EXPLICIT da chatbot.sh).
-            # Allineare il costo al ramo named, che apre un solo file.
+            # quando la finestra effettiva non è il default di sessione
+            # (WINDOW_NON_DEFAULT, chatbot.sh) — NON TIME_EXPLICIT (bug prod
+            # 2026-09-03, fix condiviso col ramo NAMED_LOG sotto): TIME_EXPLICIT
+            # vale 1 solo se la query CORRENTE nomina un tempo nel testo, quindi
+            # una finestra ereditata da un turno precedente o passata da un
+            # chiamante esterno (CTX-4, --time-from/--time-to) restava sul solo
+            # file corrente. I due rami dello stesso tool non possono rispondere
+            # diversamente alla stessa finestra (principio 6, una sola politica).
             #
             # require_app è già applicato qui: ACCESS_LOG_DIR/SERVER_LOG_DIR/
             # GC_LOG_DIR sono risolte con REQUIRE_APP=1 in resolve-logs.sh
@@ -1626,7 +1692,7 @@ _dispatch_tool_run() {
             # ad ogni query e per questo necessitava del fix a open_glob_logs.
             if [[ -n "${SYSLOG_KIND:-}" ]]; then
                 local logs_expr=""
-                if [[ "${TIME_EXPLICIT:-0}" == "1" ]]; then
+                if [[ "${WINDOW_NON_DEFAULT:-0}" == "1" ]]; then
                     case "$SYSLOG_KIND" in
                         server) logs_expr="$(open_server_logs)" ;;
                         access) logs_expr="$(open_logs)" ;;
@@ -1656,17 +1722,34 @@ _dispatch_tool_run() {
                 return
             fi
             local log_path
-            log_path=$(resolve_named_log_path "$search_root" "$named_log")
+            # skip_volume = WINDOW_NON_DEFAULT: se la finestra effettiva non è il
+            # default di sessione, si raggrupperà con open_rotations_of sotto —
+            # il volume letto lo dichiara quella chiamata, non questa risoluzione
+            # (altrimenti il file scelto verrebbe contato due volte).
+            log_path=$(resolve_named_log_path "$search_root" "$named_log" "${WINDOW_NON_DEFAULT:-0}")
             if [[ -z "$log_path" ]]; then
                 skip_named_log_not_found "$search_root" "$named_log"
                 return
             fi
-            print_log_source "$(open_log "$log_path")" "$_gnl_what"
+            local logs_expr
+            # Bug prod 2026-09-03: prima si apriva sempre e solo log_path, mai le
+            # sue rotazioni — una query con finestra ereditata (CTX-1) o passata
+            # da un chiamante esterno via --time-from/--time-to (CTX-4) restava
+            # sul solo file live anche quando i dati richiesti stavano in un .gz.
+            # WINDOW_NON_DEFAULT (chatbot.sh) copre tutte le origini della
+            # finestra, non solo il testo della query corrente (a differenza di
+            # TIME_EXPLICIT, che tail_log usa per un motivo diverso — non toccare).
+            if [[ "${WINDOW_NON_DEFAULT:-0}" == "1" ]]; then
+                logs_expr=$(open_rotations_of "$log_path")
+            else
+                logs_expr=$(open_log "$log_path")
+            fi
+            print_log_source "$logs_expr" "$_gnl_what"
             eval gawk "$tw_args" -f "$TOOLS_DIR/grep_named_log.awk" \
                 -v level="$_gnl_level" \
                 -v pattern=$_gnl_pattern_q \
                 -v tail_n="${TAIL_N:-50}" \
-                "$(open_log "$log_path")"
+                "$logs_expr"
             ;;
         search_all_logs)
             # Il contratto si ferma a LOG_SEARCH_ROOT (principio 6): sotto la

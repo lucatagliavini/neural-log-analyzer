@@ -71,8 +71,14 @@ ACTIVE_NAMED_LOG=""
 # sporcherebbero il contenuto.
 THEME_CLI=""
 # Default temporale: oggi (00:00→23:59). L'utente può sovrascrivere con query esplicita.
-ACTIVE_TIME_FROM="$(date +%Y-%m-%dT00:00)"
-ACTIVE_TIME_TO="$(date +%Y-%m-%dT23:59)"
+# Funzioni (non costanti) perché WINDOW_NON_DEFAULT, più sotto, deve confrontare la
+# finestra effettiva col default di ADESSO, non con quello congelato all'avvio sessione
+# — altrimenti una sessione REPL che attraversa la mezzanotte confronterebbe contro il
+# giorno sbagliato.
+_default_window_from() { date +%Y-%m-%dT00:00; }
+_default_window_to()   { date +%Y-%m-%dT23:59; }
+ACTIVE_TIME_FROM="$(_default_window_from)"
+ACTIVE_TIME_TO="$(_default_window_to)"
 # CTX-4: valore grezzo dai flag --time-from/--time-to/--named-log. Non
 # validato qui: named_log_base_problem() e le altre funzioni condivise non
 # sono ancora disponibili durante il parsing (arrivano con `source
@@ -498,6 +504,18 @@ run_query() {
         TIME_FROM="$ACTIVE_TIME_FROM"
         TIME_TO="$ACTIVE_TIME_TO"
     fi
+
+    # WINDOW_NON_DEFAULT: 1 se la finestra EFFETTIVA (qualunque sia l'origine — testo
+    # della query corrente, contesto ereditato da un turno precedente, o
+    # --time-from/--time-to passati da un chiamante esterno via CTX-4) non coincide col
+    # default di sessione "oggi 00:00→23:59". A differenza di TIME_EXPLICIT (solo testo
+    # della query corrente, usato da tail_log per tornare ad "adesso" — non toccare,
+    # tests/test-repl-state.sh sezione D) risponde a una domanda diversa: la finestra
+    # attiva richiede di guardare oltre il file corrente? Usato da grep_named_log
+    # (dispatch.sh) per decidere se raggruppare le rotazioni di un log applicativo.
+    WINDOW_NON_DEFAULT=0
+    [[ "$TIME_FROM" != "$(_default_window_from)" || "$TIME_TO" != "$(_default_window_to)" ]] \
+        && WINDOW_NON_DEFAULT=1
 
     # DATE_FILTER è una dimensione del contesto: se cambia → re-resolve
     [[ "${DATE_FILTER:-}" != "$RESOLVED_DATE_FILTER" ]] && { RESOLVED_DATE_FILTER="${DATE_FILTER:-}"; ctx_changed=1; }

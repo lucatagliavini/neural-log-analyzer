@@ -79,6 +79,12 @@ gzip -c <(echo "cc CC rotazione") \
     > "$_ROOT/ClaimCenter/Guidewire/prod1nsse-cc.log-2026-08-01-1785000000.gz"
 echo "ccJBatch CC" > "$_ROOT/ClaimCenter/Guidewire/prod1nsse-ccJBatch.log"
 
+# Bug prod 2026-09-03: nome logico presente SOLO come rotazione .gz, nessuna
+# copia .log live — prima delle tre cascate con "*" finale era strutturalmente
+# introvabile (tutte finivano in ".log" letterale).
+gzip -c <(echo "onlygz CC rotazione unica") \
+    > "$_ROOT/ClaimCenter/Guidewire/prod1nsse-onlygz.log-2026-08-15-1786000000.gz"
+
 echo "cc CM corrente" > "$_ROOT/ContactManager/Guidewire/prod1nssd-cc.log"
 
 echo "custom log senza directory applicativa custom nota" > "$_ROOT/weird/deep/nested/custom_app.log"
@@ -141,6 +147,41 @@ assert_true "ccJBatch (solo sotto ClaimCenter) risolto quando la sessione è Cla
 _ccjbatch_wrong=$(ACTIVE_APP="ContactManager" resolve_named_log_path "$_ROOT" ccJBatch)
 assert_true "ccJBatch (solo sotto ClaimCenter) NON risolto quando la sessione è ContactManager" \
     "$([[ -z "$_ccjbatch_wrong" ]] && echo 1 || echo 0)"
+
+# ─── resolve_named_log_path: log presente SOLO come rotazione .gz ────────────
+# Bug prod 2026-09-03: le tre cascate finivano tutte in ".log" letterale, quindi
+# un nome logico esistente solo come rotazione .gz (nessuna copia .log live)
+# era strutturalmente introvabile anche se il dato esisteva davvero sul nodo.
+section "resolve_named_log_path: log presente solo come rotazione .gz (bug prod 2026-09-03)"
+
+_onlygz=$(ACTIVE_APP="ClaimCenter" resolve_named_log_path "$_ROOT" onlygz)
+assert_true "risolto anche senza copia .log live, grazie al '*' finale in coda alla cascata" \
+    "$([[ -n "$_onlygz" && "$_onlygz" == *.gz ]] && echo 1 || echo 0)"
+
+# ─── grep_named_log (ramo NAMED_LOG): raggruppa solo se la finestra non è il
+# default di sessione ────────────────────────────────────────────────────────
+# Bug prod 2026-09-03: il ramo NAMED_LOG apriva sempre e solo resolve_named_log_path()
+# via open_log(), mai le rotazioni — indipendentemente da quanto larga fosse la
+# finestra richiesta (testo, eredità CTX-1, o flag --time-from/--time-to CTX-4).
+# Qui si replica esattamente la logica del ramo (dispatch.sh): skip_volume=1 +
+# open_rotations_of quando WINDOW_NON_DEFAULT=1, skip_volume=0 + open_log altrimenti.
+# print_log_source è la stessa funzione che produce la scritta "Log: ..." vista
+# dall'utente — verificarla qui equivale a verificare l'output reale del tool.
+section "grep_named_log (ramo NAMED_LOG): raggruppa le rotazioni solo se la finestra non è il default"
+
+_log_path_grouped=$(ACTIVE_APP="ClaimCenter" resolve_named_log_path "$_ROOT" cc 1)
+_expr_grouped=$(open_rotations_of "$_log_path_grouped")
+_out_grouped=$(print_log_source "$_expr_grouped" | sed 's/\x1b\[[0-9;]*m//g')
+assert_true "finestra NON default: 'Log: 2 file' (corrente + rotazione), non 1" \
+    "$([[ "$_out_grouped" == *"2 file"* ]] && echo 1 || echo 0)"
+assert_true "finestra NON default: nessun file di ContactManager nell'espressione raggruppata" \
+    "$(( 1 - $([[ "$_expr_grouped" == *"ContactManager"* ]] && echo 1 || echo 0) ))"
+
+_log_path_single=$(ACTIVE_APP="ClaimCenter" resolve_named_log_path "$_ROOT" cc 0)
+_expr_single=$(open_log "$_log_path_single")
+_out_single=$(print_log_source "$_expr_single" | sed 's/\x1b\[[0-9;]*m//g')
+assert_true "finestra default (invariata): un solo file, il costo basso resta intenzionale" \
+    "$([[ "$_out_single" == *"Log:"* && "$_out_single" != *" file in "* ]] && echo 1 || echo 0)"
 
 # ─── skip_named_log_not_found: messaggio "non trovato" + suggerimento app ─────
 section "skip_named_log_not_found: distingue 'assente' da 'esiste sotto un'altra app'"
