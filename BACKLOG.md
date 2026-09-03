@@ -2880,6 +2880,43 @@ l'implementazione, così è consultabile e non va ridedotta.
 
 ---
 
+## GNLROT-1 — `grep_named_log` leggeva solo il file live, mai le rotazioni — **FATTO** (2026-09-03)
+
+Bug segnalato in produzione: la query `errori nel cc.log` (prod, nodo 07, ClaimCenter,
+finestra di sessione 06:00→12:00) ha letto **solo il file live**, mancando 9 rotazioni
+`.gz` reali sul nodo, diverse dentro la finestra richiesta — con l'effetto di una falsa
+nota «dati disponibili solo da 16:35» e «Nessuna riga trovata».
+
+**Causa**: il ramo `NAMED_LOG` di `grep_named_log` (`dispatch.sh`) risolveva un file
+rappresentativo con `resolve_named_log_path()` e lo apriva con `open_log()`, senza mai
+passare dal raggruppamento delle rotazioni — nessun gate sulla finestra temporale, per
+stretta che fosse. Il ramo gemello `SYSLOG_KIND` raggruppava, ma solo se `TIME_EXPLICIT=1`
+(vero solo se la query nomina un tempo nel *testo*, non se la finestra arriva da eredità
+di sessione o da `--time-from/--time-to`, il canale usato dal wrapper MCP) — violazione
+del principio 6 (una politica sola per lo stesso tool).
+
+| ID | Descrizione | Stato |
+|----|-------------|-------|
+| GNLROT-1a | **Segnale `WINDOW_NON_DEFAULT`** (`chatbot.sh`), calcolato subito dopo il merge di eredità CTX-1: 1 se la finestra **effettiva** (testo, eredità, o flag CLI) differisce dal default di sessione "oggi", indipendentemente da dove viene. Distinto da `TIME_EXPLICIT`, non toccato (protegge `tail_log`, commit `e43d1c6`) | **Fatto** |
+| GNLROT-1b | **`open_rotations_of()`** estratta da `open_glob_logs()` (`dispatch.sh`): dato un file già risolto, apre lui + le sue rotazioni, comportamento bit-identico a prima (principio 2, nessuna seconda copia del raggruppamento) | **Fatto** |
+| GNLROT-1c | **Ramo `NAMED_LOG`** allineato a `WINDOW_NON_DEFAULT`: raggruppa via `open_rotations_of` quando la finestra non è il default, apre solo il file singolo altrimenti (il costo basso del caso comune resta intenzionale) | **Fatto** |
+| GNLROT-1d | **Ramo `SYSLOG_KIND`** migrato da `TIME_EXPLICIT` a `WINDOW_NON_DEFAULT` — stessa politica per i due rami dello stesso tool (principio 6) | **Fatto** |
+| GNLROT-1e | **Difetto secondario**: le tre cascate di `resolve_named_log_path()` finivano tutte in `.log` letterale, quindi un nome logico esistente **solo** come rotazione `.gz` (nessuna copia live) era strutturalmente introvabile. Aggiunto un `*` finale a ciascuna cascata (l'ancora `.log` resta, per non far vincere `access.log` sulla query `cc`) | **Fatto** |
+| GNLROT-1f | **Migrato anche il secondo chiamante** (principio 8): la pre-passata di stima costi multi-nodo (`_estimate_multinode_bytes`, dentro `_dispatch_tool_multinode`) replicava la stessa alberatura di rami del dispatch reale ed è stata allineata allo stesso modo, altrimenti la stima sarebbe divergita dalla lettura vera | **Fatto** |
+| GNLROT-1g | **Bug preesistente scoperto durante la verifica**: `_estimate_multinode_bytes()` (il pre-check di budget separato in `chatbot.sh:645`, PRIMA di `dispatch_tool()`) stimava sempre su **tutti** i nodi di `list_env_nodes`, mai limitandosi ad `ACTIVE_NODE` anche quando l'utente aveva già passato `--node` esplicito — diverso da `dispatch_tool()`, che invece rispetta `ACTIVE_NODE` (:1221). Latente da SCOPE-1, reso visibile da GNLROT-1c/1f (la stima del ramo named, prima quasi sempre sottostimata a un solo file, ora conta correttamente le rotazioni: moltiplicata per nodi fittizi ha superato il tetto di budget su una query realmente scoped a un solo nodo, con messaggio "13 nodi" fuorviante). Fix: filtrare `nodes_dir`/`nodes_num` al solo `ACTIVE_NODE` quando è già impostato, prima del loop di stima | **Fatto** |
+
+**Verifica**: 4 nuovi test in `tests/test-log-discovery.sh` (risoluzione di un log solo-`.gz`,
+raggruppamento gated sulla finestra, invariante cross-app). Suite locale 192 PASS / 0 FAIL.
+Deploy e verifica in produzione su `lxprworkerlana01`: query originale ripetuta con finestra
+larga (06:00→12:00, 5 file raggruppati, nota di copertura ora accurata — 09:35, verificato
+contro il contenuto reale dei file) e con finestra più recente e `--node 07` esplicito
+(15:00→19:00, 4 file: 3 rotazioni + live, nessun rifiuto di budget dopo GNLROT-1g). Ordine
+dei file confermato: rotazioni in ordine epoch crescente, live **ultimo** — retest utile
+anche per il dubbio apertO su `tail_named_log` (memoria `tail-named-log-live-vs-gz`, non
+chiuso: quel tool ha un percorso diverso, gawk senza `tw_args`, e resta fuori ambito).
+
+---
+
 ## FORMAT-1 — Il formato delle righe si riconosce per forma — **FATTO** (2026-08-17)
 
 Sollevato dall'utente durante la revisione di LOGDISC-4: *"I nomi log, come li determiniamo?
